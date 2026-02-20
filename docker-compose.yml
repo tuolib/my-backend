@@ -1,0 +1,45 @@
+services:
+  caddy:
+    image: lucaslorentz/caddy-docker-proxy:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - CADDY_INGRESS_NETWORKS=app-network
+    networks:
+      - app-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - caddy_data:/data
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    networks:
+      - app-network
+    environment:
+      - DATABASE_URL=postgres://user:password@db:5432/mydb
+    labels:
+      caddy: api.find345.site
+      caddy.reverse_proxy: "api:3000"
+    restart: always
+
+  db:
+    image: postgres:16-alpine
+    networks:
+      - app-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=mydb
+    restart: always
+
+networks:
+  app-network:
+    external: false
+
+volumes:
+  caddy_data:
+  postgres_data:

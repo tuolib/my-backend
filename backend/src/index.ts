@@ -28,6 +28,21 @@ app.get('/db-test', async (c) => {
   }
 })
 
+// 4. 一个简单的数据库查询接口
+app.get('/db-test-b', async (c) => {
+  try {
+    // 执行一个简单的 SQL
+    const result = await sql`SELECT NOW() as now`
+    return c.json({
+      success: true,
+      server_time: result[0].now,
+      message: "Database connected! hono"
+    })
+  } catch (err) {
+    return c.json({ success: false, error: err }, 500)
+  }
+})
+
 export default {
   port: 3000,
   fetch: app.fetch

@@ -18,3 +18,8 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=mydb
+
+#  app:
+#    build: .
+#    env_file:
+#      - .env  # 自动将 .env 里的变量注入到容器环境变量中

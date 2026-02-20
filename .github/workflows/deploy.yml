@@ -14,5 +14,19 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /root/my-app
+            
+            # 1. 自动备份逻辑 (在更新前执行)
+            # 这里的 db-container-name 换成你 docker ps 看到的数据库容器名
+            echo "Starting database backup..."
+            mkdir -p backups
+            DB_CONTAINER=$(docker ps --filter "name=db" --format "{{.Names}}")
+            docker exec $DB_CONTAINER pg_dump -U user mydb > ./backups/backup_$(date +%Y%m%d_%H%M%S).sql
+            
+            # 2. 保留最近 7 天的备份，防止硬盘撑爆
+            find ./backups -name "*.sql" -mtime +7 -delete
+            
             git pull origin main
             docker compose up --build -d
+            
+            # 5. (可选) 确认迁移是否成功
+            echo "Deployment successful, database migrations will run on app start."

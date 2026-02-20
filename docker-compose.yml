@@ -36,6 +36,11 @@ services:
       - POSTGRES_DB=mydb
     restart: always
 
+  app:
+    build: .
+    env_file:
+      - .env  # 自动将 .env 里的变量注入到容器环境变量中
+
 networks:
   app-network:
     external: false

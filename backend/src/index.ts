@@ -36,7 +36,7 @@ app.get('/db-test-b', async (c) => {
     return c.json({
       success: true,
       server_time: result[0].now,
-      message: "Database connected! hono"
+      message: "Database connected! hono 11"
     })
   } catch (err) {
     return c.json({ success: false, error: err }, 500)

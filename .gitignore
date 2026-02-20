@@ -34,5 +34,5 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 
 node_modules/
-bun.lockb
+
 # 如果不想在本地保留二进制锁定文件可以注释掉，但建议保留

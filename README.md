@@ -53,3 +53,6 @@ docker exec db_container pg_dump -U user mydb > backup.sql
 
 docker compose up --build -d
 ```
+
+恢复：如果部署后发现数据坏了，你可以通过这行命令秒级恢复：
+cat backups/latest_backup.sql | docker exec -i db-container-name psql -U myuser mydb

@@ -1,11 +1,20 @@
-const response = await fetch("http://localhost:3000/api/users/register", {
+// const response = await fetch("http://localhost:3000/api/users/register", {
+//   method: "POST",
+//   body: JSON.stringify({
+//     name: "Bun User",
+//     email: "bun@example.com",
+//     password: "password123"
+//   }),
+//   headers: { "Content-Type": "application/json" },
+// });
+
+const response = await fetch("https://api.find345.site/api/users/register", {
   method: "POST",
   body: JSON.stringify({
     name: "Bun User",
-    email: "bun@example.com",
+    email: "bun2@example.com",
     password: "password123"
   }),
   headers: { "Content-Type": "application/json" },
 });
-
 console.log(await response.json());

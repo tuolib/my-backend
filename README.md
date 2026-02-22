@@ -10,19 +10,7 @@ docker compose -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.dev.yml up -d db
 ```
 
-
-## 管理数据库
-
-本地可以使用 TablePlus 连接 localhost:5432 观察数据。
-
-## 部署：
-
-在服务器执行一次 git clone 将代码拉取到 /root/my-app。
-
-在 GitHub Repo 的 Settings 放入服务器 IP 和 SSH 密钥。
-
-
-## 数据库生成
+本地开发 数据库生成
 
 npx drizzle-kit generate
 npx drizzle-kit push
@@ -44,6 +32,19 @@ docker compose -f docker-compose.dev.yml up --build
 bun ./demo/user.ts
 
 ```
+
+
+## 管理数据库
+
+本地可以使用 TablePlus 连接 localhost:5432 观察数据。
+
+
+## 部署：
+
+在服务器执行一次 git clone 将代码拉取到 /root/my-app。
+
+在 GitHub Repo 的 Settings 放入服务器 IP 和 SSH 密钥。
+
 
 
 ## 发布 数据库更新

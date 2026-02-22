@@ -12,5 +12,6 @@ Content-Type: application/json
 
 {
   "name": "架构师测试",
+  "password": "sdfsdfsf12s",
   "email": "arch2@test.com"
 }

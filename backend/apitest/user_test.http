@@ -1,6 +1,6 @@
 
 ### 获取所有用户
-POST {{abc}}/api/users/getAllUser
+POST {{baseUrl}}/api/users/getAllUser
 Content-Type: application/json
 
 {}

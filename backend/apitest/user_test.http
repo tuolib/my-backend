@@ -1,0 +1,24 @@
+# 直接定义变量作为兜底
+@myprotocol=http
+@myhost=localhost:3000
+
+### 1. 获取所有用户
+POST http://localhost:3000/api/users/getAllUser
+Content-Type: application/json
+
+{}
+
+### 获取所有用户
+POST {{myprotocol}}://{{myhost}}/api/users/getAllUser
+Content-Type: application/json
+
+{}
+
+### 注册新用户
+POST http://localhost:3000/api/users/register
+Content-Type: application/json
+
+{
+  "name": "架构师测试",
+  "email": "arch2@test.com"
+}

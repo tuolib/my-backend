@@ -3,6 +3,8 @@ import { cors } from 'hono/cors'
 import postgres from 'postgres'
 import userApp from './modules/users/user.controller';
 import { migrateDatabase } from "./db";
+import type { ApiResponse } from "./middleware/api.ts";
+import { globalErrorHandler } from "./utils/response.ts";
 
 const app = new Hono()
 
@@ -13,10 +15,8 @@ app.use('/*', cors())
 const sql = postgres(process.env.DATABASE_URL!)
 console.log("🛠️ Current DATABASE_URL:", process.env.DATABASE_URL);
 
-app.onError((err, c) => {
-  console.error(`${err.message}`);
-  return c.json({ error: 'Internal Server Error', detail: err.message }, 500);
-});
+// 注册全局错误处理
+app.onError(globalErrorHandler);
 
 // 统一路由前缀
 app.route('/api/users', userApp);
@@ -56,7 +56,14 @@ app.get('/db-test-b', async (c) => {
 })
 
 // 4. 404 处理器 (通常放在最后)
-app.notFound((c) => c.json({ message: '路径不存在' }, 404));
+app.notFound((c) => {
+  return c.json({
+    code: 404,
+    success: false,
+    message: "请求资源不存在",
+    data: null
+  }, 404);
+});
 
 await migrateDatabase(); // 确保数据库先就绪
 export default {

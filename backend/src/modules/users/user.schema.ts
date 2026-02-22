@@ -8,7 +8,14 @@ export const createUserSchema = z.object({
 });
 
 // 用于更新用户的校验（所有字段可选）
-export const updateUserSchema = createUserSchema.partial();
+export const updateUserSchema = createUserSchema.partial().extend({
+  id: z.number({ error: "更新操作必须提供用户ID" }).int()
+});
+
+// 删除校验规则：只需要 id
+export const deleteUserSchema = z.object({
+  id: z.number()
+});
 
 // 推导出 TypeScript 类型供 Service 层使用
 export type CreateUserInput = z.infer<typeof createUserSchema>;

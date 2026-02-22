@@ -1,59 +1,78 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { UserService } from './user.service';
-import { createUserSchema, updateUserSchema } from './user.schema';
-import { z } from 'zod';
+import { createUserSchema, updateUserSchema, deleteUserSchema } from './user.schema';
+import { onZodError, ApiResult } from "../../utils/response.ts";
+import { parseDbError } from "../../utils/db-error.ts";
 
 const userApp = new Hono();
 
+// 1. 获取所有用户
+userApp.post('/getAllUser', async (c) => {
+  try {
+    const data = await UserService.findAll();
+    return ApiResult.success(c, data, "成功");
+  } catch (e) {
+    // 这里抛出的任何错误都会被全局 globalErrorHandler 捕获并包装
+    throw new Error("数据库操作异常");
+  }
+});
+
+// 2. 创建用户 (带 JSON 校验)
 userApp.post(
   '/register',
-  zValidator('json', z.object({
-    name: z.string().min(2),
-    email: z.string().email(),
-    password: z.string().min(6),
-  })),
+  zValidator('json', createUserSchema, onZodError),
   async (c) => {
     try {
       const validated = c.req.valid('json');
-      const result = await UserService.create(validated);
-      return c.json({ success: true, data: result }, 201);
-    } catch (err: any) {
-      return c.json({ success: false, error: err.message }, 400);
+      const data = await UserService.create(validated);
+      return ApiResult.success(c, data, "成功");
+    } catch (e) {
+      // 1. 处理数据库唯一约束冲突 (例如: email 已存在)
+      // PostgreSQL error code 23505: unique_violation
+      const { errorCode } = parseDbError(e);
+      if (errorCode == '23505') {
+        return ApiResult.error(c, "该邮箱已被注册，请更换邮箱", 409); // 409 Conflict
+      }
+
+      // 3. 最后才抛给全局错误处理器
+      // 这里抛出的任何错误都会被全局 globalErrorHandler 捕获并包装
+      throw new Error("服务器繁忙，请稍后再试");
     }
   }
 );
 
-// 1. 获取所有用户
-userApp.get('/', async (c) => {
-  const data = await UserService.findAll();
-  return c.json(data);
-});
-
-// 2. 创建用户 (带 JSON 校验)
-userApp.post('/', zValidator('json', createUserSchema), async (c) => {
-  const validated = c.req.valid('json'); // 这里拿到的数据已经是完全类型安全的了
-  const user = await UserService.create(validated);
-  return c.json(user, 201);
-});
-
 // 3. 更新用户 (路径参数 + JSON 校验)
-userApp.patch('/:id', zValidator('json', updateUserSchema), async (c) => {
-  const id = Number(c.req.param('id'));
-  const validated = c.req.valid('json');
-  const user = await UserService.update(id, validated);
-
-  if (!user) return c.json({ message: '用户不存在' }, 404);
-  return c.json(user);
+userApp.post('/update', zValidator('json', updateUserSchema, onZodError), async (c) => {
+  // const id = Number(c.req.param('id'));
+  // const validated = c.req.valid('json');
+  const { id, ...data } = c.req.valid('json'); // 解构出 id 和剩余数据
+  try {
+    const user = await UserService.update(id, data);
+    if (!user) {
+      return ApiResult.error(c, "用户不存在", 404);
+    }
+    return ApiResult.success(c, user, "更新成功");
+  } catch (e) {
+    // 这里抛出的任何错误都会被全局 globalErrorHandler 捕获并包装
+    throw new Error("数据库操作异常");
+  }
 });
 
 // 4. 删除用户
-userApp.delete('/:id', async (c) => {
-  const id = Number(c.req.param('id'));
-  const user = await UserService.delete(id);
-
-  if (!user) return c.json({ message: '用户不存在' }, 404);
-  return c.json({ message: '删除成功', user });
+userApp.post('/delete', zValidator('json', deleteUserSchema), async (c) => {
+  // const id = Number(c.req.param('id'));
+  const { id } = c.req.valid('json');
+  try {
+    const user = await UserService.delete(id);
+    if (!user) {
+      return ApiResult.error(c, "用户不存在", 404);
+    }
+    return ApiResult.success(c, user, "更新成功");
+  } catch (e) {
+    // 这里抛出的任何错误都会被全局 globalErrorHandler 捕获并包装
+    throw new Error("数据库操作异常");
+  }
 });
 
 export default userApp;

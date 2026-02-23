@@ -56,6 +56,6 @@ jobs:
             docker image prune -f
             # 启动/更新主应用程序服务
             # echo "Starting/Updating main application services..."
-            # docker compose up --build -d
+            docker compose up --build -d
             
-            echo "Deployment successful."
+            echo "✅ Deployment successful."

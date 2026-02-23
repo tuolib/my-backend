@@ -1,7 +1,7 @@
 import { db } from '@/db';
-import { users } from '@/db/schema';
+import { users } from '@/db/schema.ts';
 import { eq } from 'drizzle-orm';
-import type { CreateUserInput } from './user.schema';
+import type { CreateUserInput } from './user.schema.ts';
 import * as bcrypt from 'bcrypt';
 
 export const UserService = {

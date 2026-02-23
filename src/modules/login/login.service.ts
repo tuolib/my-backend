@@ -2,15 +2,15 @@ import { sign, verify } from 'hono/jwt';
 import { eq } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
 import { db } from '@/db';
-import { users } from '@/db/schema';
-import { redisIns } from '@/lib/redis';
-import type { LoginInput } from './login.schema';
+import { users } from '@/db/schema.ts';
+import { redisIns } from '@/lib/redis.ts';
+import type { LoginInput } from './login.schema.ts';
 import {
   ACCESS_TOKEN_EXPIRATION,
   REFRESH_TOKEN_EXPIRATION,
   JWT_SECRET,
   REDIS_SESSION_PREFIX,
-} from '@/middleware/auth-config';
+} from '@/middleware/auth-config.ts';
 
 // 自定义错误类，便于 Controller 层捕获并返回正确的 HTTP 状态码
 export class AuthenticationError extends Error {

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import { UserService } from './user.service';
-import { createUserSchema, updateUserSchema, deleteUserSchema } from './user.schema';
+import { UserService } from './user.service.ts';
+import { createUserSchema, updateUserSchema, deleteUserSchema } from './user.schema.ts';
 import { onZodError, ApiResult } from '@/utils/response.ts';
 import { parseDbError } from '@/utils/db-error.ts';
 

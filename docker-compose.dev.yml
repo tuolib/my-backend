@@ -1,6 +1,6 @@
 services:
   api:
-    build: ./backend
+    build: .
     networks:
       - app-network
     environment:
@@ -10,8 +10,9 @@ services:
       - JWT_SECRET=super_secret_123
     depends_on:
       - redis
+      - db
     volumes:
-      - ./backend:/app
+      - .:/app
       - /app/node_modules
     ports:
       - "3000:3000"

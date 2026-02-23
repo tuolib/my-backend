@@ -1,8 +1,8 @@
 import { createMiddleware } from 'hono/factory';
 import { verify } from 'hono/jwt';
-import { redisIns } from '@/lib/redis';
-import { ApiResult } from '@/utils/response';
-import { JWT_SECRET, REDIS_SESSION_PREFIX } from '@/middleware/auth-config';
+import { redisIns } from '@/lib/redis.ts';
+import { ApiResult } from '@/utils/response.ts';
+import { JWT_SECRET, REDIS_SESSION_PREFIX } from '@/middleware/auth-config.ts';
 
 /**
  * 认证中间件

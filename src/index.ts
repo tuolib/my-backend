@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { migrateDatabase } from './db';
-import { globalErrorHandler, ApiResult } from './utils/response';
-import { connectRedis } from './lib/redis';
-import { loginController } from './modules/login/login.controller';
-import { authMiddleware } from './middleware/auth';
+import { globalErrorHandler, ApiResult } from './utils/response.ts';
+import { connectRedis } from './lib/redis.ts';
+import { loginController } from './modules/login/login.controller.ts';
+import { authMiddleware } from './middleware/auth.ts';
 import userApp from '@/modules/users/user.controller.ts';
 
 // --- 1. 应用初始化 ---

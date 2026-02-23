@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
-import { loginService, AuthenticationError } from './login.service';
-import { loginBodySchema, refreshTokenBodySchema } from './login.schema';
-import { ApiResult, onZodError } from '@/utils/response';
-import { createUserSchema } from '@/modules/users/user.schema';
-import { UserService } from '@/modules/users/user.service';
-import { parseDbError } from '@/utils/db-error';
+import { loginService, AuthenticationError } from './login.service.ts';
+import { loginBodySchema, refreshTokenBodySchema } from './login.schema.ts';
+import { ApiResult, onZodError } from '@/utils/response.ts';
+import { createUserSchema } from '@/modules/users/user.schema.ts';
+import { UserService } from '@/modules/users/user.service.ts';
+import { parseDbError } from '@/utils/db-error.ts';
 
 const login = new Hono();
 

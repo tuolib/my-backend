@@ -1,12 +1,35 @@
 {
-  "name": "project-root",
+  "name": "hono-api",
+  "version": "1.0.0",
+  "type": "module",
   "scripts": {
+    "d:up": "docker compose -f docker-compose.dev.yml up -d",
+    "format": "node_modules/.bin/prettier --write \"src/**/*.ts\"",
     "dr": "docker compose -f docker-compose.dev.yml up -d redis db",
-    "dev": "bun run dr && bun run --cwd backend dev",
+    "dev": "bun run dr && bun run --hot src/index.ts",
     "stop": "docker compose -f docker-compose.dev.yml stop",
     "down": "docker compose -f docker-compose.dev.yml down",
     "db:generate": "bun drizzle-kit generate",
-    "db:migrate": "bun run src/index.ts --migrate-only",
-    "db:reset": "docker compose -f docker-compose.dev.yml down -v && docker compose -f docker-compose.dev.yml up -d && bun drizzle-kit generate && bun run src/index.ts --migrate-only"
+    "db:migrate": "bun run src/index.ts --migrate-only"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.7.6",
+    "@types/bcrypt": "^6.0.0",
+    "@types/pg": "^8.16.0",
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.3.1",
+    "drizzle-kit": "^0.31.9",
+    "drizzle-orm": "^0.45.1",
+    "hono": "^4.0.0",
+    "postgres": "^3.4.8",
+    "redis": "^5.11.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "prettier": "^3.8.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
   }
 }

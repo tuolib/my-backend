@@ -29,7 +29,7 @@ services:
       caddy.reverse_proxy: "api:3000"
     restart: always
     # 生产环境运行编译后的代码或直接运行入口，不带 --hot
-    command: bun run src/index.ts
+#    command: bun run src/index.ts
 
   db:
     image: postgres:16-alpine

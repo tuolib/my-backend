@@ -49,11 +49,11 @@ jobs:
             # --- END NEW ---
             
             # 6. 滚动更新应用
-            echo "Updating application..."
-            docker compose up -d --remove-orphans
+            # echo "Updating application..."
+            # docker compose up -d --remove-orphans
             
             # 7. 清理旧镜像 (释放磁盘空间)
-            docker image prune -f
+            # docker image prune -f
             # 启动/更新主应用程序服务
             # echo "Starting/Updating main application services..."
             docker compose up --build -d

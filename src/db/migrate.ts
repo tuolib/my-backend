@@ -4,6 +4,7 @@ import path from "path"
 import { sql } from "drizzle-orm"
 import { db, client } from "./index.ts"
 
+
 const migrationsDir = path.join(process.cwd(), "migrations")
 
 async function ensureMigrationsTable() {

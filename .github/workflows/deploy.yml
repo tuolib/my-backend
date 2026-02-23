@@ -24,6 +24,10 @@ jobs:
             
             git pull origin main
             
+            # 3. 构建生产镜像 (关键：确保使用了生产环境配置)
+            echo "Building production images..."
+            docker compose build api
+            
             # 先启动 db 和 redis（后台）
             docker compose up -d db redis
             
@@ -44,8 +48,14 @@ jobs:
             echo "✅ Database migrations completed successfully."
             # --- END NEW ---
             
+            # 6. 滚动更新应用
+            echo "Updating application..."
+            docker compose up -d --remove-orphans
+            
+            # 7. 清理旧镜像 (释放磁盘空间)
+            docker image prune -f
             # 启动/更新主应用程序服务
-            echo "Starting/Updating main application services..."
-            docker compose up --build -d
+            # echo "Starting/Updating main application services..."
+            # docker compose up --build -d
             
             echo "Deployment successful."

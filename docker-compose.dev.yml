@@ -1,17 +1,26 @@
 services:
   api:
     build: ./backend
+    networks:
+      - app-network
+    environment:
+      - DATABASE_URL=postgres://user:password@db:5432/mydb
+      # 这里的 redis 是下方服务的名称
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=super_secret_123
+    depends_on:
+      - redis
     volumes:
       - ./backend:/app
       - /app/node_modules
     ports:
       - "3000:3000"
-    environment:
-      - DATABASE_URL=postgres://user:password@db:5432/mydb
     command: bun run --hot src/index.ts
 
   db:
     image: postgres:16-alpine
+    networks:
+      - app-network
     ports:
       - "5432:5432"
     environment:
@@ -19,21 +28,23 @@ services:
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=mydb
 
-  app:
-    build: .
-    environment:
-      # 这里的 redis 是下方服务的名称
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=super_secret_123
-    depends_on:
-      - redis
   redis:
     image: redis:alpine
+    networks:
+      # 必须加入同一个网络
+      - app-network
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     restart: always
 
+
+networks:
+  app-network:
+    external: false
+
 volumes:
+  caddy_data:
+  postgres_data:
   redis_data:

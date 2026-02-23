@@ -24,11 +24,17 @@ jobs:
             
             git pull origin main
             
+            # 先启动 db 和 redis（后台）
+            docker compose up -d db redis
+            
+            # 等待几秒确保数据库就绪
+            sleep 5
+            
             # --- NEW: 显式运行数据库迁移 ---
             # 启动一个临时的 Docker 容器，只运行迁移脚本，然后退出
             # 确保你的 docker-compose.yml 中有一个名为 'backend' 的服务
             echo "Running database migrations..."
-            docker compose run --rm db bun run src/index.ts --migrate-only
+            docker compose run --rm api bun run src/index.ts --migrate-only
             
             # 检查迁移是否成功
             if [ $? -ne 0 ]; then

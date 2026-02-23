@@ -16,7 +16,7 @@ services:
       - /app/node_modules
     ports:
       - "3000:3000"
-    command: bun run --hot src/index.ts
+#    command: bun run --hot src/index.ts
 
   db:
     image: postgres:16-alpine

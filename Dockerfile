@@ -1,7 +1,7 @@
 FROM oven/bun:1.1-alpine
 WORKDIR /app
-COPY package.json ./
+COPY package.json bun.lockb* ./
 RUN bun install
-COPY backend .
+COPY . .
 EXPOSE 3000
 CMD ["bun", "run", "src/index.ts"]

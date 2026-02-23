@@ -27,3 +27,12 @@ export const loginBodySchema = z.object({
 
 // 从 Zod Schema 推断出 TypeScript 类型，避免手动维护类型定义
 export type LoginInput = z.infer<typeof loginBodySchema>;
+
+/**
+ * 刷新 Token 接口的输入校验 Schema
+ */
+export const refreshTokenBodySchema = z.object({
+  refreshToken: z.string({ message: '刷新令牌必须是字符串' }),
+});
+
+export type RefreshTokenInput = z.infer<typeof refreshTokenBodySchema>;

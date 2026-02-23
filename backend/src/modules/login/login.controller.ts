@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { loginService, AuthenticationError } from './login.service';
-import { loginBodySchema } from './login.schema';
+import { loginBodySchema, refreshTokenBodySchema } from './login.schema';
 import { ApiResult, onZodError } from '@/utils/response';
 import { createUserSchema } from '@/modules/users/user.schema';
 import { UserService } from '@/modules/users/user.service';
@@ -10,16 +10,17 @@ import { parseDbError } from '@/utils/db-error';
 const login = new Hono();
 
 /**
- * POST /api/login
+ * POST /api/account/login
  * 用户登录接口
  */
 login.post('/login', zValidator('json', loginBodySchema, onZodError), async (c) => {
   try {
     const loginData = c.req.valid('json');
-    const { token, user } = await loginService.authenticate(loginData);
+    const { accessToken, refreshToken, user } = await loginService.authenticate(loginData);
 
     return ApiResult.success(c, {
-      accessToken: token,
+      accessToken,
+      refreshToken,
       user,
     });
   } catch (error) {
@@ -28,6 +29,24 @@ login.post('/login', zValidator('json', loginBodySchema, onZodError), async (c) 
     }
 
     // 对于其他未知错误，让全局错误处理器捕获
+    throw error;
+  }
+});
+
+/**
+ * POST /api/account/refresh
+ * 刷新 Access Token
+ */
+login.post('/refresh', zValidator('json', refreshTokenBodySchema, onZodError), async (c) => {
+  try {
+    const { refreshToken } = c.req.valid('json');
+    const { accessToken } = await loginService.refreshToken(refreshToken);
+
+    return ApiResult.success(c, { accessToken });
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return ApiResult.error(c, error.message, 401);
+    }
     throw error;
   }
 });

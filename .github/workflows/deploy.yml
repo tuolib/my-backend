@@ -21,14 +21,18 @@ jobs:
 
             ACTIVE=$(docker ps --filter "label=caddy=api.find345.site" --format "{{.Names}}")
 
+            # ===== 首次部署 =====
             if [ -z "$ACTIVE" ]; then
-              echo "🚀 First deployment detected"
+              echo "🚀 First deployment"
 
               docker compose build api-blue
               docker compose up -d api-blue
 
               echo "Waiting for health..."
-              until docker inspect --format='{{.State.Health.Status}}' api-blue | grep -q "healthy"; do
+
+              CONTAINER_ID=$(docker compose ps -q api-blue)
+
+              until docker inspect --format='{{.State.Health.Status}}' $CONTAINER_ID | grep -q "healthy"; do
                 sleep 2
               done
 
@@ -36,9 +40,9 @@ jobs:
               exit 0
             fi
 
-            # ===== 正常蓝绿流程 =====
+            # ===== 蓝绿切换 =====
 
-            if [ "$ACTIVE" == "api-blue" ]; then
+            if [[ "$ACTIVE" == *"blue"* ]]; then
               NEW=api-green
               OLD=api-blue
             else
@@ -52,24 +56,28 @@ jobs:
             docker compose build $NEW
             docker compose up -d $NEW
 
+            NEW_ID=$(docker compose ps -q $NEW)
+
             echo "Waiting for health..."
-            until docker inspect --format='{{.State.Health.Status}}' $NEW | grep -q "healthy"; do
+            until docker inspect --format='{{.State.Health.Status}}' $NEW_ID | grep -q "healthy"; do
               sleep 2
             done
+
+            OLD_ID=$(docker compose ps -q $OLD)
 
             echo "Switching traffic..."
 
             docker container update \
               --label-add caddy=api.find345.site \
               --label-add caddy.reverse_proxy="{{upstreams 3000}}" \
-              $NEW
+              $NEW_ID
 
             docker container update \
               --label-rm caddy \
               --label-rm caddy.reverse_proxy \
-              $OLD
+              $OLD_ID
 
-            docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+            docker exec $(docker compose ps -q caddy) caddy reload --config /etc/caddy/Caddyfile
 
             echo "Stopping old version..."
             docker compose stop $OLD

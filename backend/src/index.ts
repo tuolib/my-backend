@@ -70,7 +70,8 @@ const startServer = async () => {
   console.log('✅ 服务初始化成功');
 
   return {
-    port: process.env.PORT || 3000,
+    port: 3000,
+    hostname: '0.0.0.0',
     fetch: app.fetch,
   };
 };

@@ -2,16 +2,27 @@
 ### 获取所有用户
 POST {{baseUrl}}/api/users/getAllUser
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {}
 
 
 ### 注册新用户
-POST {{baseUrl}}/api/users/register
+POST {{baseUrl}}/api/account/register
 Content-Type: application/json
 
 {
-  "name": "架构师测试",
-  "password": "sdfsdfsf12s",
-  "email": "arch2@test.com"
+  "email": "arch3@test.com",
+  "password": "a12345678",
+  "confirmPassword": "a12345678"
+}
+
+
+### 登录
+POST {{baseUrl}}/api/account/login
+Content-Type: application/json
+
+{
+  "email": "arch22@test.com",
+  "password": "a12345678"
 }

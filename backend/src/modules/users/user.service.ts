@@ -1,7 +1,8 @@
-import { db } from '../../db';
-import { users } from '../../db/schema';
+import { db } from '@/db';
+import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import type { CreateUserInput } from './user.schema';
+import * as bcrypt from 'bcrypt';
 
 export const UserService = {
   // 查：获取所有
@@ -17,24 +18,38 @@ export const UserService = {
 
   // 增
   async create(data: CreateUserInput) {
-    const [newUser] = await db.insert(users).values(data).returning();
+    // 1. 哈希密码
+    const saltRounds = 10; // 推荐的加盐轮数
+    const passwordHash = await bcrypt.hash(data.password, saltRounds);
+
+    // 2. 准备插入数据库的数据 (userData 中已不包含 username)
+    const { password, confirmPassword, ...userData } = data;
+    const newUserPayload = {
+      ...userData,
+      passwordHash,
+    };
+
+    // 3. 插入数据库，并只返回安全字段 (移除 username)
+    const [newUser] = await db
+      .insert(users)
+      .values(newUserPayload)
+      .returning({
+        id: users.id,
+        email: users.email,
+        createdAt: users.createdAt,
+      });
     return newUser;
   },
 
   // 改
   async update(id: number, data: Partial<CreateUserInput>) {
-    const [updatedUser] = await db.update(users)
-      .set(data)
-      .where(eq(users.id, id))
-      .returning();
+    const [updatedUser] = await db.update(users).set(data).where(eq(users.id, id)).returning();
     return updatedUser;
   },
 
   // 删
   async delete(id: number) {
-    const [deletedUser] = await db.delete(users)
-      .where(eq(users.id, id))
-      .returning();
+    const [deletedUser] = await db.delete(users).where(eq(users.id, id)).returning();
     return deletedUser;
-  }
+  },
 };

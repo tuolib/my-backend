@@ -36,10 +36,22 @@ services:
       - POSTGRES_DB=mydb
     restart: always
 
-#  app:
-#    build: .
-#    env_file:
-#      - .env  # 自动将 .env 里的变量注入到容器环境变量中
+
+  app:
+    build: .
+    environment:
+      # 这里的 redis 是下方服务的名称
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=super_secret_123
+    depends_on:
+      - redis
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
 
 networks:
   app-network:
@@ -48,3 +60,4 @@ networks:
 volumes:
   caddy_data:
   postgres_data:
+  redis_data:

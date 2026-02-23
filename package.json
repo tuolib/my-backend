@@ -1,0 +1,12 @@
+{
+  "name": "project-root",
+  "scripts": {
+    "dr": "docker compose -f docker-compose.dev.yml up -d redis db",
+    "dev": "bun run dr && bun run --cwd backend dev",
+    "stop": "docker compose -f docker-compose.dev.yml stop",
+    "down": "docker compose -f docker-compose.dev.yml down",
+    "db:generate": "bun drizzle-kit generate",
+    "db:migrate": "bun run src/index.ts --migrate-only",
+    "db:reset": "docker compose -f docker-compose.dev.yml down -v && docker compose -f docker-compose.dev.yml up -d && bun drizzle-kit generate && bun run src/index.ts --migrate-only"
+  }
+}

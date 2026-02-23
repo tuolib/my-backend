@@ -8,23 +8,28 @@ docker compose -f docker-compose.dev.yml up
 docker compose -f docker-compose.dev.yml up -d
 
 docker compose -f docker-compose.dev.yml up -d db
+
+docker compose -f docker-compose.dev.yml up -d redis
 ```
 
-本地开发 数据库生成
+- 本地开发 数据库生成
 
-npx drizzle-kit generate
-npx drizzle-kit push
-
+```
+bunx drizzle-kit generate
 bunx drizzle-kit push
+```
 
 Hono 增删改查 例子编写
 
 2 停止并移除容器（防止旧缓存干扰）
+```
 docker compose -f docker-compose.dev.yml down
+```
 
 3 强制重新构建镜像（这会重新执行 Dockerfile 中的 bun install）
+```
 docker compose -f docker-compose.dev.yml up --build
-
+```
 
 ##  接口测试
 

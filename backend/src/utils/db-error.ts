@@ -16,6 +16,6 @@ export const parseDbError = (err: any) => {
   return {
     message: err.message || '数据库操作异常',
     status: 500,
-    errorCode
+    errorCode,
   };
 };

@@ -1,56 +1,88 @@
-name: Deploy to Server
+name: Zero-Downtime Deploy
+
 on:
   push:
     branches: [ main ]
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to DockerHub # 假设使用 DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push
+        run: |
+          IMAGE_NAME=${{ secrets.DOCKERHUB_USERNAME }}/my-api
+          docker build -t $IMAGE_NAME:${{ github.sha }} ./backend
+          docker push $IMAGE_NAME:${{ github.sha }}
+
+      - name: SSH Deploy
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.SERVER_IP }}
-          username: root
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /root/my-app
+            # 定义变量
+            IMAGE_NAME=${{ secrets.DOCKERHUB_USERNAME }}/my-api
+            IMAGE_TAG=${{ github.sha }}
+            
+            # 1. 自动探测当前正在运行的颜色
+            # 如果存在 api-blue 容器，则新部署设为 green，反之亦然
+            if [ "$(docker ps -q -f name=api-blue)" ]; then
+              DEPLOY_COLOR="green"
+              OLD_COLOR="blue"
+            else
+              DEPLOY_COLOR="blue"
+              OLD_COLOR="green"
+            fi
+            
+            echo "🚀 Target Color: $DEPLOY_COLOR (Replacing: $OLD_COLOR)"
 
-            git pull origin main
+            # 2. 部署新版本 (通过命令行注入环境变量)
+            export IMAGE_NAME=$IMAGE_NAME
+            export IMAGE_TAG=$IMAGE_TAG
+            export DEPLOY_COLOR=$DEPLOY_COLOR
+            
+            # 强制通过 -f 指定文件名，确保上下文一致
+            docker-compose up -d api
 
-            echo "Building api-blue..."
-            docker compose build api-blue
+            # 3. 阻塞式健康检查
+            echo "⏳ Waiting for health check..."
+            MAX_RETRIES=12
+            for i in $(seq 1 $MAX_RETRIES); do
+              STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-$DEPLOY_COLOR)
+              if [ "$STATUS" == "healthy" ]; then
+                HEALTHY=true
+                break
+              fi
+              echo "Attempt $i: Status is $STATUS..."
+              sleep 5
+            done
 
-            echo "Starting api-blue..."
-            docker compose up -d api-blue
-
-            echo "Checking container..."
-
-            CONTAINER_ID=$(docker compose ps -q api-blue)
-
-            if [ -z "$CONTAINER_ID" ]; then
-              echo "❌ api-blue container not found!"
-              echo "Dumping compose status:"
-              docker compose ps
+            if [ "$HEALTHY" != "true" ]; then
+              echo "❌ Health check failed. Rolling back..."
+              docker stop api-$DEPLOY_COLOR && docker rm api-$DEPLOY_COLOR
               exit 1
             fi
 
-            echo "Container ID: $CONTAINER_ID"
+            # 4. 切换流量
+            # 修改 Caddy 容器内的环境变量并重载，实现“瞬间切流”
+            echo "⚡ Switching traffic to $DEPLOY_COLOR..."
+            docker exec caddy-gateway sh -c "echo 'ACTIVE_COLOR=$DEPLOY_COLOR' > /etc/caddy_env && caddy reload"
 
-            echo "Waiting for health..."
-
-            while true; do
-              STATUS=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_ID" 2>/dev/null)
-
-              if [ "$STATUS" = "healthy" ]; then
-                echo "✅ Container healthy"
-                break
-              fi
-
-              if [ "$STATUS" = "unhealthy" ]; then
-                echo "❌ Container unhealthy"
-                docker logs "$CONTAINER_ID"
-                exit 1
-              fi
-
-              sleep 2
-            done
+            # 5. 清理旧版本
+            if [ "$(docker ps -q -f name=api-$OLD_COLOR)" ]; then
+              echo "🧹 Cleaning up old version: api-$OLD_COLOR"
+              sleep 5 # 给长连接一点缓冲时间
+              docker stop api-$OLD_COLOR && docker rm api-$OLD_COLOR
+            fi
+            
+            echo "✅ Deployment Successful!"

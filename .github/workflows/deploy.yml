@@ -14,47 +14,46 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /root/my-app
-            
-            # 1. 自动备份逻辑 (在更新前执行)
-            echo "Starting database backup..."
-            mkdir -p backups
-            DB_CONTAINER=$(docker ps --filter "name=db" --format "{{.Names}}")
-            docker exec $DB_CONTAINER pg_dump -U user mydb | gzip > ./backups/backup_$(date +%Y%m%d_%H%M%S).sql.gz
-            
+
             git pull origin main
-            
-            # 3. 构建生产镜像 (关键：确保使用了生产环境配置)
-            echo "Building production images..."
-            docker compose build api
-            
-            # 先启动 db 和 redis（后台）
-            docker compose up -d db redis
-            
-            # 等待几秒确保数据库就绪
-            echo "Waiting for database to be ready..."
-            until docker inspect --format='{{.State.Health.Status}}' $(docker compose ps -q db) | grep -q "healthy"; do
+
+            ACTIVE=$(docker ps --filter "label=caddy=api.find345.site" --format "{{.Names}}")
+
+            if [[ "$ACTIVE" == "api-blue" ]]; then
+              NEW=api-green
+              OLD=api-blue
+            else
+              NEW=api-blue
+              OLD=api-green
+            fi
+
+            echo "Active: $OLD"
+            echo "Deploying: $NEW"
+
+            docker compose build $NEW
+            docker compose up -d $NEW
+
+            echo "Waiting for health..."
+
+            until docker inspect --format='{{.State.Health.Status}}' $NEW | grep -q "healthy"; do
               sleep 2
             done
-            
-            # --- NEW: 显式运行数据库迁移 ---
-            # 启动一个临时的 Docker 容器，只运行迁移脚本，然后退出
-            # 确保你的 docker-compose.yml 中有一个名为 'backend' 的服务
-            echo "Running database migrations..."
-            docker compose exec api bun run src/index.ts --migrate-only
-            
-            # 检查迁移是否成功
-            if [ $? -ne 0 ]; then
-              echo "❌ Database migrations failed! Aborting deployment."
-              exit 1
-            fi
-            echo "✅ Database migrations completed successfully."
-            # --- END NEW ---
-            
-            # 6. 滚动更新应用
-            # echo "Updating application..."
-            docker compose up -d --remove-orphans
-            
-            # 7. 清理旧镜像 (释放磁盘空间)
-             docker image prune -f
-            
-            echo "✅ Deployment successful."
+
+            echo "Switching traffic..."
+
+            docker container update \
+              --label-add caddy=api.find345.site \
+              --label-add caddy.reverse_proxy="{{upstreams 3000}}" \
+              $NEW
+
+            docker container update \
+              --label-rm caddy \
+              --label-rm caddy.reverse_proxy \
+              $OLD
+
+            docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+
+            echo "Stopping old version..."
+            docker compose stop $OLD
+
+            echo "Zero-downtime deployment complete."

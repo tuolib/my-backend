@@ -1,6 +1,13 @@
+version: "3.9"
+
 services:
+
+  # =============================
+  # CADDY REVERSE PROXY
+  # =============================
   caddy:
     image: lucaslorentz/caddy-docker-proxy:latest
+    container_name: caddy
     ports:
       - "80:80"
       - "443:443"
@@ -13,26 +20,12 @@ services:
       - caddy_data:/data
     restart: unless-stopped
 
-  api:
-    build: ./backend
-    networks:
-      - app-network
-    environment:
-      - DATABASE_URL=postgres://user:password@db:5432/mydb
-      # 这里的 redis 是下方服务的名称
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=super_secret_123
-    depends_on:
-      - redis
-    labels:
-      caddy: api.find345.site
-      caddy.reverse_proxy: "{{upstreams 3000}}"
-    restart: always
-    # 生产环境运行编译后的代码或直接运行入口，不带 --hot
-#    command: bun run src/index.ts
-
+  # =============================
+  # POSTGRES
+  # =============================
   db:
     image: postgres:16-alpine
+    container_name: postgres-db
     networks:
       - app-network
     volumes:
@@ -41,29 +34,93 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=mydb
-    restart: always
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U user" ]
+      test: ["CMD-SHELL", "pg_isready -U user"]
       interval: 5s
       timeout: 5s
       retries: 5
-
-  redis:
-    image: redis:alpine
-    networks:
-      # 必须加入同一个网络
-      - app-network
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
     restart: always
 
+  # =============================
+  # REDIS
+  # =============================
+  redis:
+    image: redis:alpine
+    container_name: redis-cache
+    networks:
+      - app-network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: always
+
+  # =============================
+  # API BLUE (当前线上版本)
+  # =============================
+  api-blue:
+    build: ./backend
+    container_name: api-blue
+    networks:
+      - app-network
+    environment:
+      - DATABASE_URL=postgres://user:password@db:5432/mydb
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=super_secret_123
+      - NODE_ENV=production
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      caddy: api.find345.site
+      caddy.reverse_proxy: "{{upstreams 3000}}"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+
+  # =============================
+  # API GREEN (待发布版本)
+  # =============================
+  api-green:
+    build: ./backend
+    container_name: api-green
+    networks:
+      - app-network
+    environment:
+      - DATABASE_URL=postgres://user:password@db:5432/mydb
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=super_secret_123
+      - NODE_ENV=production
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: always
+
+# =============================
+# NETWORK
+# =============================
 networks:
   app-network:
-    external: false
-    driver: bridge # 明确声明使用 bridge 模式
+    driver: bridge
 
+# =============================
+# VOLUMES
+# =============================
 volumes:
   caddy_data:
   postgres_data:

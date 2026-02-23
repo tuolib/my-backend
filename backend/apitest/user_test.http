@@ -26,3 +26,11 @@ Content-Type: application/json
   "email": "arch22@test.com",
   "password": "a12345678"
 }
+
+### 刷新token
+POST {{baseUrl}}/api/account/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{refreshToken}}"
+}

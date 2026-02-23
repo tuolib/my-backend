@@ -40,9 +40,9 @@ login.post('/login', zValidator('json', loginBodySchema, onZodError), async (c) 
 login.post('/refresh', zValidator('json', refreshTokenBodySchema, onZodError), async (c) => {
   try {
     const { refreshToken } = c.req.valid('json');
-    const { accessToken } = await loginService.refreshToken(refreshToken);
+    const { accessToken, refreshToken: newRefreshToken } = await loginService.refreshToken(refreshToken);
 
-    return ApiResult.success(c, { accessToken });
+    return ApiResult.success(c, { accessToken, refreshToken: newRefreshToken });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       return ApiResult.error(c, error.message, 401);

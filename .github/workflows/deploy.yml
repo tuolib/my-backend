@@ -1,88 +1,37 @@
-name: Zero-Downtime Deploy
-
+name: Deploy to Server
 on:
   push:
     branches: [ main ]
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Login to DockerHub # 假设使用 DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and Push
-        run: |
-          IMAGE_NAME=${{ secrets.DOCKERHUB_USERNAME }}/my-api
-          docker build -t $IMAGE_NAME:${{ github.sha }} ./backend
-          docker push $IMAGE_NAME:${{ github.sha }}
-
-      - name: SSH Deploy
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
+          host: ${{ secrets.SERVER_IP }}
+          username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # 定义变量
-            IMAGE_NAME=${{ secrets.DOCKERHUB_USERNAME }}/my-api
-            IMAGE_TAG=${{ github.sha }}
+            cd /root/my-app
             
-            # 1. 自动探测当前正在运行的颜色
-            # 如果存在 api-blue 容器，则新部署设为 green，反之亦然
-            if [ "$(docker ps -q -f name=api-blue)" ]; then
-              DEPLOY_COLOR="green"
-              OLD_COLOR="blue"
-            else
-              DEPLOY_COLOR="blue"
-              OLD_COLOR="green"
-            fi
+            # 1. 更新代码
+            git pull origin main
             
-            echo "🚀 Target Color: $DEPLOY_COLOR (Replacing: $OLD_COLOR)"
-
-            # 2. 部署新版本 (通过命令行注入环境变量)
-            export IMAGE_NAME=$IMAGE_NAME
-            export IMAGE_TAG=$IMAGE_TAG
-            export DEPLOY_COLOR=$DEPLOY_COLOR
+            # 2. 备份（容错处理：如果 db 还没起来就跳过备份）
+            echo "Starting backup..."
+            mkdir -p backups
+            docker exec postgres-db pg_dump -U user mydb > ./backups/backup_$(date +%Y%m%d_%H%M%S).sql || echo "Backup skipped (db not running)"
+            find ./backups -name "*.sql" -mtime +7 -delete
             
-            # 强制通过 -f 指定文件名，确保上下文一致
-            docker-compose up -d api
-
-            # 3. 阻塞式健康检查
-            echo "⏳ Waiting for health check..."
-            MAX_RETRIES=12
-            for i in $(seq 1 $MAX_RETRIES); do
-              STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-$DEPLOY_COLOR)
-              if [ "$STATUS" == "healthy" ]; then
-                HEALTHY=true
-                break
-              fi
-              echo "Attempt $i: Status is $STATUS..."
-              sleep 5
-            done
-
-            if [ "$HEALTHY" != "true" ]; then
-              echo "❌ Health check failed. Rolling back..."
-              docker stop api-$DEPLOY_COLOR && docker rm api-$DEPLOY_COLOR
-              exit 1
-            fi
-
-            # 4. 切换流量
-            # 修改 Caddy 容器内的环境变量并重载，实现“瞬间切流”
-            echo "⚡ Switching traffic to $DEPLOY_COLOR..."
-            docker exec caddy-gateway sh -c "echo 'ACTIVE_COLOR=$DEPLOY_COLOR' > /etc/caddy_env && caddy reload"
-
-            # 5. 清理旧版本
-            if [ "$(docker ps -q -f name=api-$OLD_COLOR)" ]; then
-              echo "🧹 Cleaning up old version: api-$OLD_COLOR"
-              sleep 5 # 给长连接一点缓冲时间
-              docker stop api-$OLD_COLOR && docker rm api-$OLD_COLOR
-            fi
+            # 3. 构建并启动
+            # --build 会重新构建镜像
+            # --remove-orphans 会清理掉没用的容器
+            docker compose up -d --build --remove-orphans
             
-            echo "✅ Deployment Successful!"
+            # 4. 执行迁移 (容器起来后执行)
+            echo "Running migrations..."
+            # 既然是单实例，直接在运行中的容器里执行迁移更省事
+            docker exec api-service bun run src/index.ts --migrate-only
+            
+            echo "✅ Deployment successful."

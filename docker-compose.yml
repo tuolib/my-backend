@@ -1,10 +1,8 @@
 version: "3.9"
 
 services:
-  # --- 基础设施网关 ---
   caddy:
-    image: lucaslorentz/caddy-docker-proxy:2.8-alpine
-    container_name: caddy-gateway
+    image: lucaslorentz/caddy-docker-proxy:latest
     ports:
       - "80:80"
       - "443:443"
@@ -13,60 +11,53 @@ services:
     networks:
       - app-network
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - caddy_data:/data
-    restart: always
+    restart: unless-stopped
 
-  # --- 数据库 ---
-  db:
-    image: postgres:16-alpine
-    container_name: postgres-db
-    environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=mydb
-    networks:
-      - app-network
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d mydb"]
-      interval: 5s
-      retries: 5
-
-  # --- 缓存 ---
-  redis:
-    image: redis:7-alpine
-    container_name: redis-cache
-    networks:
-      - app-network
-
-  # --- 应用层 (核心蓝绿逻辑) ---
   api:
-    image: ${IMAGE_NAME}:${IMAGE_TAG}
-    container_name: api-${DEPLOY_COLOR} # 动态生成 api-blue 或 api-green
+    build: ./backend
+    container_name: api-service
     networks:
       - app-network
     environment:
       - DATABASE_URL=postgres://user:password@db:5432/mydb
       - REDIS_URL=redis://redis:6379
-      - NODE_ENV=production
+      - JWT_SECRET=super_secret_123
     labels:
       caddy: api.find345.site
+      # 这里直接写 3000，不要带服务名，caddy-docker-proxy 会自动处理
       caddy.reverse_proxy: "{{upstreams 3000}}"
-      # 流量控制闸门：只有匹配 ACTIVE_COLOR 环境变量的容器才接流
-      caddy.@active: "expression {env.ACTIVE_COLOR} == '${DEPLOY_COLOR}'"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+    restart: always
+
+  db:
+    image: postgres:16-alpine
+    container_name: postgres-db
+    networks:
+      - app-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=mydb
+    restart: always
+
+  redis:
+    image: redis:alpine
+    container_name: redis-cache
+    networks:
+      - app-network
+    # 除非你要从本地电脑连 Redis，否则不需要 ports
+    volumes:
+      - redis_data:/data
     restart: always
 
 networks:
   app-network:
-    driver: bridge
+    name: app-network # 显式命名
 
 volumes:
   caddy_data:
   postgres_data:
+  redis_data:

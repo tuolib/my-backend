@@ -13,7 +13,7 @@ if (!databaseUrl) {
 
 // 1. 创建 postgres.js 客户端
 // postgres.js 内部会处理连接池，所以比 pg.Pool 更简单
-const client = postgres(databaseUrl, { max: 20 });
+export const client = postgres(databaseUrl, { max: 20 });
 
 // 2. 初始化 Drizzle 实例
 // 注意：drizzle 函数的第一个参数现在是 postgres.js 的客户端

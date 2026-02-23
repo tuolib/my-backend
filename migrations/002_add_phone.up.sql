@@ -1,0 +1,4 @@
+ALTER TABLE users ADD COLUMN phone text;
+UPDATE users SET phone = '' WHERE phone IS NULL;
+ALTER TABLE users ALTER COLUMN phone SET DEFAULT '';
+ALTER TABLE users ALTER COLUMN phone SET NOT NULL;

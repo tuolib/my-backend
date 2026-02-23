@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { migrateDatabase } from './db';
 import { globalErrorHandler, ApiResult } from './utils/response.ts';
 import { connectRedis } from './lib/redis.ts';
 import { loginController } from './modules/login/login.controller.ts';
@@ -43,10 +42,10 @@ const initializeServices = async (runMigrations = true) => {
   // 添加一个参数
   try {
     await connectRedis();
-    if (runMigrations) { // 根据参数决定是否运行迁移
-      await migrateDatabase();
-      process.exit(0);
-    }
+    // if (runMigrations) { // 根据参数决定是否运行迁移
+    //   await migrateDatabase();
+    //   process.exit(0);
+    // }
   } catch (error) {
     console.error('❌ 服务初始化失败:', error);
     process.exit(1);
@@ -56,10 +55,10 @@ const initializeServices = async (runMigrations = true) => {
 // --- 7. 启动应用 ---
 const startServer = async () => {
   // 检查命令行参数，例如 `bun run src/index.ts --migrate-only`
-  const args = process.argv.slice(2);
-  const migrateOnly = args.includes('--migrate-only');
+  // const args = process.argv.slice(2);
+  // const migrateOnly = args.includes('--migrate-only');
 
-  await initializeServices(migrateOnly);
+  await initializeServices();
 
   console.log('✅ 服务初始化成功');
 

@@ -10,7 +10,9 @@
     "stop": "docker compose -f docker-compose.dev.yml stop",
     "down": "docker compose -f docker-compose.dev.yml down",
     "db:generate": "bun drizzle-kit generate",
-    "db:migrate": "bun run src/index.ts --migrate-only"
+    "db:migrate": "bun run src/index.ts --migrate-only",
+    "migrate": "bun run src/migrate.ts",
+    "migrate:down": "bun run src/migrate.ts --down"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.6",

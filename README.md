@@ -58,3 +58,14 @@ docker 配置文件 docker-compose.yml
 ```
 deploy.yml
 ```
+
+
+发布产线 数据库表 字段 升级
+```
+升级
+bun run migrate
+
+回滚
+bun run migrate:down
+```
+

@@ -1,16 +1,13 @@
-import { Client } from "pg"
 import { readdir } from "fs/promises"
 import { readFile } from "fs/promises"
 import path from "path"
-
-const client = new Client({
-  connectionString: process.env.DATABASE_URL,
-})
+import { sql } from "drizzle-orm"
+import { db, client } from "./index.ts"
 
 const migrationsDir = path.join(process.cwd(), "migrations")
 
 async function ensureMigrationsTable() {
-  await client.query(`
+  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version VARCHAR(255) PRIMARY KEY,
       applied_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -19,42 +16,33 @@ async function ensureMigrationsTable() {
 }
 
 async function getAppliedMigrations(): Promise<string[]> {
-  const res = await client.query(
-    `SELECT version FROM schema_migrations ORDER BY version`
+  const res = await db.execute(
+    sql`SELECT version FROM schema_migrations ORDER BY version`
   )
-  return res.rows.map(r => r.version)
+  const rows = Array.isArray(res)
+    ? res
+    : ((res as { rows?: Array<{ version: string }> }).rows ?? [])
+  return rows.map(r => String((r as { version: string }).version))
 }
 
-async function applyMigration(version: string, sql: string) {
+async function applyMigration(version: string, migrationSql: string) {
   console.log(`Applying ${version}`)
-  await client.query("BEGIN")
-  try {
-    await client.query(sql)
-    await client.query(
-      `INSERT INTO schema_migrations(version) VALUES($1)`,
-      [version]
+  await db.transaction(async tx => {
+    await tx.execute(sql.raw(migrationSql))
+    await tx.execute(
+      sql`INSERT INTO schema_migrations(version) VALUES(${version})`
     )
-    await client.query("COMMIT")
-  } catch (err) {
-    await client.query("ROLLBACK")
-    throw err
-  }
+  })
 }
 
-async function rollbackMigration(version: string, sql: string) {
+async function rollbackMigration(version: string, migrationSql: string) {
   console.log(`Rolling back ${version}`)
-  await client.query("BEGIN")
-  try {
-    await client.query(sql)
-    await client.query(
-      `DELETE FROM schema_migrations WHERE version = $1`,
-      [version]
+  await db.transaction(async tx => {
+    await tx.execute(sql.raw(migrationSql))
+    await tx.execute(
+      sql`DELETE FROM schema_migrations WHERE version = ${version}`
     )
-    await client.query("COMMIT")
-  } catch (err) {
-    await client.query("ROLLBACK")
-    throw err
-  }
+  })
 }
 
 async function migrateUp() {
@@ -92,16 +80,17 @@ async function migrateDown() {
 }
 
 async function main() {
-  await client.connect()
-  await ensureMigrationsTable()
+  try {
+    await ensureMigrationsTable()
 
-  if (process.argv.includes("--down")) {
-    await migrateDown()
-  } else {
-    await migrateUp()
+    if (process.argv.includes("--down")) {
+      await migrateDown()
+    } else {
+      await migrateUp()
+    }
+  } finally {
+    await client.end()
   }
-
-  await client.end()
 }
 
 main()

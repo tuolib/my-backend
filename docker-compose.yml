@@ -3,6 +3,7 @@ version: "3.9"
 services:
   caddy:
     image: lucaslorentz/caddy-docker-proxy:latest
+    container_name: caddy-gateway
     ports:
       - "80:80"
       - "443:443"

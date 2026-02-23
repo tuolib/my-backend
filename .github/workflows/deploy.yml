@@ -19,8 +19,7 @@ jobs:
             echo "Starting database backup..."
             mkdir -p backups
             DB_CONTAINER=$(docker ps --filter "name=db" --format "{{.Names}}")
-            docker exec $DB_CONTAINER pg_dump -U user mydb > ./backups/backup_$(date +%Y%m%d_%H%M%S).sql
-            find ./backups -name "*.sql" -mtime +7 -delete
+            docker exec $DB_CONTAINER pg_dump -U user mydb | gzip > ./backups/backup_$(date +%Y%m%d_%H%M%S).sql.gz
             
             git pull origin main
             
@@ -32,13 +31,16 @@ jobs:
             docker compose up -d db redis
             
             # 等待几秒确保数据库就绪
-            sleep 5
+            echo "Waiting for database to be ready..."
+            until docker inspect --format='{{.State.Health.Status}}' $(docker compose ps -q db) | grep -q "healthy"; do
+              sleep 2
+            done
             
             # --- NEW: 显式运行数据库迁移 ---
             # 启动一个临时的 Docker 容器，只运行迁移脚本，然后退出
             # 确保你的 docker-compose.yml 中有一个名为 'backend' 的服务
             echo "Running database migrations..."
-            docker compose run --rm api bun run src/index.ts --migrate-only
+            docker compose exec api bun run src/index.ts --migrate-only
             
             # 检查迁移是否成功
             if [ $? -ne 0 ]; then
@@ -50,12 +52,9 @@ jobs:
             
             # 6. 滚动更新应用
             # echo "Updating application..."
-            # docker compose up -d --remove-orphans
+            docker compose up -d --remove-orphans
             
             # 7. 清理旧镜像 (释放磁盘空间)
-            # docker image prune -f
-            # 启动/更新主应用程序服务
-            # echo "Starting/Updating main application services..."
-            docker compose up --build -d
+             docker image prune -f
             
             echo "✅ Deployment successful."

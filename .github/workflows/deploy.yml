@@ -17,9 +17,28 @@ jobs:
 
             git pull origin main
 
+            echo "Checking active container..."
+
             ACTIVE=$(docker ps --filter "label=caddy=api.find345.site" --format "{{.Names}}")
 
-            if [[ "$ACTIVE" == "api-blue" ]]; then
+            if [ -z "$ACTIVE" ]; then
+              echo "🚀 First deployment detected"
+
+              docker compose build api-blue
+              docker compose up -d api-blue
+
+              echo "Waiting for health..."
+              until docker inspect --format='{{.State.Health.Status}}' api-blue | grep -q "healthy"; do
+                sleep 2
+              done
+
+              echo "✅ First deployment complete."
+              exit 0
+            fi
+
+            # ===== 正常蓝绿流程 =====
+
+            if [ "$ACTIVE" == "api-blue" ]; then
               NEW=api-green
               OLD=api-blue
             else
@@ -34,7 +53,6 @@ jobs:
             docker compose up -d $NEW
 
             echo "Waiting for health..."
-
             until docker inspect --format='{{.State.Health.Status}}' $NEW | grep -q "healthy"; do
               sleep 2
             done
@@ -56,4 +74,4 @@ jobs:
             echo "Stopping old version..."
             docker compose stop $OLD
 
-            echo "Zero-downtime deployment complete."
+            echo "✅ Zero-downtime deployment complete."

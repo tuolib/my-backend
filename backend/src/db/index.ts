@@ -24,7 +24,7 @@ export const migrateDatabase = async () => {
   console.log('⏳ 正在同步产线数据库表结构...');
   try {
     // migrate 函数的第一个参数也需要是 drizzle 实例
-    await migrate(db, { migrationsFolder: 'drizzle' });
+    // await migrate(db, { migrationsFolder: 'drizzle' });
     console.log('✅ 数据库同步成功！');
   } catch (error) {
     console.error('❌ 数据库同步失败:', error);

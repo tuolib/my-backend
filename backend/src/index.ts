@@ -10,20 +10,6 @@ import userApp from '@/modules/users/user.controller.ts';
 // --- 1. 应用初始化 ---
 const app = new Hono();
 
-// --- 2. 核心服务连接 ---
-// 建议将所有异步初始化操作放在一个函数中
-const initializeServices = async (runMigrations = true) => { // 添加一个参数
-  try {
-    await connectRedis();
-    // if (runMigrations) { // 根据参数决定是否运行迁移
-    //   await migrateDatabase();
-    // }
-  } catch (error) {
-    console.error('❌ 服务初始化失败:', error);
-    process.exit(1);
-  }
-};
-
 // --- 3. 中间件注册 ---
 app.use('*', cors()); // 全局跨域
 app.onError(globalErrorHandler); // 全局错误处理
@@ -42,25 +28,38 @@ protectedApi.use('*', authMiddleware);
 // 未来可以添加其他需要登录的路由
 protectedApi.route('/users', userApp);
 
-
 // --- 5. 路由注册到主应用 ---
 // 使用 /api 前缀
 app.route('/api', publicApi);
 app.route('/api', protectedApi);
 
-
 // --- 6. 基础路由与 404 ---
 app.get('/', (c) => c.text('API is running!'));
 app.notFound((c) => ApiResult.error(c, '请求资源不存在', 404));
 
+// --- 2. 核心服务连接 ---
+// 建议将所有异步初始化操作放在一个函数中
+const initializeServices = async (runMigrations = true) => {
+  // 添加一个参数
+  try {
+    await connectRedis();
+    if (runMigrations) { // 根据参数决定是否运行迁移
+      await migrateDatabase();
+      process.exit(0);
+    }
+  } catch (error) {
+    console.error('❌ 服务初始化失败:', error);
+    process.exit(1);
+  }
+};
 
 // --- 7. 启动应用 ---
 const startServer = async () => {
   // 检查命令行参数，例如 `bun run src/index.ts --migrate-only`
-  // const args = process.argv.slice(2);
-  // const migrateOnly = args.includes('--migrate-only');
+  const args = process.argv.slice(2);
+  const migrateOnly = args.includes('--migrate-only');
 
-  await initializeServices(); // 如果是 migrateOnly 模式，则不运行迁移
+  await initializeServices(migrateOnly);
 
   console.log('✅ 服务初始化成功');
 

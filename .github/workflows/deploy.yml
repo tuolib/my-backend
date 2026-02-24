@@ -99,7 +99,19 @@ jobs:
             echo "KUBE_CONFIG_DATA not set, use runner default kubeconfig if present"
           fi
 
+      - name: Check Kubernetes connectivity
+        id: k8s_check
+        run: |
+          if kubectl --request-timeout=10s cluster-info >/dev/null 2>&1; then
+            echo "reachable=true" >> "$GITHUB_OUTPUT"
+            echo "Kubernetes cluster is reachable"
+          else
+            echo "reachable=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No reachable Kubernetes cluster in this runner context; deployment will be skipped."
+          fi
+
       - name: Deploy with blue/green script
+        if: steps.k8s_check.outputs.reachable == 'true'
         env:
           IMAGE_REPOSITORY: ${{ needs.build.outputs.image_repository }}
           IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
@@ -111,3 +123,7 @@ jobs:
           export API_STANDBY_REPLICAS="${DEPLOY_STANDBY_REPLICAS}"
           export RUN_MIGRATION="${DEPLOY_RUN_MIGRATION}"
           bash scripts/deploy/bluegreen-k8s.sh
+
+      - name: Skip deploy (cluster unreachable)
+        if: steps.k8s_check.outputs.reachable != 'true'
+        run: echo "Deployment skipped because no reachable Kubernetes cluster was found."

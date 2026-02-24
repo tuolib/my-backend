@@ -34,9 +34,40 @@ Secrets 先不在 GitHub Repository Settings中设置，放在脚本中写死先
 
 1
 
+ # 1. 创建文件
+  nano /etc/systemd/system/actions-runner.service
 
+  进入编辑器后：
 
+  # 2. 粘贴以下内容
+  [Unit]
+  Description=GitHub Actions Runner
+  After=network.target
 
+  [Service]
+  Type=simple
+  Environment="RUNNER_ALLOW_RUNASROOT=1"
+  WorkingDirectory=/root/actions-runner
+  ExecStart=/root/actions-runner/run.sh
+  Restart=always
+  RestartSec=5
+
+  [Install]
+  WantedBy=multi-user.target
+
+  # 3. 保存退出
+  Ctrl+O    # 保存
+  Enter     # 确认文件名
+  Ctrl+X    # 退出
+
+  # 4. 启动服务
+  systemctl daemon-reload
+  systemctl enable actions-runner
+  systemctl start actions-runner
+  systemctl status actions-runner
+
+  
+./config.sh --url https://github.com/   --token  --name "swarm-manager" --labels "self-hosted,linux,swarm-manager"  --unattended
 
 
 

@@ -92,13 +92,48 @@ bun run k8s:kind:down
 - `API_ACTIVE_REPLICAS=4`
 - `API_STANDBY_REPLICAS=1`
 - `RUN_MIGRATION=true`
-- `DEPLOY_REQUIRE_CLUSTER=true`（集群不可达直接失败）
+- `DEPLOY_REQUIRE_CLUSTER=false`（集群不可达时跳过部署，不让流水线失败）
 - `DEPLOY_PUBLIC_HEALTHCHECK_URL=https://api.finde345.site/healthz`
-- 仅当 Runner 没有预置 kubeconfig 时，才需要 `KUBE_CONFIG_DATA`（base64 kubeconfig）
+- 当前模式不使用任何自定义 GitHub Secrets（包括 `KUBE_CONFIG_DATA`）
+- deploy 是否执行取决于 Runner 本机是否已有可用 kube context
 
 > 注意：生产环境请把 `values-prod.yaml` 中数据库和 JWT 密码改为真实强密码，并建议改为外部 Secret 管理（如 External Secrets / Vault）。
 
-## 5. 迁移策略
+## 5. 单机 k3s（生产）落地步骤
+
+### 5.1 服务器安装 k3s
+
+在你的服务器执行：
+
+```bash
+cd /path/to/your/repo
+sudo bash scripts/k3s/install-single-node.sh
+```
+
+说明：
+- 默认会禁用 k3s 自带 traefik（本项目使用 Caddy）。
+- 保留 k3s ServiceLB，`LoadBalancer` Service 在单机也可用。
+
+### 5.2 可选：导出 kubeconfig（未来启用 Secret 模式时使用）
+
+```bash
+cd /path/to/your/repo
+API_SERVER=https://<你的服务器公网IP>:6443 \
+sudo bash scripts/k3s/export-kubeconfig-base64.sh
+```
+
+复制输出内容，未来如需启用 Secret 模式可配置到仓库 Secret：`KUBE_CONFIG_DATA`。
+
+### 5.3 首次发布
+
+1. 确认防火墙放通：`6443`、`80`、`443`
+2. push 到 `main`
+3. 观察 workflow：
+   - `Check Kubernetes connectivity` 应显示 reachable
+   - `Deploy with blue/green script` 成功
+   - `Smoke test (public domain)` 成功
+
+## 6. 迁移策略
 
 迁移脚本：`src/db/migrate.ts`
 

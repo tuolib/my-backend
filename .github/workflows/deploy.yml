@@ -17,7 +17,7 @@ env:
   DEPLOY_ACTIVE_REPLICAS: "4"
   DEPLOY_STANDBY_REPLICAS: "1"
   DEPLOY_RUN_MIGRATION: "true"
-  DEPLOY_REQUIRE_CLUSTER: "true"
+  DEPLOY_REQUIRE_CLUSTER: "false"
   DEPLOY_PUBLIC_HEALTHCHECK_URL: "https://api.finde345.site/healthz"
 
 jobs:
@@ -88,19 +88,6 @@ jobs:
         with:
           version: v3.15.4
 
-      - name: Write kubeconfig (optional)
-        env:
-          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
-        run: |
-          if [ -n "${KUBE_CONFIG_DATA:-}" ]; then
-            mkdir -p "$HOME/.kube"
-            echo "$KUBE_CONFIG_DATA" | base64 -d > "$HOME/.kube/config"
-            chmod 600 "$HOME/.kube/config"
-            echo "kubeconfig loaded from KUBE_CONFIG_DATA"
-          else
-            echo "KUBE_CONFIG_DATA not set, use runner default kubeconfig if present"
-          fi
-
       - name: Check Kubernetes connectivity
         id: k8s_check
         run: |
@@ -113,7 +100,7 @@ jobs:
               echo "::error::No reachable Kubernetes cluster in this runner context."
               exit 1
             fi
-            echo "::warning::No reachable Kubernetes cluster in this runner context; deployment will be skipped."
+            echo "::warning::No reachable Kubernetes cluster in this runner context; deployment will be skipped (no custom secrets mode)."
           fi
 
       - name: Deploy with blue/green script

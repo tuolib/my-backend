@@ -17,6 +17,7 @@ api:
     # 30 pods × 5 = 150 个客户端连接到 PgBouncer（远低于其 maxClientConn=2000），
     # PgBouncer 再复用 200 条到 PostgreSQL，彻底解决突发扩容时的连接风暴问题。
     DB_POOL_MAX: "5"
+    DB_STRICT_READ_READINESS: "false"
     NODE_ENV: "production"
     LOG_LEVEL: "info"
   blue:

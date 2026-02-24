@@ -10,6 +10,7 @@ if (!writeDatabaseUrlRaw) {
 }
 const writeDatabaseUrl = writeDatabaseUrlRaw;
 const readDatabaseUrl = process.env.DATABASE_READ_URL || writeDatabaseUrl;
+const strictReadReadiness = process.env.DB_STRICT_READ_READINESS === 'true';
 
 const poolMax = Number(process.env.DB_POOL_MAX || 20);
 const sharedDbUrl = writeDatabaseUrl === readDatabaseUrl;
@@ -34,7 +35,9 @@ export const client = writeClient;
 
 export const checkDatabaseReadiness = async () => {
   await dbWrite.execute(sql`select 1`);
-  await dbRead.execute(sql`select 1`);
+  if (strictReadReadiness && !sharedDbUrl) {
+    await dbRead.execute(sql`select 1`);
+  }
 };
 
 export const closeDbConnections = async () => {

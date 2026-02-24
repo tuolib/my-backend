@@ -56,6 +56,8 @@ spec:
                   key: JWT_SECRET
             - name: DB_POOL_MAX
               value: {{ $.Values.api.env.DB_POOL_MAX | quote }}
+            - name: DB_STRICT_READ_READINESS
+              value: {{ $.Values.api.env.DB_STRICT_READ_READINESS | default "false" | quote }}
             - name: NODE_ENV
               value: {{ $.Values.api.env.NODE_ENV | default "production" | quote }}
             - name: LOG_LEVEL

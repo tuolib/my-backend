@@ -1,39 +1,20 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { globalErrorHandler, ApiResult } from './utils/response.ts';
-import { checkRedisReadiness, connectRedis } from './lib/redis.ts';
-import { loginController } from './modules/login/login.controller.ts';
-import { authMiddleware } from './middleware/auth.ts';
-import userApp from '@/modules/users/user.controller.ts';
+import { globalErrorHandler, ApiResult } from '@/utils/response.ts';
+import { checkRedisReadiness, connectRedis } from '@/lib/redis.ts';
 import { checkDatabaseReadiness } from '@/db';
+import { buildRouter } from '@/router.ts';
 
-// --- 1. 应用初始化 ---
 const app = new Hono();
 
-// --- 3. 中间件注册 ---
-app.use('*', cors()); // 全局跨域
-app.onError(globalErrorHandler); // 全局错误处理
+// 全局中间件
+app.use('*', cors());
+app.onError(globalErrorHandler);
 
-// --- 4. 路由定义 ---
+// 挂载所有业务路由
+app.route('/', buildRouter());
 
-// 4.1 公开路由组 (无需登录)
-const publicApi = new Hono();
-publicApi.route('/account', loginController);
-// 未来可以添加注册、获取验证码等路由
-
-// 4.2 保护路由组 (需要登录)
-const protectedApi = new Hono();
-// 【核心】对整个路由组应用认证中间件
-protectedApi.use('*', authMiddleware);
-// 未来可以添加其他需要登录的路由
-protectedApi.route('/users', userApp);
-
-// --- 5. 路由注册到主应用 ---
-// 使用 /api 前缀
-app.route('/api', publicApi);
-app.route('/api', protectedApi);
-
-// --- 6. 基础路由与 404 ---
+// 基础路由
 app.get('/', (c) => c.text('API is running!'));
 app.get('/healthz', (c) => c.json({ status: 'ok' }));
 app.get('/readyz', async (c) => {
@@ -53,33 +34,20 @@ app.get('/readyz', async (c) => {
 });
 app.notFound((c) => ApiResult.error(c, '请求资源不存在', 404));
 
-// --- 2. 核心服务连接 ---
-// 建议将所有异步初始化操作放在一个函数中
-const initializeServices = async (runMigrations = true) => {
-  // 添加一个参数
+// 服务初始化
+const initializeServices = async () => {
   try {
     await connectRedis();
     await checkDatabaseReadiness();
-    // if (runMigrations) { // 根据参数决定是否运行迁移
-    //   await migrateDatabase();
-    //   process.exit(0);
-    // }
   } catch (error) {
     console.error('❌ 服务初始化失败:', error);
     process.exit(1);
   }
 };
 
-// --- 7. 启动应用 ---
 const startServer = async () => {
-  // 检查命令行参数，例如 `bun run src/index.ts --migrate-only`
-  // const args = process.argv.slice(2);
-  // const migrateOnly = args.includes('--migrate-only');
-
   await initializeServices();
-
   console.log('✅ 服务初始化成功');
-
   return {
     port: 3000,
     fetch: app.fetch,

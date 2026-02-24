@@ -1,4 +1,4 @@
-name: Build And Deploy (K8s)
+name: Build And Deploy (Swarm)
 
 on:
   push:
@@ -12,14 +12,23 @@ permissions:
 env:
   IMAGE_NAME: ho-api
   DEPLOY_BRANCH: main
-  DEPLOY_NAMESPACE: ho
-  DEPLOY_RELEASE: ho
-  DEPLOY_VALUES_FILE: ./charts/ho-stack/values-prod.yaml
-  DEPLOY_ACTIVE_REPLICAS: "4"
-  DEPLOY_STANDBY_REPLICAS: "1"
-  DEPLOY_RUN_MIGRATION: "true"
-  DEPLOY_REQUIRE_CLUSTER: "false"
-  DEPLOY_PUBLIC_HEALTHCHECK_URL: "https://api.finde345.site/healthz"
+  STACK_NAME: ho
+  SWARM_DOMAIN: api.finde345.site
+  DEPLOY_MODE: auto
+  POSTGRES_DB: mydb
+  POSTGRES_USER: user
+  POSTGRES_PASSWORD: password
+  POSTGRES_REPLICATION_PASSWORD: repl_password
+  JWT_SECRET: change-me-in-prod
+  API_REPLICAS_SINGLE: "2"
+  API_REPLICAS_MULTI: "10"
+  DB_POOL_MAX: "5"
+  DB_STRICT_READ_READINESS: "false"
+  LOG_LEVEL: info
+  PGBOUNCER_MAX_CLIENT_CONN: "5000"
+  PGBOUNCER_DEFAULT_POOL_SIZE: "500"
+  PGBOUNCER_RESERVE_POOL_SIZE: "100"
+  RUN_MIGRATION: "true"
 
 jobs:
   build:
@@ -71,10 +80,10 @@ jobs:
             ${{ steps.vars.outputs.image_repository }}:latest
 
   deploy:
-    name: One-click deploy to Kubernetes
+    name: One-click deploy to Swarm
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, swarm-manager]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,18 +100,64 @@ jobs:
           git pull --ff-only origin "${DEPLOY_BRANCH}"
           echo "Deploy commit: $(git rev-parse --short HEAD)"
 
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: v1.30.0
+      - name: Verify Docker Swarm manager
+        run: |
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "::error::docker not found on self-hosted runner"
+            exit 1
+          fi
 
-      - name: Setup Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.15.4
+          if [ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || true)" != "active" ]; then
+            echo "::error::Swarm is not active on this runner"
+            exit 1
+          fi
 
-      - name: One-click publish script
-        env:
-          IMAGE_REPOSITORY: ${{ needs.build.outputs.image_repository }}
-          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
-        run: bash scripts/deploy/release-k8s.sh
+          if ! docker node ls >/dev/null 2>&1; then
+            echo "::error::Runner must execute on a Swarm manager node"
+            exit 1
+          fi
+
+      - name: Login GHCR on manager
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Render Swarm env file (hardcoded mode)
+        run: |
+          cat > swarm/.env.swarm <<EOF_ENV
+          STACK_NAME=${STACK_NAME}
+          SWARM_DOMAIN=${SWARM_DOMAIN}
+          DEPLOY_MODE=${DEPLOY_MODE}
+          IMAGE_REPOSITORY=${{ needs.build.outputs.image_repository }}
+          IMAGE_TAG=${{ needs.build.outputs.image_tag }}
+          API_REPLICAS_SINGLE=${API_REPLICAS_SINGLE}
+          API_REPLICAS_MULTI=${API_REPLICAS_MULTI}
+          DB_POOL_MAX=${DB_POOL_MAX}
+          DB_STRICT_READ_READINESS=${DB_STRICT_READ_READINESS}
+          LOG_LEVEL=${LOG_LEVEL}
+          POSTGRES_DB=${POSTGRES_DB}
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD}
+          PGBOUNCER_MAX_CLIENT_CONN=${PGBOUNCER_MAX_CLIENT_CONN}
+          PGBOUNCER_DEFAULT_POOL_SIZE=${PGBOUNCER_DEFAULT_POOL_SIZE}
+          PGBOUNCER_RESERVE_POOL_SIZE=${PGBOUNCER_RESERVE_POOL_SIZE}
+          JWT_SECRET=${JWT_SECRET}
+          RUN_MIGRATION=${RUN_MIGRATION}
+          EOF_ENV
+
+      - name: Deploy stack
+        run: bash scripts/swarm/deploy-stack.sh
+
+      - name: Public smoke test
+        run: |
+          URL="https://${SWARM_DOMAIN}/healthz"
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 "${URL}" >/tmp/swarm-smoke.out; then
+              echo "Swarm public smoke test passed: ${URL}"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "::error::Swarm public smoke test failed: ${URL}"
+          exit 1

@@ -7,6 +7,7 @@ import { buildRouter } from '@/router.ts';
 import { logger } from '@/lib/logger.ts';
 
 const app = new Hono();
+const port = Number(process.env.PORT || 3000);
 
 // 全局中间件
 app.use('*', cors());
@@ -44,8 +45,8 @@ const initializeServices = async () => {
 
 const startServer = async () => {
   await initializeServices();
-  logger.info('Service initialized successfully', { port: 3000 });
-  return { port: 3000, fetch: app.fetch };
+  logger.info('Service initialized successfully', { port, host: '0.0.0.0' });
+  return { hostname: '0.0.0.0', port, fetch: app.fetch };
 };
 
 export default await startServer();

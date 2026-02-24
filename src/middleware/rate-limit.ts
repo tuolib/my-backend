@@ -12,6 +12,12 @@ interface RateLimitOptions {
   keyPrefix?: string;
 }
 
+const isRateLimitEnabled = (): boolean => {
+  const raw = false;
+  if (raw == null) return true;
+  return !['0', 'false', 'off', 'no'].includes(raw.trim().toLowerCase());
+};
+
 /**
  * Redis 滑动窗口限流（Sliding Window Log via Sorted Set + Lua）。
  *
@@ -48,6 +54,11 @@ export function rateLimit(options: RateLimitOptions) {
   const windowSec = Math.ceil(windowMs / 1000) + 1;
 
   return createMiddleware(async (c, next) => {
+    if (!isRateLimitEnabled()) {
+      await next();
+      return;
+    }
+
     const ip =
       c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
       c.req.header('X-Real-IP') ??

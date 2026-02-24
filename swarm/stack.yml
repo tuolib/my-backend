@@ -1,0 +1,425 @@
+x-api-env: &api_env
+  DATABASE_WRITE_URL: "postgres://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@pgbouncer-rw:5432/${POSTGRES_DB:-mydb}"
+  DATABASE_READ_URL: "postgres://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@pgbouncer-ro:5432/${POSTGRES_DB:-mydb}"
+  REDIS_URL: "redis://redis:6379"
+  JWT_SECRET: "${JWT_SECRET:-change-me-in-prod}"
+  DB_POOL_MAX: "${DB_POOL_MAX:-5}"
+  DB_STRICT_READ_READINESS: "${DB_STRICT_READ_READINESS:-false}"
+  NODE_ENV: "production"
+  LOG_LEVEL: "${LOG_LEVEL:-info}"
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+      - target: 443
+        published: 443
+        protocol: tcp
+    networks:
+      - edge
+      - backend
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 1
+        failure_action: rollback
+
+  api:
+    image: "${IMAGE_REPOSITORY:-ghcr.io/your-org/ho-api}:${IMAGE_TAG:-latest}"
+    environment:
+      <<: *api_env
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+      start_period: 20s
+    deploy:
+      replicas: ${API_REPLICAS:-10}
+      endpoint_mode: vip
+      placement:
+        constraints:
+          - node.labels.tier == api
+        max_replicas_per_node: 1
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 2
+        delay: 5s
+        failure_action: rollback
+      rollback_config:
+        order: start-first
+        parallelism: 2
+        delay: 5s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+      restart_policy:
+        condition: on-failure
+
+  postgres-primary:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-user}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      POSTGRES_DB: "${POSTGRES_DB:-mydb}"
+      REPLICATION_PASSWORD: "${POSTGRES_REPLICATION_PASSWORD:-repl_password}"
+      POSTGRES_HOST_AUTH_METHOD: md5
+      POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=md5"
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=20
+      - -c
+      - wal_keep_size=1024MB
+      - -c
+      - hot_standby=on
+      - -c
+      - password_encryption=md5
+    configs:
+      - source: postgres_primary_init
+        target: /docker-entrypoint-initdb.d/init-replication.sh
+        mode: 0555
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 1
+      restart_policy:
+        condition: on-failure
+
+  postgres-replica-1:
+    image: postgres:16-alpine
+    environment: &replica_env
+      POSTGRES_USER: "${POSTGRES_USER:-user}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      POSTGRES_DB: "${POSTGRES_DB:-mydb}"
+      PGDATA: /var/lib/postgresql/data
+      PRIMARY_HOST: postgres-primary
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: "${POSTGRES_REPLICATION_PASSWORD:-repl_password}"
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: &replica_configs
+      - source: postgres_replica_setup
+        target: /replica-setup.sh
+        mode: 0555
+    volumes:
+      - postgres_replica_1_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: &replica_health
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 2
+      restart_policy:
+        condition: on-failure
+
+  postgres-replica-2:
+    image: postgres:16-alpine
+    environment: *replica_env
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: *replica_configs
+    volumes:
+      - postgres_replica_2_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: *replica_health
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 3
+      restart_policy:
+        condition: on-failure
+
+  postgres-replica-3:
+    image: postgres:16-alpine
+    environment: *replica_env
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: *replica_configs
+    volumes:
+      - postgres_replica_3_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: *replica_health
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 4
+      restart_policy:
+        condition: on-failure
+
+  postgres-replica-4:
+    image: postgres:16-alpine
+    environment: *replica_env
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: *replica_configs
+    volumes:
+      - postgres_replica_4_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: *replica_health
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 5
+      restart_policy:
+        condition: on-failure
+
+  postgres-replica-5:
+    image: postgres:16-alpine
+    environment: *replica_env
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: *replica_configs
+    volumes:
+      - postgres_replica_5_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: *replica_health
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 6
+      restart_policy:
+        condition: on-failure
+
+  postgres-replica-6:
+    image: postgres:16-alpine
+    environment: *replica_env
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: *replica_configs
+    volumes:
+      - postgres_replica_6_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: *replica_health
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 7
+      restart_policy:
+        condition: on-failure
+
+  postgres-replica-7:
+    image: postgres:16-alpine
+    environment: *replica_env
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: *replica_configs
+    volumes:
+      - postgres_replica_7_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: *replica_health
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 8
+      restart_policy:
+        condition: on-failure
+
+  postgres-replica-8:
+    image: postgres:16-alpine
+    environment: *replica_env
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: *replica_configs
+    volumes:
+      - postgres_replica_8_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: *replica_health
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 9
+      restart_policy:
+        condition: on-failure
+
+  postgres-replica-9:
+    image: postgres:16-alpine
+    environment: *replica_env
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: *replica_configs
+    volumes:
+      - postgres_replica_9_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: *replica_health
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == 10
+      restart_policy:
+        condition: on-failure
+
+  haproxy-ro:
+    image: haproxy:2.9-alpine
+    configs:
+      - source: haproxy_ro_cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  pgbouncer-rw:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DB_HOST: postgres-primary
+      DB_PORT: "5432"
+      DB_USER: "${POSTGRES_USER:-user}"
+      DB_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      DB_NAME: "${POSTGRES_DB:-mydb}"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "${PGBOUNCER_MAX_CLIENT_CONN:-5000}"
+      DEFAULT_POOL_SIZE: "${PGBOUNCER_DEFAULT_POOL_SIZE:-500}"
+      RESERVE_POOL_SIZE: "${PGBOUNCER_RESERVE_POOL_SIZE:-100}"
+      AUTH_TYPE: md5
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432 2>/dev/null && echo ok || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.labels.tier == api
+      restart_policy:
+        condition: on-failure
+
+  pgbouncer-ro:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DB_HOST: haproxy-ro
+      DB_PORT: "5432"
+      DB_USER: "${POSTGRES_USER:-user}"
+      DB_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      DB_NAME: "${POSTGRES_DB:-mydb}"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "${PGBOUNCER_MAX_CLIENT_CONN:-5000}"
+      DEFAULT_POOL_SIZE: "${PGBOUNCER_DEFAULT_POOL_SIZE:-500}"
+      RESERVE_POOL_SIZE: "${PGBOUNCER_RESERVE_POOL_SIZE:-100}"
+      AUTH_TYPE: md5
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432 2>/dev/null && echo ok || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.labels.tier == api
+      restart_policy:
+        condition: on-failure
+
+networks:
+  edge:
+    driver: overlay
+    attachable: true
+  backend:
+    driver: overlay
+    attachable: true
+
+volumes:
+  caddy_data:
+  caddy_config:
+  redis_data:
+  postgres_primary_data:
+  postgres_replica_1_data:
+  postgres_replica_2_data:
+  postgres_replica_3_data:
+  postgres_replica_4_data:
+  postgres_replica_5_data:
+  postgres_replica_6_data:
+  postgres_replica_7_data:
+  postgres_replica_8_data:
+  postgres_replica_9_data:
+
+configs:
+  caddyfile:
+    file: ./swarm/caddy/Caddyfile
+  haproxy_ro_cfg:
+    file: ./swarm/haproxy/haproxy-ro.cfg
+  postgres_primary_init:
+    file: ./sim/postgres/primary-init.sh
+  postgres_replica_setup:
+    file: ./sim/postgres/replica-setup.sh

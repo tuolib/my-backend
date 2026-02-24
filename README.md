@@ -2,6 +2,7 @@
 
 这个版本已经按以下目标重构：
 - Kubernetes 部署（Helm）
+- Docker Swarm 部署（10 API + 10 DB）
 - API 蓝绿发布（blue/green）
 - PostgreSQL 主从（写主读从）
 - PgBouncer 连接池（rw/ro 分离）
@@ -50,6 +51,15 @@ bun run k8s:kind:down
 - kind 配置: `scripts/kind/kind-config.yaml`
 - 本地 values: `charts/ho-stack/values-local.yaml`
 
+## Swarm 部署（多机/单机）
+
+完整 Swarm 方案见：
+- `README-swarm.md`
+- `swarm/stack.yml`
+- `swarm/stack-single.yml`
+- `scripts/swarm/deploy-stack.sh`
+- `.github/workflows/deploy-swarm.yml`
+
 ## 3. 架构要点
 
 - 同一套 Helm Chart（`charts/ho-stack`）用于本地与生产，只通过 `values-local.yaml` / `values-prod.yaml` 做环境差异化。
@@ -74,13 +84,15 @@ bun run k8s:kind:down
 流程：
 1. `push` 任意分支：自动 `bun install` + `tsc --noEmit` + Docker Build（验证可构建）。
 2. `push` 到 `main`：构建并推送镜像到 GHCR（`ghcr.io/<owner>/ho-api:<git-sha12>` + `latest`）。
-3. 自动执行 `scripts/deploy/bluegreen-k8s.sh`（部署参数已在工作流写死）：
+3. 自动执行 `scripts/deploy/release-k8s.sh`（部署参数已在工作流写死）：
+   - 发布前先 `git pull --ff-only origin main` 拉取最新代码
+   - 然后脚本内部调用 `scripts/deploy/bluegreen-k8s.sh`
    - 判定当前 active color
    - 部署闲置 color 新版本
    - 跑迁移 `bun run migrate`
    - 就绪后切换 Service selector
    - 老 color 缩容为 standby
-4. 发布后自动烟雾测试：
+4. 发布后自动烟雾测试（脚本内完成）：
    - 集群内网关探活（Caddy）
    - 公网域名探活（`https://api.finde345.site/healthz`）
    - 任一失败则工作流失败（避免“假成功”）

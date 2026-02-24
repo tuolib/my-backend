@@ -2,55 +2,67 @@ import { createMiddleware } from 'hono/factory';
 import { verify } from 'hono/jwt';
 import { redisIns } from '@/lib/redis.ts';
 import { ApiResult } from '@/utils/response.ts';
+import { logger } from '@/lib/logger.ts';
 import { JWT_SECRET, REDIS_SESSION_PREFIX } from '@/middleware/auth-config.ts';
 
 /**
- * 认证中间件
- * 负责：
- * 1. 验证 JWT 令牌的有效性（签名、过期时间）
- * 2. 检查 Redis 中的会话状态（实现单点登录/强制下线）
- * 3. 将用户信息注入到请求上下文中
+ * Redis 熔断器状态。
+ *
+ * 设计原则：安全性 vs 可用性的平衡
+ * - Redis 正常：完整验证 JWT 签名 + Redis session（防 token 泄露/强制下线）
+ * - Redis 故障（熔断打开）：降级为仅 JWT 签名验证，保证服务不中断
+ * - 降级期间 token 仍受 JWT 过期时间保护（最多 15 分钟窗口期）
+ * - 5 秒后自动尝试半开，快速恢复完整验证
  */
+let circuitOpen = false;
+let lastFailureTime = 0;
+const CIRCUIT_TIMEOUT_MS = 5_000;
+
+async function verifySession(userId: string, sid: string): Promise<boolean> {
+  // 熔断打开期间：跳过 Redis 检查，降级为 JWT-only 认证
+  if (circuitOpen) {
+    if (Date.now() - lastFailureTime < CIRCUIT_TIMEOUT_MS) {
+      logger.warn('Redis circuit open, JWT-only auth degraded', { userId });
+      return true;
+    }
+    circuitOpen = false; // 半开：尝试恢复
+  }
+
+  try {
+    const currentSid = await redisIns.get(`${REDIS_SESSION_PREFIX}${userId}`);
+    return !!(currentSid && sid === currentSid);
+  } catch (err) {
+    circuitOpen = true;
+    lastFailureTime = Date.now();
+    logger.error('Redis session check failed, opening circuit', { error: String(err) });
+    return true; // 降级放行，避免全站 401
+  }
+}
+
 export const authMiddleware = createMiddleware(async (c, next) => {
-  console.log(`[Auth Middleware] Checking request for: ${c.req.path}`); // 添加日志
-
   const authHeader = c.req.header('Authorization');
-
   if (!authHeader) {
-    console.log('[Auth Middleware] Failed: No Authorization header');
     return ApiResult.error(c, '未提供认证令牌', 401);
   }
 
-  // 提取 Token: "Bearer <token>"
   const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
-
   if (!token) {
     return ApiResult.error(c, '令牌格式错误', 401);
   }
 
   try {
-    // 1. 验证 JWT 签名和过期时间
-    // verify 函数会抛出异常如果 token 无效
     const payload = await verify(token, JWT_SECRET, 'HS256');
-
-    // 2. 架构师思维：多因素校验（异地登录踢出逻辑）
-    // 从 Redis 获取当前有效的 Session ID
-    // 注意：payload.sub 存储的是 userId
     const userId = payload.sub as string;
-    const currentSid = await redisIns.get(`${REDIS_SESSION_PREFIX}${userId}`);
+    const sid = payload.sid as string;
 
-    // 如果 Redis 中没有记录（会话过期）或者 sid 不匹配（被顶号），则拒绝访问
-    if (!currentSid || payload.sid !== currentSid) {
+    const isValid = await verifySession(userId, sid);
+    if (!isValid) {
       return ApiResult.error(c, '会话已失效或在其他设备登录', 401);
     }
 
-    // 3. 将用户信息注入 Context
-    // 这样后续的 Controller 可以直接通过 c.get('jwtPayload') 获取用户信息
     c.set('jwtPayload', payload);
-
     await next();
-  } catch (error) {
-    // 区分不同类型的错误可以提供更友好的提示，这里简化处理
+  } catch {
     return ApiResult.error(c, '令牌无效或已过期', 401);
   }
 });

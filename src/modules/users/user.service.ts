@@ -3,8 +3,8 @@ import { UserRepository } from './user.repository.ts';
 import type { CreateUserInput } from './user.schema.ts';
 
 export const UserService = {
-  async findAll() {
-    return await UserRepository.findAll();
+  async findPaginated(page: number, pageSize: number) {
+    return await UserRepository.findPaginated(page, pageSize);
   },
 
   async findById(id: number) {
@@ -19,7 +19,7 @@ export const UserService = {
 
   async update(id: number, data: Partial<CreateUserInput>) {
     const payload: Record<string, unknown> = { ...data };
-    // 业务规则：更新时若包含明文密码，必须重新哈希后再写入 DB
+    // 业务规则：更新包含明文密码时必须重新哈希，绝不允许明文写入 DB
     if (data.password) {
       payload.passwordHash = await bcrypt.hash(data.password, 10);
       delete payload.password;

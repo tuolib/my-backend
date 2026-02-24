@@ -6,7 +6,9 @@ api:
   activeColor: blue
   env:
     JWT_SECRET: change-me-in-ci
-    DB_POOL_MAX: "30"
+    DB_POOL_MAX: "5"
+    NODE_ENV: "production"
+    LOG_LEVEL: "info"
   blue:
     replicaCount: 4
     image:
@@ -18,6 +20,8 @@ api:
   hpa:
     enabled: true
     minReplicas: 4
+    # 生产最大 60 pods × 5 pool = 300 连接到 pgbouncer，pgbouncer defaultPoolSize=500
+    # 健康的连接复用比，不会出现连接风暴
     maxReplicas: 60
     targetCPUUtilizationPercentage: 60
   pdb:
@@ -31,7 +35,9 @@ postgres:
     storage: 100Gi
   replica:
     enabled: true
-    replicaCount: 2
+    # 生产环境 4 个副本：流量高峰时读负载均摊，
+    # 允许 1 个副本滚动更新期间仍有 3 个提供读服务
+    replicaCount: 4
     storage: 100Gi
 
 pgbouncer:

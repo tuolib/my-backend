@@ -12,7 +12,13 @@ api:
   standbyReplicas: 1
   env:
     JWT_SECRET: super_secret_123
-    DB_POOL_MAX: "30"
+    # DB_POOL_MAX 从 30 降至 5：
+    # PgBouncer 负责连接池化，应用层只需少量连接。
+    # 30 pods × 5 = 150 个客户端连接到 PgBouncer（远低于其 maxClientConn=2000），
+    # PgBouncer 再复用 200 条到 PostgreSQL，彻底解决突发扩容时的连接风暴问题。
+    DB_POOL_MAX: "5"
+    NODE_ENV: "production"
+    LOG_LEVEL: "info"
   blue:
     enabled: true
     replicaCount: 3
@@ -59,7 +65,9 @@ postgres:
         memory: 2Gi
   replica:
     enabled: true
-    replicaCount: 2
+    # 从 2 增加到 3：读流量 10 倍时，3 个副本分摊负载更均衡，
+    # 同时保证主库故障时仍有 2 个副本可读
+    replicaCount: 3
     storage: 20Gi
     resources:
       requests:

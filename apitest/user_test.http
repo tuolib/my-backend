@@ -1,14 +1,6 @@
 
-### 获取所有用户
-POST {{baseUrl}}/api/users/getAllUser
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{}
-
-
 ### 注册新用户
-POST {{baseUrl}}/api/account/register
+POST {{baseUrl}}/api/v1/account/register
 Content-Type: application/json
 
 {
@@ -19,7 +11,7 @@ Content-Type: application/json
 
 
 ### 登录
-POST {{baseUrl}}/api/account/login
+POST {{baseUrl}}/api/v1/account/login
 Content-Type: application/json
 
 {
@@ -27,10 +19,31 @@ Content-Type: application/json
   "password": "a12345678"
 }
 
-### 刷新token
-POST {{baseUrl}}/api/account/refresh
+### 刷新 token
+POST {{baseUrl}}/api/v1/account/refresh
 Content-Type: application/json
 
 {
   "refreshToken": "{{refreshToken}}"
 }
+
+### 获取用户列表（分页，第 1 页，每页 20 条）
+GET {{baseUrl}}/api/v1/users?page=1&pageSize=20
+Authorization: Bearer {{token}}
+
+### 获取用户列表（第 2 页）
+GET {{baseUrl}}/api/v1/users?page=2&pageSize=20
+Authorization: Bearer {{token}}
+
+### 更新用户（id 从路径参数传入）
+PATCH {{baseUrl}}/api/v1/users/1
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "email": "updated@test.com"
+}
+
+### 删除用户（id 从路径参数传入）
+DELETE {{baseUrl}}/api/v1/users/1
+Authorization: Bearer {{token}}

@@ -56,6 +56,10 @@ spec:
                   key: JWT_SECRET
             - name: DB_POOL_MAX
               value: {{ $.Values.api.env.DB_POOL_MAX | quote }}
+            - name: NODE_ENV
+              value: {{ $.Values.api.env.NODE_ENV | default "production" | quote }}
+            - name: LOG_LEVEL
+              value: {{ $.Values.api.env.LOG_LEVEL | default "info" | quote }}
           readinessProbe:
             httpGet:
               path: /readyz
@@ -131,6 +135,30 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ $.Values.api.hpa.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      # 流量突增时立即扩容，不等待稳定窗口（默认 300s 会导致 5 分钟过载）
+      stabilizationWindowSeconds: 0
+      policies:
+        # 策略 1：每 15s 最多翻倍（应对指数级流量增长）
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        # 策略 2：每 60s 最多新增 4 个 Pod（平稳场景下的安全上限）
+        - type: Pods
+          value: 4
+          periodSeconds: 60
+      # 取两种策略中更激进的一个，确保快速响应
+      selectPolicy: Max
+    scaleDown:
+      # 缩容前等待 5 分钟：流量可能只是短暂下降，防止频繁扩缩容（thrashing）
+      stabilizationWindowSeconds: 300
+      policies:
+        # 每 60s 最多缩减 25%，保守缩容避免缩过头
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+      selectPolicy: Min
 {{- end }}
 {{- end }}
 {{- end }}

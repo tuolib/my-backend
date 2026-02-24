@@ -15,7 +15,6 @@ data:
 
       reverse_proxy {{ include "ho-stack.apiName" . }}-active.{{ .Release.Namespace }}.svc.cluster.local:80 {
         lb_policy random_choose 2
-        health_uri /readyz
       }
     }
 ---

@@ -15,6 +15,7 @@ SERVICE_NAME=${SERVICE_NAME:-${RELEASE}-ho-stack-api-active}
 BLUE_DEPLOYMENT=${BLUE_DEPLOYMENT:-${RELEASE}-ho-stack-api-blue}
 GREEN_DEPLOYMENT=${GREEN_DEPLOYMENT:-${RELEASE}-ho-stack-api-green}
 SECRET_NAME=${SECRET_NAME:-${RELEASE}-ho-stack-secrets}
+API_LABEL_SELECTOR=${API_LABEL_SELECTOR:-app.kubernetes.io/instance=${RELEASE},component=api}
 
 run_migration_job() {
   if [[ "${RUN_MIGRATION}" != "true" ]]; then
@@ -51,6 +52,26 @@ YAML
     echo "Migration failed"
     exit 1
   }
+}
+
+collect_api_diagnostics() {
+  echo "===== API diagnostics ====="
+  kubectl -n "${NAMESPACE}" get deploy "${BLUE_DEPLOYMENT}" "${GREEN_DEPLOYMENT}" -o wide || true
+  kubectl -n "${NAMESPACE}" get pods -l "${API_LABEL_SELECTOR}" -o wide || true
+  kubectl -n "${NAMESPACE}" get svc "${SERVICE_NAME}" -o wide || true
+  kubectl -n "${NAMESPACE}" get endpoints "${SERVICE_NAME}" -o wide || true
+}
+
+assert_service_has_endpoints() {
+  local svc_name=$1
+  local endpoint_ips
+  endpoint_ips=$(kubectl -n "${NAMESPACE}" get endpoints "${svc_name}" -o jsonpath='{range .subsets[*].addresses[*]}{.ip}{" "}{end}' 2>/dev/null || true)
+  if [[ -z "${endpoint_ips}" ]]; then
+    echo "No ready endpoints found for service: ${svc_name}"
+    collect_api_diagnostics
+    exit 1
+  fi
+  echo "Service ${svc_name} endpoints: ${endpoint_ips}"
 }
 
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
@@ -103,5 +124,6 @@ run_migration_job
 
 kubectl -n "${NAMESPACE}" patch svc "${SERVICE_NAME}" --type='json' -p="[{\"op\":\"replace\",\"path\":\"/spec/selector/color\",\"value\":\"${NEXT_COLOR}\"}]"
 kubectl -n "${NAMESPACE}" scale deployment "${OLD_DEPLOYMENT}" --replicas="${API_STANDBY_REPLICAS}"
+assert_service_has_endpoints "${SERVICE_NAME}"
 
 echo "Blue/green switch complete. Active color: ${NEXT_COLOR}"

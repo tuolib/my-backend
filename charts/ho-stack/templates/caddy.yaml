@@ -1,4 +1,5 @@
 {{- if .Values.caddy.enabled }}
+{{- $siteAddress := .Values.caddy.host | default ":80" -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,7 +8,7 @@ metadata:
     {{- include "ho-stack.labels" . | nindent 4 }}
 data:
   Caddyfile: |
-    :80 {
+    {{ $siteAddress }} {
       encode gzip zstd
 
       @health path /healthz
@@ -44,6 +45,8 @@ spec:
           ports:
             - name: http
               containerPort: 80
+            - name: https
+              containerPort: 443
           volumeMounts:
             - name: caddyfile
               mountPath: /etc/caddy/Caddyfile
@@ -81,6 +84,12 @@ spec:
       targetPort: http
       {{- if and (eq .Values.caddy.service.type "NodePort") .Values.caddy.service.nodePort }}
       nodePort: {{ .Values.caddy.service.nodePort }}
+      {{- end }}
+    - name: https
+      port: {{ .Values.caddy.service.httpsPort | default 443 }}
+      targetPort: https
+      {{- if and (eq .Values.caddy.service.type "NodePort") .Values.caddy.service.httpsNodePort }}
+      nodePort: {{ .Values.caddy.service.httpsNodePort }}
       {{- end }}
   selector:
     {{- include "ho-stack.selectorLabels" . | nindent 4 }}

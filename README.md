@@ -96,6 +96,7 @@ bun run k8s:kind:down
 - `DEPLOY_PUBLIC_HEALTHCHECK_URL=https://api.finde345.site/healthz`
 - 当前模式不使用任何自定义 GitHub Secrets（包括 `KUBE_CONFIG_DATA`）
 - deploy 是否执行取决于 Runner 本机是否已有可用 kube context
+- 若日志出现 `No reachable Kubernetes cluster... deployment will be skipped`，表示这次并未实际部署到服务器
 
 > 注意：生产环境请把 `values-prod.yaml` 中数据库和 JWT 密码改为真实强密码，并建议改为外部 Secret 管理（如 External Secrets / Vault）。
 

@@ -56,3 +56,5 @@ caddy:
   host: api.finde345.site
   service:
     type: LoadBalancer
+    port: 80
+    httpsPort: 443

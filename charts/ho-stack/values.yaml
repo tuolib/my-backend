@@ -113,10 +113,13 @@ redis:
 caddy:
   enabled: true
   image: caddy:2.8-alpine
-  host: api.localtest.me
+  # 生产建议使用域名（例如 api.example.com）以启用 Caddy 自动 HTTPS。
+  # 本地/无证书场景可设为 :80，仅监听 HTTP。
+  host: :80
   service:
     type: LoadBalancer
     port: 80
+    httpsPort: 443
     nodePort: 30080
   resources:
     requests:

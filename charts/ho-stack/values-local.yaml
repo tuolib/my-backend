@@ -39,9 +39,10 @@ redis:
 
 caddy:
   # 本地开发通过 localhost:3000 访问，kind-config 将 hostPort:3000 映射到 NodePort:30080
-  # Caddyfile 使用 :80（无 host 过滤），无需域名即可访问
-  host: localhost
+  # 使用 :80（无 host 过滤、无 HTTPS 证书要求），无需域名即可访问
+  host: :80
   service:
     type: NodePort
     port: 80
+    httpsPort: 443
     nodePort: 30080

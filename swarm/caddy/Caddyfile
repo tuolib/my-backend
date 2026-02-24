@@ -1,4 +1,4 @@
-{$SWARM_DOMAIN:api.finde345.site} {
+{$SWARM_DOMAIN:api.find345.site} {
   encode gzip zstd
 
   @health path /healthz

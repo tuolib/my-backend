@@ -1,4 +1,4 @@
-import { db } from '@/db';
+import { dbRead, dbWrite } from '@/db';
 import { users } from '@/db/schema.ts';
 import { eq } from 'drizzle-orm';
 import type { CreateUserInput } from './user.schema.ts';
@@ -7,12 +7,12 @@ import * as bcrypt from 'bcrypt';
 export const UserService = {
   // 查：获取所有
   async findAll() {
-    return await db.select().from(users);
+    return await dbRead.select().from(users);
   },
 
   // 查：单个
   async findById(id: number) {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
+    const [user] = await dbRead.select().from(users).where(eq(users.id, id));
     return user;
   },
 
@@ -30,7 +30,7 @@ export const UserService = {
     };
 
     // 3. 插入数据库，并只返回安全字段 (移除 username)
-    const [newUser] = await db
+    const [newUser] = await dbWrite
       .insert(users)
       .values(newUserPayload)
       .returning({
@@ -43,13 +43,13 @@ export const UserService = {
 
   // 改
   async update(id: number, data: Partial<CreateUserInput>) {
-    const [updatedUser] = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    const [updatedUser] = await dbWrite.update(users).set(data).where(eq(users.id, id)).returning();
     return updatedUser;
   },
 
   // 删
   async delete(id: number) {
-    const [deletedUser] = await db.delete(users).where(eq(users.id, id)).returning();
+    const [deletedUser] = await dbWrite.delete(users).where(eq(users.id, id)).returning();
     return deletedUser;
   },
 };

@@ -1,0 +1,67 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "ho-stack.redis" . }}
+  labels:
+    {{- include "ho-stack.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "ho-stack.redis" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ho-stack.selectorLabels" . | nindent 6 }}
+      component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "ho-stack.selectorLabels" . | nindent 8 }}
+        component: redis
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          imagePullPolicy: IfNotPresent
+          args: ["--appendonly", "yes"]
+          ports:
+            - containerPort: {{ .Values.redis.port }}
+              name: redis
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.redis.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ho-stack.redis" . }}
+  labels:
+    {{- include "ho-stack.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: redis
+      port: {{ .Values.redis.port }}
+      targetPort: redis
+  selector:
+    {{- include "ho-stack.selectorLabels" . | nindent 4 }}
+    component: redis
+{{- end }}

@@ -1,7 +1,7 @@
 import { sign, verify } from 'hono/jwt';
 import { eq } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
-import { db } from '@/db';
+import { dbRead, dbWrite } from '@/db';
 import { users } from '@/db/schema.ts';
 import { redisIns } from '@/lib/redis.ts';
 import type { LoginInput } from './login.schema.ts';
@@ -26,7 +26,7 @@ export class LoginService {
    */
   async authenticate(input: LoginInput) {
     // ... (此方法不变)
-    const [user] = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+    const [user] = await dbRead.select().from(users).where(eq(users.email, input.email)).limit(1);
 
     if (!user) {
       throw new AuthenticationError('邮箱或密码错误');
@@ -49,7 +49,7 @@ export class LoginService {
       EX: REFRESH_TOKEN_EXPIRATION,
     });
 
-    await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
+    await dbWrite.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
 
     const accessToken = await sign(
       {

@@ -1,0 +1,52 @@
+image:
+  repository: ghcr.io/your-org/ho-api
+  pullPolicy: IfNotPresent
+
+api:
+  activeColor: blue
+  env:
+    JWT_SECRET: change-me-in-ci
+    DB_POOL_MAX: "30"
+  blue:
+    replicaCount: 4
+    image:
+      tag: stable
+  green:
+    replicaCount: 2
+    image:
+      tag: stable
+  hpa:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 60
+    targetCPUUtilizationPercentage: 60
+  pdb:
+    enabled: true
+    minAvailable: 3
+
+postgres:
+  password: change-me
+  replicationPassword: change-me
+  primary:
+    storage: 100Gi
+  replica:
+    enabled: true
+    replicaCount: 2
+    storage: 100Gi
+
+pgbouncer:
+  rw:
+    replicaCount: 3
+  ro:
+    replicaCount: 3
+  maxClientConn: 5000
+  defaultPoolSize: 500
+  reservePoolSize: 100
+
+redis:
+  storage: 20Gi
+
+caddy:
+  host: api.example.com
+  service:
+    type: LoadBalancer

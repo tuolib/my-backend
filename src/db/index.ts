@@ -1,33 +1,45 @@
-// 导入从 drizzle-orm/postgres-js
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
-// 导入 postgres.js
+import { sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import * as schema from './schema.ts';
 
-const databaseUrl = process.env.DATABASE_URL;
+const writeDatabaseUrlRaw = process.env.DATABASE_WRITE_URL || process.env.DATABASE_URL;
 
-if (!databaseUrl) {
-  throw new Error('DATABASE_URL is not set in environment variables');
+if (!writeDatabaseUrlRaw) {
+  throw new Error('DATABASE_WRITE_URL or DATABASE_URL is not set in environment variables');
 }
+const writeDatabaseUrl = writeDatabaseUrlRaw;
+const readDatabaseUrl = process.env.DATABASE_READ_URL || writeDatabaseUrl;
 
-// 1. 创建 postgres.js 客户端
-// postgres.js 内部会处理连接池，所以比 pg.Pool 更简单
-export const client = postgres(databaseUrl, { max: 20 });
+const poolMax = Number(process.env.DB_POOL_MAX || 20);
+const sharedDbUrl = writeDatabaseUrl === readDatabaseUrl;
 
-// 2. 初始化 Drizzle 实例
-// 注意：drizzle 函数的第一个参数现在是 postgres.js 的客户端
-export const db = drizzle(client, { schema });
+export const writeClient = postgres(writeDatabaseUrl, {
+  max: poolMax,
+  prepare: false,
+});
+export const readClient = sharedDbUrl
+  ? writeClient
+  : postgres(readDatabaseUrl, {
+      max: poolMax,
+      prepare: false,
+    });
 
-// 3. 封装迁移函数
-export const migrateDatabase = async () => {
-  console.log('⏳ 正在同步产线数据库表结构...');
-  try {
-    // migrate 函数的第一个参数也需要是 drizzle 实例
-    // await migrate(db, { migrationsFolder: 'drizzle' });
-    console.log('✅ 数据库同步成功！');
-  } catch (error) {
-    console.error('❌ 数据库同步失败:', error);
-    process.exit(1);
+export const dbWrite = drizzle(writeClient, { schema });
+export const dbRead = drizzle(readClient, { schema });
+
+// 兼容旧代码，默认使用写库连接
+export const db = dbWrite;
+export const client = writeClient;
+
+export const checkDatabaseReadiness = async () => {
+  await dbWrite.execute(sql`select 1`);
+  await dbRead.execute(sql`select 1`);
+};
+
+export const closeDbConnections = async () => {
+  await writeClient.end();
+  if (!sharedDbUrl) {
+    await readClient.end();
   }
 };

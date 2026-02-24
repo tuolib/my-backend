@@ -1,0 +1,136 @@
+{{- $full := include "ho-stack.fullname" . -}}
+{{- $apiBase := include "ho-stack.apiName" . -}}
+{{- $secretName := printf "%s-secrets" $full -}}
+{{- range $color := list "blue" "green" }}
+{{- $cfg := index $.Values.api $color -}}
+{{- if $cfg.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $apiBase }}-{{ $color }}
+  labels:
+    {{- include "ho-stack.labels" $ | nindent 4 }}
+    component: api
+    color: {{ $color }}
+spec:
+  replicas: {{ $cfg.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ho-stack.selectorLabels" $ | nindent 6 }}
+      component: api
+      color: {{ $color }}
+  template:
+    metadata:
+      labels:
+        {{- include "ho-stack.selectorLabels" $ | nindent 8 }}
+        component: api
+        color: {{ $color }}
+    spec:
+      containers:
+        - name: api
+          image: {{ $.Values.image.repository }}:{{ $cfg.image.tag }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ $.Values.api.containerPort }}
+              name: http
+          env:
+            - name: DATABASE_WRITE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: DATABASE_WRITE_URL
+            - name: DATABASE_READ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: DATABASE_READ_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: REDIS_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: JWT_SECRET
+            - name: DB_POOL_MAX
+              value: {{ $.Values.api.env.DB_POOL_MAX | quote }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml $.Values.api.resources | nindent 12 }}
+---
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $apiBase }}-active
+  labels:
+    {{- include "ho-stack.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    {{- include "ho-stack.selectorLabels" . | nindent 4 }}
+    component: api
+    color: {{ .Values.api.activeColor }}
+{{- if .Values.api.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $apiBase }}-pdb
+  labels:
+    {{- include "ho-stack.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.api.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "ho-stack.selectorLabels" . | nindent 6 }}
+      component: api
+{{- end }}
+{{- if .Values.api.hpa.enabled }}
+{{- range $color := list "blue" "green" }}
+{{- $cfg := index $.Values.api $color -}}
+{{- if $cfg.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $apiBase }}-{{ $color }}
+  labels:
+    {{- include "ho-stack.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $apiBase }}-{{ $color }}
+  minReplicas: {{ $.Values.api.hpa.minReplicas }}
+  maxReplicas: {{ $.Values.api.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $.Values.api.hpa.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}
+{{- end }}

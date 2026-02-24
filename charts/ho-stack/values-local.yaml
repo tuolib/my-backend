@@ -1,0 +1,41 @@
+image:
+  repository: ho-api
+
+api:
+  activeColor: blue
+  env:
+    JWT_SECRET: local-dev-secret
+    DB_POOL_MAX: "20"
+  blue:
+    replicaCount: 2
+    image:
+      tag: local
+  green:
+    replicaCount: 1
+    image:
+      tag: local
+  hpa:
+    enabled: false
+  pdb:
+    minAvailable: 1
+
+postgres:
+  password: password
+  replicationPassword: repl_password
+  replica:
+    replicaCount: 1
+
+pgbouncer:
+  rw:
+    replicaCount: 1
+  ro:
+    replicaCount: 1
+
+redis:
+  storage: 1Gi
+
+caddy:
+  host: api.localtest.me
+  service:
+    type: NodePort
+    nodePort: 30080

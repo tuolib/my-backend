@@ -1,0 +1,32 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ho-stack.fullname" . }}-postgres-init
+  labels:
+    {{- include "ho-stack.labels" . | nindent 4 }}
+data:
+  01-replication-user.sql: |
+    DO
+    $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ .Values.postgres.replicationUser }}') THEN
+        CREATE ROLE {{ .Values.postgres.replicationUser }} WITH REPLICATION LOGIN PASSWORD '{{ .Values.postgres.replicationPassword }}';
+      END IF;
+    END
+    $$;
+
+  02-enable-replication.sql: |
+    ALTER SYSTEM SET wal_level = 'replica';
+    ALTER SYSTEM SET max_wal_senders = '10';
+    ALTER SYSTEM SET max_replication_slots = '10';
+    ALTER SYSTEM SET hot_standby = 'on';
+
+  03-pg-hba.sh: |
+    #!/bin/sh
+    set -e
+    HBA_FILE="$PGDATA/pg_hba.conf"
+    if ! grep -q "host replication {{ .Values.postgres.replicationUser }} 0.0.0.0/0 md5" "$HBA_FILE"; then
+      echo "host replication {{ .Values.postgres.replicationUser }} 0.0.0.0/0 md5" >> "$HBA_FILE"
+    fi
+{{- end }}

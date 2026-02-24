@@ -1,0 +1,16 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ho-stack.postgresPrimary" . }}
+  labels:
+    {{- include "ho-stack.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.port }}
+      targetPort: postgres
+  selector:
+    {{- include "ho-stack.selectorLabels" . | nindent 4 }}
+    component: postgres-primary
+{{- end }}

@@ -1,0 +1,85 @@
+{{- if .Values.pgbouncer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ho-stack.pgbouncerRw" . }}
+  labels:
+    {{- include "ho-stack.labels" . | nindent 4 }}
+    component: pgbouncer-rw
+spec:
+  replicas: {{ .Values.pgbouncer.rw.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ho-stack.selectorLabels" . | nindent 6 }}
+      component: pgbouncer-rw
+  template:
+    metadata:
+      labels:
+        {{- include "ho-stack.selectorLabels" . | nindent 8 }}
+        component: pgbouncer-rw
+    spec:
+      containers:
+        - name: pgbouncer
+          image: {{ .Values.pgbouncer.image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: pgbouncer
+              containerPort: {{ .Values.pgbouncer.port }}
+          env:
+            - name: DB_HOST
+              value: {{ include "ho-stack.postgresPrimary" . }}
+            - name: DB_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ho-stack.fullname" . }}-secrets
+                  key: POSTGRES_DB
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ho-stack.fullname" . }}-secrets
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ho-stack.fullname" . }}-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POOL_MODE
+              value: transaction
+            - name: MAX_CLIENT_CONN
+              value: {{ .Values.pgbouncer.maxClientConn | quote }}
+            - name: DEFAULT_POOL_SIZE
+              value: {{ .Values.pgbouncer.defaultPoolSize | quote }}
+            - name: RESERVE_POOL_SIZE
+              value: {{ .Values.pgbouncer.reservePoolSize | quote }}
+            - name: AUTH_TYPE
+              value: md5
+          readinessProbe:
+            tcpSocket:
+              port: pgbouncer
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: pgbouncer
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.pgbouncer.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ho-stack.pgbouncerRw" . }}
+  labels:
+    {{- include "ho-stack.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: pgbouncer
+      port: {{ .Values.pgbouncer.port }}
+      targetPort: pgbouncer
+  selector:
+    {{- include "ho-stack.selectorLabels" . | nindent 4 }}
+    component: pgbouncer-rw
+{{- end }}

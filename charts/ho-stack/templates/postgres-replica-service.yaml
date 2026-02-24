@@ -1,0 +1,16 @@
+{{- if and .Values.postgres.enabled .Values.postgres.replica.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ho-stack.postgresReplica" . }}
+  labels:
+    {{- include "ho-stack.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: postgres
+      port: {{ .Values.postgres.port }}
+      targetPort: postgres
+  selector:
+    {{- include "ho-stack.selectorLabels" . | nindent 4 }}
+    component: postgres-replica
+{{- end }}

@@ -52,3 +52,10 @@ export const connectRedis = async () => {
     await redisIns.connect();
   }
 };
+
+export const checkRedisReadiness = async () => {
+  if (!redisIns.isOpen) {
+    throw new Error('Redis is not connected');
+  }
+  await redisIns.ping();
+};

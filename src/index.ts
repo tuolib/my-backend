@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { globalErrorHandler, ApiResult } from './utils/response.ts';
-import { connectRedis } from './lib/redis.ts';
+import { checkRedisReadiness, connectRedis } from './lib/redis.ts';
 import { loginController } from './modules/login/login.controller.ts';
 import { authMiddleware } from './middleware/auth.ts';
 import userApp from '@/modules/users/user.controller.ts';
+import { checkDatabaseReadiness } from '@/db';
 
 // --- 1. 应用初始化 ---
 const app = new Hono();
@@ -34,6 +35,22 @@ app.route('/api', protectedApi);
 
 // --- 6. 基础路由与 404 ---
 app.get('/', (c) => c.text('API is running!'));
+app.get('/healthz', (c) => c.json({ status: 'ok' }));
+app.get('/readyz', async (c) => {
+  try {
+    await checkDatabaseReadiness();
+    await checkRedisReadiness();
+    return c.json({ status: 'ready' });
+  } catch (error) {
+    return c.json(
+      {
+        status: 'not-ready',
+        reason: error instanceof Error ? error.message : 'unknown',
+      },
+      503
+    );
+  }
+});
 app.notFound((c) => ApiResult.error(c, '请求资源不存在', 404));
 
 // --- 2. 核心服务连接 ---
@@ -42,6 +59,7 @@ const initializeServices = async (runMigrations = true) => {
   // 添加一个参数
   try {
     await connectRedis();
+    await checkDatabaseReadiness();
     // if (runMigrations) { // 根据参数决定是否运行迁移
     //   await migrateDatabase();
     //   process.exit(0);

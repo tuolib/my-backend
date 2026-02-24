@@ -2,12 +2,12 @@ import { readdir } from 'fs/promises';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { sql } from 'drizzle-orm';
-import { db, client } from './index.ts';
+import { dbWrite, closeDbConnections } from './index.ts';
 
 const migrationsDir = path.join(process.cwd(), 'migrations');
 
 async function ensureMigrationsTable() {
-  await db.execute(sql`
+  await dbWrite.execute(sql`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version VARCHAR(255) PRIMARY KEY,
       applied_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -16,7 +16,7 @@ async function ensureMigrationsTable() {
 }
 
 async function getAppliedMigrations(): Promise<string[]> {
-  const res = await db.execute(sql`SELECT version FROM schema_migrations ORDER BY version`);
+  const res = await dbWrite.execute(sql`SELECT version FROM schema_migrations ORDER BY version`);
   const rows = Array.isArray(res)
     ? res
     : ((res as { rows?: Array<{ version: string }> }).rows ?? []);
@@ -25,7 +25,7 @@ async function getAppliedMigrations(): Promise<string[]> {
 
 async function applyMigration(version: string, migrationSql: string) {
   console.log(`Applying ${version}`);
-  await db.transaction(async (tx) => {
+  await dbWrite.transaction(async (tx) => {
     await tx.execute(sql.raw(migrationSql));
     await tx.execute(sql`INSERT INTO schema_migrations(version) VALUES(${version})`);
   });
@@ -33,7 +33,7 @@ async function applyMigration(version: string, migrationSql: string) {
 
 async function rollbackMigration(version: string, migrationSql: string) {
   console.log(`Rolling back ${version}`);
-  await db.transaction(async (tx) => {
+  await dbWrite.transaction(async (tx) => {
     await tx.execute(sql.raw(migrationSql));
     await tx.execute(sql`DELETE FROM schema_migrations WHERE version = ${version}`);
   });
@@ -63,6 +63,10 @@ async function migrateDown() {
   }
 
   const lastVersion = applied[applied.length - 1];
+  if (!lastVersion) {
+    console.log('No migrations to rollback');
+    return;
+  }
   const downFile = `${lastVersion}.down.sql`;
   const sql = await readFile(path.join(migrationsDir, downFile), 'utf-8');
 
@@ -81,7 +85,7 @@ async function main() {
       await migrateUp();
     }
   } finally {
-    await client.end();
+    await closeDbConnections();
   }
 }
 

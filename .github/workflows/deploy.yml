@@ -1,13 +1,25 @@
-name: Build And Deploy (Swarm)
+name: Build & Deploy
 
+# ─── 触发条件 ─────────────────────────────────────────────────────────────────
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: "Deploy mode (auto / single / multi)"
+        required: false
+        default: "auto"
+      image_tag:
+        description: "Image tag to deploy (leave blank = build from current commit)"
+        required: false
+        default: ""
 
+# 同分支只保留最后一次运行
 concurrency:
-  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -16,25 +28,23 @@ permissions:
 
 env:
   IMAGE_NAME: ho-api
+  STACK_NAME: ${{ vars.STACK_NAME || 'ho' }}
   DEPLOY_BRANCH: main
-  STACK_NAME: ho
-  SWARM_DOMAIN: api.finde345.site
-  DEPLOY_MODE: auto
-  POSTGRES_DB: mydb
-  POSTGRES_USER: user
-  POSTGRES_PASSWORD: password
-  POSTGRES_REPLICATION_PASSWORD: repl_password
-  JWT_SECRET: change-me-in-prod
-  API_REPLICAS_SINGLE: "2"
-  API_REPLICAS_MULTI: "10"
-  DB_POOL_MAX: "5"
-  DB_STRICT_READ_READINESS: "false"
-  LOG_LEVEL: info
-  PGBOUNCER_MAX_CLIENT_CONN: "5000"
-  PGBOUNCER_DEFAULT_POOL_SIZE: "500"
-  PGBOUNCER_RESERVE_POOL_SIZE: "100"
-  RUN_MIGRATION: "true"
+  SWARM_DOMAIN: ${{ vars.SWARM_DOMAIN || 'api.example.com' }}
+  DEPLOY_MODE: ${{ inputs.deploy_mode || vars.DEPLOY_MODE || 'auto' }}
+  API_REPLICAS_SINGLE: ${{ vars.API_REPLICAS_SINGLE || '2' }}
+  API_REPLICAS_MULTI: ${{ vars.API_REPLICAS_MULTI || '10' }}
+  DB_POOL_MAX: ${{ vars.DB_POOL_MAX || '5' }}
+  DB_STRICT_READ_READINESS: ${{ vars.DB_STRICT_READ_READINESS || 'false' }}
+  LOG_LEVEL: ${{ vars.LOG_LEVEL || 'info' }}
+  PGBOUNCER_MAX_CLIENT_CONN: ${{ vars.PGBOUNCER_MAX_CLIENT_CONN || '5000' }}
+  PGBOUNCER_DEFAULT_POOL_SIZE: ${{ vars.PGBOUNCER_DEFAULT_POOL_SIZE || '500' }}
+  PGBOUNCER_RESERVE_POOL_SIZE: ${{ vars.PGBOUNCER_RESERVE_POOL_SIZE || '100' }}
+  POSTGRES_DB: ${{ vars.POSTGRES_DB || 'mydb' }}
+  POSTGRES_USER: ${{ vars.POSTGRES_USER || 'user' }}
+  RUN_MIGRATION: ${{ vars.RUN_MIGRATION || 'true' }}
 
+# ─── Job 1: 类型检查 + 构建镜像 ───────────────────────────────────────────────
 jobs:
   build:
     name: Build image
@@ -43,6 +53,7 @@ jobs:
     outputs:
       image_repository: ${{ steps.vars.outputs.image_repository }}
       image_tag: ${{ steps.vars.outputs.image_tag }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,15 +72,25 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # 计算镜像坐标：owner 转小写，tag 取 commit SHA 前 12 位
       - name: Compute image coordinates
         id: vars
         run: |
           OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
-          echo "image_repository=ghcr.io/${OWNER_LC}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
-          echo "image_tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          REPO="${OWNER_LC}/${IMAGE_NAME}"
+          # workflow_dispatch 可传入已有 tag，否则用 SHA
+          CUSTOM_TAG="${{ inputs.image_tag }}"
+          if [[ -n "${CUSTOM_TAG}" ]]; then
+            TAG="${CUSTOM_TAG}"
+          else
+            TAG="${GITHUB_SHA::12}"
+          fi
+          echo "image_repository=ghcr.io/${REPO}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${TAG}"                  >> "$GITHUB_OUTPUT"
 
+      # 只在 main push / workflow_dispatch 时才推送镜像
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -80,26 +101,41 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ steps.vars.outputs.image_repository }}:${{ steps.vars.outputs.image_tag }}
             ${{ steps.vars.outputs.image_repository }}:latest
+          # 利用 GitHub Actions Cache 加速重复构建
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
+      - name: Build summary
+        run: |
+          echo "### Build Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image**: \`${{ steps.vars.outputs.image_repository }}:${{ steps.vars.outputs.image_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Pushed**: \`${{ github.event_name != 'pull_request' }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+# ─── Job 2: 部署到 Swarm（仅 main push / workflow_dispatch） ─────────────────
   deploy:
-    name: One-click deploy to Swarm
+    name: Deploy to Swarm
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request'
+    # 在 Swarm manager 节点上运行的 self-hosted runner
     runs-on: [self-hosted, linux, swarm-manager]
     timeout-minutes: 30
+    environment:
+      name: production
+      url: https://${{ vars.SWARM_DOMAIN || 'api.example.com' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ env.DEPLOY_BRANCH }}
-          fetch-depth: 0
+          fetch-depth: 1
           clean: true
 
-      - name: Pull latest code before deploy
+      - name: Pull latest code
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch origin "${DEPLOY_BRANCH}" --prune
@@ -107,50 +143,41 @@ jobs:
           git pull --ff-only origin "${DEPLOY_BRANCH}"
           echo "Deploy commit: $(git rev-parse --short HEAD)"
 
-      - name: Verify Docker Swarm manager
+      - name: Verify Swarm manager
         run: |
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "::error::docker not found on self-hosted runner"
-            exit 1
-          fi
+          command -v docker || { echo "::error::docker not found"; exit 1; }
+          [[ "$(docker info --format '{{.Swarm.LocalNodeState}}')" == "active" ]] \
+            || { echo "::error::Swarm not active"; exit 1; }
+          docker node ls >/dev/null || { echo "::error::Not a swarm manager"; exit 1; }
 
-          if [ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || true)" != "active" ]; then
-            echo "::error::Swarm is not active on this runner"
-            exit 1
-          fi
-
-          if ! docker node ls >/dev/null 2>&1; then
-            echo "::error::Runner must execute on a Swarm manager node"
-            exit 1
-          fi
-
-      - name: Login GHCR on manager
+      - name: Log in to GHCR on manager
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Render Swarm env file (hardcoded mode)
+      - name: Render .env.swarm
         run: |
-          cat > swarm/.env.swarm <<EOF_ENV
-          STACK_NAME=${STACK_NAME}
-          SWARM_DOMAIN=${SWARM_DOMAIN}
-          DEPLOY_MODE=${DEPLOY_MODE}
-          IMAGE_REPOSITORY=${{ needs.build.outputs.image_repository }}
-          IMAGE_TAG=${{ needs.build.outputs.image_tag }}
-          API_REPLICAS_SINGLE=${API_REPLICAS_SINGLE}
-          API_REPLICAS_MULTI=${API_REPLICAS_MULTI}
-          DB_POOL_MAX=${DB_POOL_MAX}
-          DB_STRICT_READ_READINESS=${DB_STRICT_READ_READINESS}
-          LOG_LEVEL=${LOG_LEVEL}
-          POSTGRES_DB=${POSTGRES_DB}
-          POSTGRES_USER=${POSTGRES_USER}
-          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-          POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD}
-          PGBOUNCER_MAX_CLIENT_CONN=${PGBOUNCER_MAX_CLIENT_CONN}
-          PGBOUNCER_DEFAULT_POOL_SIZE=${PGBOUNCER_DEFAULT_POOL_SIZE}
-          PGBOUNCER_RESERVE_POOL_SIZE=${PGBOUNCER_RESERVE_POOL_SIZE}
-          JWT_SECRET=${JWT_SECRET}
-          RUN_MIGRATION=${RUN_MIGRATION}
-          EOF_ENV
+          cat > swarm/.env.swarm <<EOF
+STACK_NAME=${STACK_NAME}
+SWARM_DOMAIN=${SWARM_DOMAIN}
+DEPLOY_MODE=${DEPLOY_MODE}
+IMAGE_REPOSITORY=${{ needs.build.outputs.image_repository }}
+IMAGE_TAG=${{ needs.build.outputs.image_tag }}
+API_REPLICAS_SINGLE=${API_REPLICAS_SINGLE}
+API_REPLICAS_MULTI=${API_REPLICAS_MULTI}
+DB_POOL_MAX=${DB_POOL_MAX}
+DB_STRICT_READ_READINESS=${DB_STRICT_READ_READINESS}
+LOG_LEVEL=${LOG_LEVEL}
+POSTGRES_DB=${POSTGRES_DB}
+POSTGRES_USER=${POSTGRES_USER}
+POSTGRES_PASSWORD=password
+POSTGRES_REPLICATION_PASSWORD=repl_password
+PGBOUNCER_MAX_CLIENT_CONN=${PGBOUNCER_MAX_CLIENT_CONN}
+PGBOUNCER_DEFAULT_POOL_SIZE=${PGBOUNCER_DEFAULT_POOL_SIZE}
+PGBOUNCER_RESERVE_POOL_SIZE=${PGBOUNCER_RESERVE_POOL_SIZE}
+JWT_SECRET=change-me-in-prod
+RUN_MIGRATION=${RUN_MIGRATION}
+EOF
 
       - name: Deploy stack
         run: bash scripts/swarm/deploy-stack.sh
@@ -158,13 +185,25 @@ jobs:
       - name: Public smoke test
         run: |
           URL="https://${SWARM_DOMAIN}/healthz"
+          echo "Smoke testing: ${URL}"
           for i in $(seq 1 30); do
-            if curl -fsS --max-time 5 "${URL}" >/tmp/swarm-smoke.out; then
-              echo "Swarm public smoke test passed: ${URL}"
+            if curl -fsS --max-time 5 "${URL}" >/tmp/smoke.out 2>&1; then
+              echo "✓ Smoke test passed"
               exit 0
             fi
+            echo "  attempt ${i}/30 failed, retrying in 5s..."
             sleep 5
           done
-
-          echo "::error::Swarm public smoke test failed: ${URL}"
+          echo "::error::Smoke test failed: ${URL}"
+          cat /tmp/smoke.out || true
           exit 1
+
+      - name: Deploy summary
+        if: always()
+        run: |
+          echo "### Deploy Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Stack**: \`${STACK_NAME}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image tag**: \`${{ needs.build.outputs.image_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Domain**: \`https://${SWARM_DOMAIN}\`" >> "$GITHUB_STEP_SUMMARY"
+          NODE_COUNT=$(docker node ls -q | wc -l | tr -d ' ' || echo "?")
+          echo "- **Swarm nodes**: \`${NODE_COUNT}\`" >> "$GITHUB_STEP_SUMMARY"

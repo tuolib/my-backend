@@ -17,6 +17,8 @@ env:
   DEPLOY_ACTIVE_REPLICAS: "4"
   DEPLOY_STANDBY_REPLICAS: "1"
   DEPLOY_RUN_MIGRATION: "true"
+  DEPLOY_REQUIRE_CLUSTER: "true"
+  DEPLOY_PUBLIC_HEALTHCHECK_URL: "https://api.finde345.site/healthz"
 
 jobs:
   build:
@@ -107,6 +109,10 @@ jobs:
             echo "Kubernetes cluster is reachable"
           else
             echo "reachable=false" >> "$GITHUB_OUTPUT"
+            if [ "${DEPLOY_REQUIRE_CLUSTER}" = "true" ]; then
+              echo "::error::No reachable Kubernetes cluster in this runner context."
+              exit 1
+            fi
             echo "::warning::No reachable Kubernetes cluster in this runner context; deployment will be skipped."
           fi
 
@@ -124,6 +130,44 @@ jobs:
           export RUN_MIGRATION="${DEPLOY_RUN_MIGRATION}"
           bash scripts/deploy/bluegreen-k8s.sh
 
-      - name: Skip deploy (cluster unreachable)
-        if: steps.k8s_check.outputs.reachable != 'true'
-        run: echo "Deployment skipped because no reachable Kubernetes cluster was found."
+      - name: Smoke test (cluster gateway)
+        if: steps.k8s_check.outputs.reachable == 'true'
+        run: |
+          CADDY_SVC="${DEPLOY_RELEASE}-ho-stack-caddy"
+          kubectl -n "${DEPLOY_NAMESPACE}" rollout status deployment/"${CADDY_SVC}" --timeout=180s
+
+          kubectl -n "${DEPLOY_NAMESPACE}" port-forward svc/"${CADDY_SVC}" 18080:80 >/tmp/port-forward.log 2>&1 &
+          PF_PID=$!
+          trap 'kill ${PF_PID} >/dev/null 2>&1 || true' EXIT
+          sleep 3
+
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18080/ >/tmp/smoke-cluster.out; then
+              echo "Cluster smoke test passed"
+              exit 0
+            fi
+            sleep 3
+          done
+
+          echo "::error::Cluster smoke test failed"
+          cat /tmp/port-forward.log || true
+          exit 1
+
+      - name: Smoke test (public domain)
+        if: steps.k8s_check.outputs.reachable == 'true'
+        run: |
+          if [ -z "${DEPLOY_PUBLIC_HEALTHCHECK_URL}" ]; then
+            echo "DEPLOY_PUBLIC_HEALTHCHECK_URL is empty, skip public smoke test"
+            exit 0
+          fi
+
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 "${DEPLOY_PUBLIC_HEALTHCHECK_URL}" >/tmp/smoke-public.out; then
+              echo "Public smoke test passed: ${DEPLOY_PUBLIC_HEALTHCHECK_URL}"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "::error::Public smoke test failed: ${DEPLOY_PUBLIC_HEALTHCHECK_URL}"
+          exit 1

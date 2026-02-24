@@ -80,6 +80,10 @@ bun run k8s:kind:down
    - 跑迁移 `bun run migrate`
    - 就绪后切换 Service selector
    - 老 color 缩容为 standby
+4. 发布后自动烟雾测试：
+   - 集群内网关探活（Caddy）
+   - 公网域名探活（`https://api.finde345.site/healthz`）
+   - 任一失败则工作流失败（避免“假成功”）
 
 ### 部署参数（已写死）
 - `NAMESPACE=ho`
@@ -88,6 +92,8 @@ bun run k8s:kind:down
 - `API_ACTIVE_REPLICAS=4`
 - `API_STANDBY_REPLICAS=1`
 - `RUN_MIGRATION=true`
+- `DEPLOY_REQUIRE_CLUSTER=true`（集群不可达直接失败）
+- `DEPLOY_PUBLIC_HEALTHCHECK_URL=https://api.finde345.site/healthz`
 - 仅当 Runner 没有预置 kubeconfig 时，才需要 `KUBE_CONFIG_DATA`（base64 kubeconfig）
 
 > 注意：生产环境请把 `values-prod.yaml` 中数据库和 JWT 密码改为真实强密码，并建议改为外部 Secret 管理（如 External Secrets / Vault）。

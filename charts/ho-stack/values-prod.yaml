@@ -53,6 +53,6 @@ redis:
   storage: 20Gi
 
 caddy:
-  host: api.example.com
+  host: api.finde345.site
   service:
     type: LoadBalancer

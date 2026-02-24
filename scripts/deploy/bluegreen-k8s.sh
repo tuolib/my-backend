@@ -10,12 +10,15 @@ IMAGE_TAG=${IMAGE_TAG:?IMAGE_TAG is required}
 API_ACTIVE_REPLICAS=${API_ACTIVE_REPLICAS:-4}
 API_STANDBY_REPLICAS=${API_STANDBY_REPLICAS:-1}
 RUN_MIGRATION=${RUN_MIGRATION:-true}
+LB_INGRESS_WAIT_SECONDS=${LB_INGRESS_WAIT_SECONDS:-300}
 
 SERVICE_NAME=${SERVICE_NAME:-${RELEASE}-ho-stack-api-active}
 BLUE_DEPLOYMENT=${BLUE_DEPLOYMENT:-${RELEASE}-ho-stack-api-blue}
 GREEN_DEPLOYMENT=${GREEN_DEPLOYMENT:-${RELEASE}-ho-stack-api-green}
 SECRET_NAME=${SECRET_NAME:-${RELEASE}-ho-stack-secrets}
 API_LABEL_SELECTOR=${API_LABEL_SELECTOR:-app.kubernetes.io/instance=${RELEASE},component=api}
+CADDY_DEPLOYMENT=${CADDY_DEPLOYMENT:-${RELEASE}-ho-stack-caddy}
+CADDY_SERVICE=${CADDY_SERVICE:-${RELEASE}-ho-stack-caddy}
 
 run_migration_job() {
   if [[ "${RUN_MIGRATION}" != "true" ]]; then
@@ -60,6 +63,8 @@ collect_api_diagnostics() {
   kubectl -n "${NAMESPACE}" get pods -l "${API_LABEL_SELECTOR}" -o wide || true
   kubectl -n "${NAMESPACE}" get svc "${SERVICE_NAME}" -o wide || true
   kubectl -n "${NAMESPACE}" get endpoints "${SERVICE_NAME}" -o wide || true
+  kubectl -n "${NAMESPACE}" get deploy "${CADDY_DEPLOYMENT}" -o wide || true
+  kubectl -n "${NAMESPACE}" get svc "${CADDY_SERVICE}" -o wide || true
 }
 
 assert_service_has_endpoints() {
@@ -72,6 +77,31 @@ assert_service_has_endpoints() {
     exit 1
   fi
   echo "Service ${svc_name} endpoints: ${endpoint_ips}"
+}
+
+assert_caddy_service_exposed() {
+  local svc_type
+  svc_type=$(kubectl -n "${NAMESPACE}" get svc "${CADDY_SERVICE}" -o jsonpath='{.spec.type}' 2>/dev/null || true)
+  if [[ "${svc_type}" != "LoadBalancer" ]]; then
+    echo "Caddy service type is ${svc_type:-unknown}, skip LoadBalancer ingress check"
+    return
+  fi
+
+  local elapsed=0
+  local ingress
+  while [[ ${elapsed} -lt ${LB_INGRESS_WAIT_SECONDS} ]]; do
+    ingress=$(kubectl -n "${NAMESPACE}" get svc "${CADDY_SERVICE}" -o jsonpath='{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+    if [[ -n "${ingress}" ]]; then
+      echo "Caddy LoadBalancer ingress: ${ingress}"
+      return
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+
+  echo "Caddy LoadBalancer ingress not assigned within ${LB_INGRESS_WAIT_SECONDS}s"
+  collect_api_diagnostics
+  exit 1
 }
 
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
@@ -88,7 +118,9 @@ if ! helm -n "${NAMESPACE}" status "${RELEASE}" >/dev/null 2>&1; then
 
   kubectl -n "${NAMESPACE}" rollout status deployment/"${BLUE_DEPLOYMENT}" --timeout=300s
   run_migration_job
-  kubectl -n "${NAMESPACE}" rollout status deployment/"${RELEASE}"-ho-stack-caddy --timeout=300s
+  kubectl -n "${NAMESPACE}" rollout status deployment/"${CADDY_DEPLOYMENT}" --timeout=300s
+  assert_service_has_endpoints "${SERVICE_NAME}"
+  assert_caddy_service_exposed
   echo "Initial install complete"
   exit 0
 fi
@@ -125,5 +157,7 @@ run_migration_job
 kubectl -n "${NAMESPACE}" patch svc "${SERVICE_NAME}" --type='json' -p="[{\"op\":\"replace\",\"path\":\"/spec/selector/color\",\"value\":\"${NEXT_COLOR}\"}]"
 kubectl -n "${NAMESPACE}" scale deployment "${OLD_DEPLOYMENT}" --replicas="${API_STANDBY_REPLICAS}"
 assert_service_has_endpoints "${SERVICE_NAME}"
+kubectl -n "${NAMESPACE}" rollout status deployment/"${CADDY_DEPLOYMENT}" --timeout=180s
+assert_caddy_service_exposed
 
 echo "Blue/green switch complete. Active color: ${NEXT_COLOR}"

@@ -16,6 +16,43 @@ BLUE_DEPLOYMENT=${BLUE_DEPLOYMENT:-${RELEASE}-ho-stack-api-blue}
 GREEN_DEPLOYMENT=${GREEN_DEPLOYMENT:-${RELEASE}-ho-stack-api-green}
 SECRET_NAME=${SECRET_NAME:-${RELEASE}-ho-stack-secrets}
 
+run_migration_job() {
+  if [[ "${RUN_MIGRATION}" != "true" ]]; then
+    echo "Skipping migration (RUN_MIGRATION=false)"
+    return
+  fi
+
+  SAFE_TAG=$(echo "${IMAGE_TAG}" | tr -c 'a-zA-Z0-9' '-' | cut -c1-30)
+  JOB_NAME="${RELEASE}-migrate-${SAFE_TAG}"
+  kubectl -n "${NAMESPACE}" delete job "${JOB_NAME}" --ignore-not-found=true
+
+  cat <<YAML | kubectl -n "${NAMESPACE}" apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${JOB_NAME}
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ${IMAGE_REPOSITORY}:${IMAGE_TAG}
+          command: ["bun", "run", "migrate"]
+          envFrom:
+            - secretRef:
+                name: ${SECRET_NAME}
+YAML
+
+  kubectl -n "${NAMESPACE}" wait --for=condition=complete --timeout=300s job/"${JOB_NAME}" || {
+    kubectl -n "${NAMESPACE}" logs job/"${JOB_NAME}" --tail=200 || true
+    echo "Migration failed"
+    exit 1
+  }
+}
+
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
 if ! helm -n "${NAMESPACE}" status "${RELEASE}" >/dev/null 2>&1; then
@@ -29,6 +66,7 @@ if ! helm -n "${NAMESPACE}" status "${RELEASE}" >/dev/null 2>&1; then
     --set api.activeColor=blue
 
   kubectl -n "${NAMESPACE}" rollout status deployment/"${BLUE_DEPLOYMENT}" --timeout=300s
+  run_migration_job
   kubectl -n "${NAMESPACE}" rollout status deployment/"${RELEASE}"-ho-stack-caddy --timeout=300s
   echo "Initial install complete"
   exit 0
@@ -61,36 +99,7 @@ kubectl -n "${NAMESPACE}" set image deployment/"${NEXT_DEPLOYMENT}" api="${IMAGE
 kubectl -n "${NAMESPACE}" scale deployment "${NEXT_DEPLOYMENT}" --replicas="${API_ACTIVE_REPLICAS}"
 kubectl -n "${NAMESPACE}" rollout status deployment/"${NEXT_DEPLOYMENT}" --timeout=300s
 
-if [[ "${RUN_MIGRATION}" == "true" ]]; then
-  JOB_NAME="${RELEASE}-migrate-${IMAGE_TAG//[^a-zA-Z0-9]/-}"
-  kubectl -n "${NAMESPACE}" delete job "${JOB_NAME}" --ignore-not-found=true
-
-  cat <<YAML | kubectl -n "${NAMESPACE}" apply -f -
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: ${JOB_NAME}
-spec:
-  backoffLimit: 1
-  ttlSecondsAfterFinished: 600
-  template:
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: migrate
-          image: ${IMAGE_REPOSITORY}:${IMAGE_TAG}
-          command: ["bun", "run", "migrate"]
-          envFrom:
-            - secretRef:
-                name: ${SECRET_NAME}
-YAML
-
-  kubectl -n "${NAMESPACE}" wait --for=condition=complete --timeout=300s job/"${JOB_NAME}" || {
-    kubectl -n "${NAMESPACE}" logs job/"${JOB_NAME}" --tail=200 || true
-    echo "Migration failed"
-    exit 1
-  }
-fi
+run_migration_job
 
 kubectl -n "${NAMESPACE}" patch svc "${SERVICE_NAME}" --type='json' -p="[{\"op\":\"replace\",\"path\":\"/spec/selector/color\",\"value\":\"${NEXT_COLOR}\"}]"
 kubectl -n "${NAMESPACE}" scale deployment "${OLD_DEPLOYMENT}" --replicas="${API_STANDBY_REPLICAS}"

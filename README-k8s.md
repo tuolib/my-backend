@@ -52,6 +52,7 @@ bun run k8s:kind:down
 
 ## 3. 架构要点
 
+- 同一套 Helm Chart（`charts/ho-stack`）用于本地与生产，只通过 `values-local.yaml` / `values-prod.yaml` 做环境差异化。
 - API：`api-blue` / `api-green` 双 Deployment。
 - 切流：`Service ...-api-active` 的 selector `color=blue|green`。
 - PostgreSQL：`primary`（写） + `replica`（读）。
@@ -71,21 +72,23 @@ bun run k8s:kind:down
 工作流：`.github/workflows/deploy.yml`
 
 流程：
-1. Build 镜像并推送 GHCR。
-2. 执行 `scripts/deploy/bluegreen-k8s.sh`：
+1. `push` 任意分支：自动 `bun install` + `tsc --noEmit` + Docker Build（验证可构建）。
+2. `push` 到 `main`：构建并推送镜像到 GHCR（`ghcr.io/<owner>/ho-api:<git-sha12>` + `latest`）。
+3. 自动执行 `scripts/deploy/bluegreen-k8s.sh`（部署参数已在工作流写死）：
    - 判定当前 active color
    - 部署闲置 color 新版本
    - 跑迁移 `bun run migrate`
    - 就绪后切换 Service selector
    - 老 color 缩容为 standby
 
-### 必需 Secrets
-- `KUBE_CONFIG_DATA`：base64 编码 kubeconfig
-- `K8S_NAMESPACE`：默认 `ho`
-- `K8S_RELEASE_NAME`：默认 `ho`
-- `K8S_VALUES_FILE`：默认 `./charts/ho-stack/values-prod.yaml`
-- `K8S_API_ACTIVE_REPLICAS`：默认 `4`
-- `K8S_API_STANDBY_REPLICAS`：默认 `1`
+### 部署参数（已写死）
+- `NAMESPACE=ho`
+- `RELEASE=ho`
+- `VALUES_FILE=./charts/ho-stack/values-prod.yaml`
+- `API_ACTIVE_REPLICAS=4`
+- `API_STANDBY_REPLICAS=1`
+- `RUN_MIGRATION=true`
+- 仅当 Runner 没有预置 kubeconfig 时，才需要 `KUBE_CONFIG_DATA`（base64 kubeconfig）
 
 > 注意：生产环境请把 `values-prod.yaml` 中数据库和 JWT 密码改为真实强密码，并建议改为外部 Secret 管理（如 External Secrets / Vault）。
 

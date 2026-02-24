@@ -1,90 +1,109 @@
-name: Deploy to Server
+name: Build And Deploy (K8s)
+
 on:
   push:
-    branches: [ main ]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ho-api
+  DEPLOY_NAMESPACE: ho
+  DEPLOY_RELEASE: ho
+  DEPLOY_VALUES_FILE: ./charts/ho-stack/values-prod.yaml
+  DEPLOY_ACTIVE_REPLICAS: "4"
+  DEPLOY_STANDBY_REPLICAS: "1"
+  DEPLOY_RUN_MIGRATION: "true"
+
 jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    outputs:
+      image_repository: ${{ steps.vars.outputs.image_repository }}
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install deps
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bunx tsc --noEmit
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image coordinates
+        id: vars
+        run: |
+          OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "image_repository=ghcr.io/${OWNER_LC}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ steps.vars.outputs.image_repository }}:${{ steps.vars.outputs.image_tag }}
+            ${{ steps.vars.outputs.image_repository }}:latest
+
   deploy:
+    name: Blue/Green deploy to Kubernetes
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@master
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
         with:
-          host: ${{ secrets.SERVER_IP }}
-          username: root
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            cd /root/my-app
-            
-            # 1. 更新代码
-            git pull origin main
-            
-            # 2. 备份
-            mkdir -p backups
-            docker exec postgres-db pg_dump -U user mydb > ./backups/backup_$(date +%Y%m%d_%H%M%S).sql || echo "Backup skipped"
-            find ./backups -name "*.sql" -mtime +7 -delete
-            
-            # 3. 判断当前颜色并选择下一颜色
-            BLUE_RUNNING=false
-            GREEN_RUNNING=false
-            if docker compose ps --status running --services | grep -q "^api-blue$"; then BLUE_RUNNING=true; fi
-            if docker compose ps --status running --services | grep -q "^api-green$"; then GREEN_RUNNING=true; fi
+          version: v1.30.0
 
-            if [ "$BLUE_RUNNING" = true ] && [ "$GREEN_RUNNING" = true ]; then
-              echo "⚠ 同时存在两个实例，自动清理 green。"
-              docker compose stop api-green
-              GREEN_RUNNING=false
-            fi
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.4
 
-            if [ "$BLUE_RUNNING" = true ]; then
-              CURRENT_SERVICE=api-blue
-              NEXT_SERVICE=api-green
-            elif [ "$GREEN_RUNNING" = true ]; then
-              CURRENT_SERVICE=api-green
-              NEXT_SERVICE=api-blue
-            else
-              CURRENT_SERVICE=""
-              NEXT_SERVICE=api-blue
-            fi
+      - name: Write kubeconfig
+        if: ${{ secrets.KUBE_CONFIG_DATA != '' }}
+        env:
+          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "$KUBE_CONFIG_DATA" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
 
-            echo "Current service: ${CURRENT_SERVICE:-none}, next service: $NEXT_SERVICE"
-            
-            # 4. 基础依赖服务先启动
-            docker compose up -d db redis caddy
-
-            # 5. 构建下一颜色镜像
-            docker compose build "$NEXT_SERVICE"
-            
-            # 6. 运行迁移（使用下一颜色镜像）
-            docker compose run --rm "$NEXT_SERVICE" bun run migrate
-            # 回滚：docker compose run --rm "$NEXT_SERVICE" bun run migrate:down
-            
-            # 7. 启动下一颜色实例
-            docker compose up -d --no-deps "$NEXT_SERVICE"
-
-            # 8. 健康检查（最多等待 120 秒）
-            NEXT_CONTAINER_ID=$(docker compose ps -q "$NEXT_SERVICE")
-            for i in $(seq 1 24); do
-              STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$NEXT_CONTAINER_ID")
-              if [ "$STATUS" = "healthy" ] || [ "$STATUS" = "running" ]; then
-                echo "✅ $NEXT_SERVICE is healthy."
-                break
-              fi
-
-              if [ "$i" -eq 24 ]; then
-                echo "❌ $NEXT_SERVICE health check timeout, rollback."
-                docker compose stop "$NEXT_SERVICE" || true
-                exit 1
-              fi
-
-              sleep 5
-            done
-
-            # 9. 下线旧颜色实例
-            if [ -n "$CURRENT_SERVICE" ]; then
-              docker compose stop "$CURRENT_SERVICE"
-            fi
-
-            # 10. 清理孤儿容器
-            docker compose up -d --remove-orphans
-            
-            echo "✅ Blue-green deployment successful. Active: $NEXT_SERVICE"
+      - name: Deploy with blue/green script
+        env:
+          IMAGE_REPOSITORY: ${{ needs.build.outputs.image_repository }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+        run: |
+          export NAMESPACE="${DEPLOY_NAMESPACE}"
+          export RELEASE="${DEPLOY_RELEASE}"
+          export VALUES_FILE="${DEPLOY_VALUES_FILE}"
+          export API_ACTIVE_REPLICAS="${DEPLOY_ACTIVE_REPLICAS}"
+          export API_STANDBY_REPLICAS="${DEPLOY_STANDBY_REPLICAS}"
+          export RUN_MIGRATION="${DEPLOY_RUN_MIGRATION}"
+          bash scripts/deploy/bluegreen-k8s.sh

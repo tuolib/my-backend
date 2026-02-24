@@ -14,9 +14,9 @@ services:
       - caddy_data:/data
     restart: unless-stopped
 
-  api:
+  api-blue:
     build: .
-    container_name: api-service
+    container_name: api-blue-service
     networks:
       - app-network
     environment:
@@ -25,8 +25,36 @@ services:
       - JWT_SECRET=super_secret_123
     labels:
       caddy: api.find345.site
-      # 这里直接写 3000，不要带服务名，caddy-docker-proxy 会自动处理
       caddy.reverse_proxy: "{{upstreams 3000}}"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+    restart: always
+    depends_on:
+      - redis
+      - db
+
+  api-green:
+    build: .
+    container_name: api-green-service
+    networks:
+      - app-network
+    environment:
+      - DATABASE_URL=postgres://user:password@db:5432/mydb
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=super_secret_123
+    labels:
+      caddy: api.find345.site
+      caddy.reverse_proxy: "{{upstreams 3000}}"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
     restart: always
     depends_on:
       - redis
@@ -52,14 +80,13 @@ services:
     container_name: redis-cache
     networks:
       - app-network
-    # 除非你要从本地电脑连 Redis，否则不需要 ports
     volumes:
       - redis_data:/data
     restart: always
 
 networks:
   app-network:
-    name: app-network # 显式命名
+    name: app-network
 
 volumes:
   caddy_data:

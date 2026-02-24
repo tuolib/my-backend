@@ -30,7 +30,7 @@ env:
   IMAGE_NAME: ho-api
   STACK_NAME: ${{ vars.STACK_NAME || 'ho' }}
   DEPLOY_BRANCH: main
-  SWARM_DOMAIN: ${{ vars.SWARM_DOMAIN || 'api.example.com' }}
+  SWARM_DOMAIN: ${{ vars.SWARM_DOMAIN || 'api.find345.site' }}
   DEPLOY_MODE: ${{ inputs.deploy_mode || vars.DEPLOY_MODE || 'auto' }}
   API_REPLICAS_SINGLE: ${{ vars.API_REPLICAS_SINGLE || '2' }}
   API_REPLICAS_MULTI: ${{ vars.API_REPLICAS_MULTI || '10' }}
@@ -125,7 +125,7 @@ jobs:
     timeout-minutes: 30
     environment:
       name: production
-      url: https://${{ vars.SWARM_DOMAIN || 'api.example.com' }}
+      url: https://${{ vars.SWARM_DOMAIN || 'api.find345.site' }}
 
     steps:
       - name: Checkout

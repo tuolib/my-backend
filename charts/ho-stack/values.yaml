@@ -79,8 +79,8 @@ postgres:
 
 pgbouncer:
   enabled: true
-  image: edoburu/pgbouncer:1.23.1
-  port: 6432
+  image: edoburu/pgbouncer:latest
+  port: 5432
   maxClientConn: 2000
   defaultPoolSize: 200
   reservePoolSize: 50

@@ -5,7 +5,10 @@ api:
   activeColor: blue
   env:
     JWT_SECRET: local-dev-secret
-    DB_POOL_MAX: "20"
+    # 与生产保持一致：PgBouncer 负责连接池，应用层每 Pod 只需少量连接
+    DB_POOL_MAX: "5"
+    NODE_ENV: "development"
+    LOG_LEVEL: "debug"
   blue:
     replicaCount: 2
     image:
@@ -35,7 +38,10 @@ redis:
   storage: 1Gi
 
 caddy:
-  host: api.localtest.me
+  # 本地开发通过 localhost:3000 访问，kind-config 将 hostPort:3000 映射到 NodePort:30080
+  # Caddyfile 使用 :80（无 host 过滤），无需域名即可访问
+  host: localhost
   service:
     type: NodePort
+    port: 80
     nodePort: 30080

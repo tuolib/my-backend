@@ -30,8 +30,9 @@ jobs:
             if docker compose ps --status running --services | grep -q "^api-green$"; then GREEN_RUNNING=true; fi
 
             if [ "$BLUE_RUNNING" = true ] && [ "$GREEN_RUNNING" = true ]; then
-              echo "❌ 检测到 api-blue 和 api-green 同时运行，终止部署避免流量混乱。"
-              exit 1
+              echo "⚠ 同时存在两个实例，自动清理 green。"
+              docker compose stop api-green
+              GREEN_RUNNING=false
             fi
 
             if [ "$BLUE_RUNNING" = true ]; then

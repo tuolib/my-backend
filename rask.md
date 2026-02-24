@@ -70,5 +70,8 @@ Secrets 先不在 GitHub Repository Settings中设置，放在脚本中写死先
 ./config.sh --url https://github.com/   --token  --name "swarm-manager" --labels "self-hosted,linux,swarm-manager"  --unattended
 
 
+docker swarm init
+
+
 
 

@@ -225,10 +225,10 @@ volumes:
 
 configs:
   caddyfile:
-    file: ./swarm/caddy/Caddyfile
+    file: ./caddy/Caddyfile
   haproxy_ro_single_cfg:
-    file: ./swarm/haproxy/haproxy-ro-single.cfg
+    file: ./haproxy/haproxy-ro-single.cfg
   postgres_primary_init:
-    file: ./sim/postgres/primary-init.sh
+    file: ../sim/postgres/primary-init.sh
   postgres_replica_setup:
-    file: ./sim/postgres/replica-setup.sh
+    file: ../sim/postgres/replica-setup.sh

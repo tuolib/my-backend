@@ -1,0 +1,190 @@
+name: my-backend-sim
+
+# 本地生产模拟环境：2 API + PG 主从复制 + PgBouncer 读写分离 + Redis + Caddy
+# 启动：docker compose -f docker-compose.sim.yml up --build -d
+# 迁移：docker compose -f docker-compose.sim.yml run --rm api-1 bun run migrate
+# 停止：docker compose -f docker-compose.sim.yml down
+# 清除：docker compose -f docker-compose.sim.yml down -v
+
+services:
+
+  # ─── 入口网关 ───────────────────────────────────────────────────────
+  caddy:
+    image: caddy:2.8-alpine
+    ports:
+      - "3000:80"
+    volumes:
+      - ./sim/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api-1:
+        condition: service_healthy
+      api-2:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── API 实例（模拟多副本） ──────────────────────────────────────────
+  api-1:
+    build: .
+    environment:
+      DATABASE_WRITE_URL: postgres://user:password@pgbouncer-rw:5432/mydb
+      DATABASE_READ_URL: postgres://user:password@pgbouncer-ro:5432/mydb
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: sim-local-secret-do-not-use-in-real-prod
+      DB_POOL_MAX: "5"
+      RATE_LIMIT_ENABLED: "false"
+    depends_on:
+      pgbouncer-rw:
+        condition: service_healthy
+      pgbouncer-ro:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  api-2:
+    build: .
+    environment:
+      DATABASE_WRITE_URL: postgres://user:password@pgbouncer-rw:5432/mydb
+      DATABASE_READ_URL: postgres://user:password@pgbouncer-ro:5432/mydb
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: sim-local-secret-do-not-use-in-real-prod
+      DB_POOL_MAX: "5"
+      RATE_LIMIT_ENABLED: "false"
+    depends_on:
+      pgbouncer-rw:
+        condition: service_healthy
+      pgbouncer-ro:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # ─── PgBouncer 连接池（读写分离） ────────────────────────────────────
+  pgbouncer-rw:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DB_HOST: postgres-primary
+      DB_PORT: "5432"
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_NAME: mydb
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      AUTH_TYPE: md5
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432 2>/dev/null && echo ok || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  pgbouncer-ro:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DB_HOST: postgres-replica
+      DB_PORT: "5432"
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_NAME: mydb
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      AUTH_TYPE: md5
+    depends_on:
+      postgres-replica:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432 2>/dev/null && echo ok || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ─── PostgreSQL 主库 ─────────────────────────────────────────────────
+  postgres-primary:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydb
+      REPLICATION_PASSWORD: repl_password
+      # PG16 默认 scram-sha-256，pgbouncer 旧版不兼容，改为 md5
+      POSTGRES_HOST_AUTH_METHOD: md5
+      POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=md5"
+    volumes:
+      - ./sim/postgres/primary-init.sh:/docker-entrypoint-initdb.d/init-replication.sh:ro
+      - postgres_primary_data:/var/lib/postgresql/data
+    # 开启 WAL 流复制所需参数
+    command: >
+      postgres
+      -c wal_level=replica
+      -c max_wal_senders=5
+      -c wal_keep_size=64MB
+      -c hot_standby=on
+      -c password_encryption=md5
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d mydb"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  # ─── PostgreSQL 从库（流复制） ────────────────────────────────────────
+  postgres-replica:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydb
+      PGDATA: /var/lib/postgresql/data
+      PRIMARY_HOST: postgres-primary
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: repl_password
+    volumes:
+      - ./sim/postgres/replica-setup.sh:/replica-setup.sh:ro
+      - postgres_replica_data:/var/lib/postgresql/data
+    entrypoint: ["bash", "/replica-setup.sh"]
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d mydb"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  # ─── Redis ──────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_sim_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_primary_data:
+  postgres_replica_data:
+  redis_sim_data:

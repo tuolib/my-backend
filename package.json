@@ -15,7 +15,11 @@
     "db:generate": "bun drizzle-kit generate",
     "db:migrate": "bun run src/index.ts --migrate-only",
     "migrate": "bun run src/db/migrate.ts",
-    "migrate:down": "bun run src/db/migrate.ts --down"
+    "migrate:down": "bun run src/db/migrate.ts --down",
+    "sim:up": "docker compose -f docker-compose.sim.yml up --build -d",
+    "sim:migrate": "docker compose -f docker-compose.sim.yml run --rm api-1 bun run migrate",
+    "sim:down": "docker compose -f docker-compose.sim.yml down",
+    "sim:clean": "docker compose -f docker-compose.sim.yml down -v"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.6",

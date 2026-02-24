@@ -13,10 +13,9 @@ interface RateLimitOptions {
 }
 
 const isRateLimitEnabled = (): boolean => {
-  return false;
-  // const raw = 'false';
-  // if (raw == null) return true;
-  // return !['0', 'false', 'off', 'no'].includes(raw.trim().toLowerCase());
+  const raw = process.env.RATE_LIMIT_ENABLED;
+  if (raw == null) return false;
+  return !['0', 'false', 'off', 'no'].includes(raw.trim().toLowerCase());
 };
 
 /**

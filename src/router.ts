@@ -3,6 +3,8 @@ import { authMiddleware } from '@/middleware/auth.ts';
 import { requestIdMiddleware } from '@/middleware/request-id.ts';
 import { loginRoute } from '@/modules/login/login.route.ts';
 import userRoute from '@/modules/users/user.route.ts';
+import { menuRoute } from '@/modules/menu/menu.route.ts';
+import { orderRoute } from '@/modules/orders/order.route.ts';
 
 /**
  * 构建完整路由树。
@@ -10,6 +12,8 @@ import userRoute from '@/modules/users/user.route.ts';
  * 结构：
  *   /api/v1/account/*  — 公开路由（登录、注册、刷新 Token）
  *   /api/v1/users/*    — 受保护路由（需要 JWT + Redis session 认证）
+ *   /api/v1/menu/*     — 受保护路由（饭店 + 菜单管理）
+ *   /api/v1/orders/*   — 受保护路由（下单、付款、取消、查询）
  *
  * 版本化原则：
  *   /v1 前缀允许未来平滑引入 /v2 路由，新旧版本共存，客户端按需迁移。
@@ -28,6 +32,8 @@ export const buildRouter = (): Hono => {
   const protectedApi = new Hono();
   protectedApi.use('*', authMiddleware);
   protectedApi.route('/users', userRoute);
+  protectedApi.route('/menu', menuRoute);
+  protectedApi.route('/orders', orderRoute);
 
   // 统一挂载到 /api/v1
   router.route('/api/v1', publicApi);

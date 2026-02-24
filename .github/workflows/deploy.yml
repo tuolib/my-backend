@@ -22,7 +22,7 @@ jobs:
             mkdir -p backups
             docker exec postgres-db pg_dump -U user mydb > ./backups/backup_$(date +%Y%m%d_%H%M%S).sql || echo "Backup skipped"
             find ./backups -name "*.sql" -mtime +7 -delete
-            docker compose stop
+            
             # 3. 判断当前颜色并选择下一颜色
             BLUE_RUNNING=false
             GREEN_RUNNING=false

@@ -46,7 +46,7 @@ jobs:
             fi
 
             echo "Current service: ${CURRENT_SERVICE:-none}, next service: $NEXT_SERVICE"
-
+            docker compose -f docker-compose.dev.yml stop
             # 4. 基础依赖服务先启动
             docker compose up -d db redis caddy
 

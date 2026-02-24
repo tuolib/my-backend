@@ -86,14 +86,18 @@ jobs:
         with:
           version: v3.15.4
 
-      - name: Write kubeconfig
-        if: ${{ secrets.KUBE_CONFIG_DATA != '' }}
+      - name: Write kubeconfig (optional)
         env:
           KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
         run: |
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG_DATA" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
+          if [ -n "${KUBE_CONFIG_DATA:-}" ]; then
+            mkdir -p "$HOME/.kube"
+            echo "$KUBE_CONFIG_DATA" | base64 -d > "$HOME/.kube/config"
+            chmod 600 "$HOME/.kube/config"
+            echo "kubeconfig loaded from KUBE_CONFIG_DATA"
+          else
+            echo "KUBE_CONFIG_DATA not set, use runner default kubeconfig if present"
+          fi
 
       - name: Deploy with blue/green script
         env:

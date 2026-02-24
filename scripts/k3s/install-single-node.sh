@@ -61,3 +61,4 @@ kubectl get pods -A
 echo ""
 echo "Next step:"
 echo "API_SERVER=https://<YOUR_SERVER_PUBLIC_IP>:6443 sudo bash scripts/k3s/export-kubeconfig-base64.sh"
+

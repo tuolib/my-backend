@@ -104,6 +104,22 @@ bash scripts/swarm/deploy-stack.sh
 使用前只需要做一件事：
 - 在 Swarm manager 机器上安装 GitHub self-hosted runner，并加标签：`swarm-manager`
 
+可以直接用一键脚本：
+
+```bash
+GITHUB_REPOSITORY=<owner>/<repo> \
+GH_TOKEN=<github_pat_or_fine_grained_token> \
+bash scripts/github/setup-self-hosted-runner.sh
+```
+
+如果你已拿到 runner registration token，也可以：
+
+```bash
+GITHUB_REPOSITORY=<owner>/<repo> \
+RUNNER_TOKEN=<registration_token> \
+bash scripts/github/setup-self-hosted-runner.sh
+```
+
 Runner 准备好后，push 到 `main` 即可自动发布。
 
 ## 7. 验证

@@ -79,6 +79,27 @@ export API_REPLICAS
 
 echo "Deploying stack ${STACK_NAME} with image ${IMAGE_REPOSITORY}:${IMAGE_TAG}"
 echo "Swarm nodes: ${NODE_COUNT}, deploy mode: ${SELECTED_MODE}, stack file: ${STACK_FILE}, api replicas: ${API_REPLICAS}"
+
+# Docker Swarm configs are immutable — content changes require new names.
+# Hash each config file so changed content gets a new config name automatically.
+config_hash() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -c1-12
+  else
+    shasum -a 256 "$1" | cut -c1-12
+  fi
+}
+
+export CADDYFILE_HASH=$(config_hash "swarm/caddy/Caddyfile")
+export POSTGRES_PRIMARY_INIT_HASH=$(config_hash "sim/postgres/primary-init.sh")
+export POSTGRES_REPLICA_SETUP_HASH=$(config_hash "sim/postgres/replica-setup.sh")
+if [[ "${SELECTED_MODE}" == "single" ]]; then
+  export HAPROXY_RO_SINGLE_CFG_HASH=$(config_hash "swarm/haproxy/haproxy-ro-single.cfg")
+else
+  export HAPROXY_RO_CFG_HASH=$(config_hash "swarm/haproxy/haproxy-ro.cfg")
+fi
+echo "Config hashes: caddy=${CADDYFILE_HASH} pg-init=${POSTGRES_PRIMARY_INIT_HASH} pg-replica=${POSTGRES_REPLICA_SETUP_HASH}"
+
 docker stack deploy -c "${STACK_FILE}" --with-registry-auth "${STACK_NAME}"
 
 wait_service() {
@@ -129,6 +150,26 @@ if [[ "${RUN_MIGRATION}" == "true" ]]; then
     -e DB_STRICT_READ_READINESS="${DB_STRICT_READ_READINESS:-false}" \
     "${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
     bun run migrate
+fi
+
+# Clean up orphaned versioned configs from previous deployments
+cleanup_old_configs() {
+  local prefix="$1" current_name="$2"
+  docker config ls --format '{{.Name}}' 2>/dev/null | while read -r name; do
+    if [[ "${name}" == ${prefix}-* && "${name}" != "${current_name}" ]]; then
+      echo "Removing old config: ${name}"
+      docker config rm "${name}" 2>/dev/null || true
+    fi
+  done
+}
+
+cleanup_old_configs "caddyfile" "caddyfile-${CADDYFILE_HASH}"
+cleanup_old_configs "postgres_primary_init" "postgres_primary_init-${POSTGRES_PRIMARY_INIT_HASH}"
+cleanup_old_configs "postgres_replica_setup" "postgres_replica_setup-${POSTGRES_REPLICA_SETUP_HASH}"
+if [[ "${SELECTED_MODE}" == "single" ]]; then
+  cleanup_old_configs "haproxy_ro_single_cfg" "haproxy_ro_single_cfg-${HAPROXY_RO_SINGLE_CFG_HASH}"
+else
+  cleanup_old_configs "haproxy_ro_cfg" "haproxy_ro_cfg-${HAPROXY_RO_CFG_HASH}"
 fi
 
 echo ""

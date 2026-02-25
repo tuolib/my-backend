@@ -416,10 +416,14 @@ volumes:
 
 configs:
   caddyfile:
+    name: caddyfile-${CADDYFILE_HASH}
     file: ./caddy/Caddyfile
   haproxy_ro_cfg:
+    name: haproxy_ro_cfg-${HAPROXY_RO_CFG_HASH}
     file: ./haproxy/haproxy-ro.cfg
   postgres_primary_init:
+    name: postgres_primary_init-${POSTGRES_PRIMARY_INIT_HASH}
     file: ../sim/postgres/primary-init.sh
   postgres_replica_setup:
+    name: postgres_replica_setup-${POSTGRES_REPLICA_SETUP_HASH}
     file: ../sim/postgres/replica-setup.sh

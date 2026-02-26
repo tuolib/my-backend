@@ -113,3 +113,6 @@ To add a worker to this swarm, run the following command:
 
 
 
+
+docker info | grep -E 'Swarm|NodeID'
+docker context ls

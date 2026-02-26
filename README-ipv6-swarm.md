@@ -52,7 +52,7 @@ docker swarm join --token SWMTKN-xxx 192.168.1.10:2377
 ## 四、打标签（node-1 上执行）
 
 ```bash
-API_NODES="node-1,node-2,node-3" DB_NODES="node-4,node-5" bash scripts/swarm/label-nodes.sh
+API_NODES="088a6eqp7eye3nykt6f1ijdv5,node-2,node-3" DB_NODES="node-4,node-5" bash scripts/swarm/label-nodes.sh
 ```
 
 ## 五、配置 GitHub Secrets/Variables

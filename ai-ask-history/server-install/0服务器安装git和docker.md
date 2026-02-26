@@ -1,4 +1,6 @@
 
+## 服务器上使用 git 拉取代码
+
 ssh-keygen -t ed25519
 
 cat ~/.ssh/id_ed25519.pub
@@ -91,28 +93,3 @@ newgrp docker
 ```
 
 
-Swarm initialized: current node (088a6eqp7eye3nykt6f1ijdv5) is now a manager.
-
-To add a worker to this swarm, run the following command:
-
-    docker swarm join --token SWMTKN-1-1aazgko1wqisabv0kemlkfps26je20jp9bmy76ruvqttrhdew1-c7yvtd308rdkmdgnqqodc5lu9 64.176.207.90:2377
-
-To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.
-
-Manager join token:
-To add a manager to this swarm, run the following command:
-
-    docker swarm join --token SWMTKN-1-1aazgko1wqisabv0kemlkfps26je20jp9bmy76ruvqttrhdew1-6039y690fxclyq994ukhucegn 64.176.207.90:2377
-
-
-Worker join token:
-To add a worker to this swarm, run the following command:
-
-    docker swarm join --token SWMTKN-1-1aazgko1wqisabv0kemlkfps26je20jp9bmy76ruvqttrhdew1-c7yvtd308rdkmdgnqqodc5lu9 64.176.207.90:2377
-
-
-
-
-
-docker info | grep -E 'Swarm|NodeID'
-docker context ls

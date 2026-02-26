@@ -4,7 +4,7 @@ POST {{baseUrl}}/api/v1/account/register
 Content-Type: application/json
 
 {
-  "email": "arch3@test.com",
+  "email": "arch345@test.com",
   "password": "a12345678",
   "confirmPassword": "a12345678"
 }

@@ -4,6 +4,7 @@ import { globalErrorHandler, ApiResult } from '@/utils/response.ts';
 import { checkRedisReadiness, connectRedis } from '@/lib/redis.ts';
 import { checkDatabaseReadiness } from '@/db';
 import { buildRouter } from '@/router.ts';
+import { gatewayRoutes } from '@/gateway/index.ts';
 import { logger } from '@/lib/logger.ts';
 
 const app = new Hono();
@@ -12,6 +13,9 @@ const port = Number(process.env.PORT || 3000);
 // 全局中间件
 app.use('*', cors());
 app.onError(globalErrorHandler);
+
+// 网关系统路由（/health, /ready）
+app.route('/', gatewayRoutes);
 
 // 挂载所有业务路由（含 request-id 中间件）
 app.route('/', buildRouter());

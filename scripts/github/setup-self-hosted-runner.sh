@@ -12,6 +12,8 @@ set -euo pipefail
 #   RUNNER_LABELS=self-hosted,linux,swarm-manager
 #   RUNNER_DIR=/opt/actions-runner
 #   RUNNER_VERSION=2.327.1
+#   RUNNER_RESTART_POLICY=always
+#   RUNNER_RESTART_SEC=5
 
 GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-}
 RUNNER_TOKEN=${RUNNER_TOKEN:-}
@@ -20,6 +22,8 @@ RUNNER_NAME=${RUNNER_NAME:-"$(hostname)-swarm-manager"}
 RUNNER_LABELS=${RUNNER_LABELS:-"self-hosted,linux,swarm-manager"}
 RUNNER_DIR=${RUNNER_DIR:-/opt/actions-runner}
 RUNNER_VERSION=${RUNNER_VERSION:-2.327.1}
+RUNNER_RESTART_POLICY=${RUNNER_RESTART_POLICY:-always}
+RUNNER_RESTART_SEC=${RUNNER_RESTART_SEC:-5}
 
 if [[ -z "${GITHUB_REPOSITORY}" ]]; then
   echo "GITHUB_REPOSITORY is required (example: owner/repo)."
@@ -51,6 +55,7 @@ ensure_cmd() {
 
 ensure_cmd curl
 ensure_cmd tar
+ensure_cmd systemctl
 
 need_sudo=false
 if [[ "${EUID}" -ne 0 ]]; then
@@ -144,10 +149,42 @@ install_service() {
   fi
 }
 
+configure_service_restart() {
+  local service_name
+  service_name=$(systemctl list-unit-files 'actions.runner*.service' --no-legend 2>/dev/null \
+    | awk '{print $1}' \
+    | grep -F ".${RUNNER_NAME}.service" \
+    | head -n1 || true)
+
+  if [[ -z "${service_name}" ]]; then
+    service_name=$(systemctl list-unit-files 'actions.runner*.service' --no-legend 2>/dev/null \
+      | awk '{print $1}' \
+      | head -n1 || true)
+  fi
+
+  if [[ -z "${service_name}" ]]; then
+    echo "Failed to detect actions.runner systemd service name."
+    exit 1
+  fi
+
+  echo "Configuring systemd restart policy for ${service_name}..."
+  run_as_root mkdir -p "/etc/systemd/system/${service_name}.d"
+  run_as_root bash -c "cat > '/etc/systemd/system/${service_name}.d/override.conf' <<EOF
+[Service]
+Restart=${RUNNER_RESTART_POLICY}
+RestartSec=${RUNNER_RESTART_SEC}
+EOF"
+  run_as_root systemctl daemon-reload
+  run_as_root systemctl enable "${service_name}"
+  run_as_root systemctl restart "${service_name}"
+  run_as_root systemctl status "${service_name}" --no-pager || true
+}
+
 fetch_runner_token
 setup_runner_files
 configure_runner
 install_service
+configure_service_restart
 
 echo ""
 echo "Runner setup complete."

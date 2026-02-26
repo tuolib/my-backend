@@ -407,6 +407,9 @@ GH_TOKEN=<github_pat_or_fine_grained_token> \
 bash scripts/github/setup-self-hosted-runner.sh
 ```
 
+
+RUNNER_ALLOW_RUNASROOT=1 GITHUB_REPOSITORY=tuolib/my-backend RUNNER_TOKEN=ANDFOV7KVD5UYYJQ52WXQ3TJUBUYG bash scripts/github/setup-self-hosted-runner.sh
+
 或使用 registration token：
 
 ```bash

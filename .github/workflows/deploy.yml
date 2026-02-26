@@ -143,6 +143,9 @@ jobs:
           fetch-depth: 1
           clean: true
 
+      - name: Ensure HOME for git global config
+        run: echo "HOME=${HOME:-/root}" >> "$GITHUB_ENV"
+
       - name: Pull latest code
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"

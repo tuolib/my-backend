@@ -64,6 +64,19 @@ export type DownstreamRoute = ServiceRoute & {
   lastFailureTime: number;
 };
 
+/** 下游调度结果 */
+export type DispatchResult = {
+  ok: boolean;
+  status: number;
+  data: unknown;
+  /** 是否因超时失败 */
+  timeout: boolean;
+  /** 耗时 (ms) */
+  latency: number;
+  /** 错误信息 */
+  error?: string;
+};
+
 /** 网关完整配置 */
 export type GatewayConfig = {
   services: ServiceRoute[];

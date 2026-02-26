@@ -8,31 +8,30 @@ import type { GatewayConfig } from './types.ts';
  */
 export const gatewayConfig: GatewayConfig = {
   services: [
-    // TODO: 阶段二后续步骤 — 添加代理转发时启用
-    // {
-    //   prefix: '/api/v1/users',
-    //   upstream: process.env.USER_SERVICE_URL || 'http://localhost:3001',
-    //   timeout: 3000,
-    //   retryEnabled: true,
-    //   retryMax: 1,
-    //   authRequired: true,
-    // },
-    // {
-    //   prefix: '/api/v1/orders',
-    //   upstream: process.env.ORDER_SERVICE_URL || 'http://localhost:3002',
-    //   timeout: 3000,
-    //   retryEnabled: true,
-    //   retryMax: 1,
-    //   authRequired: true,
-    // },
-    // {
-    //   prefix: '/api/v1/payments',
-    //   upstream: process.env.PAYMENT_SERVICE_URL || 'http://localhost:3003',
-    //   timeout: 10000,  // 支付服务超时更长
-    //   retryEnabled: false,  // 非幂等，不重试
-    //   retryMax: 0,
-    //   authRequired: true,
-    // },
+    {
+      prefix: '/api/v1/users',
+      upstream: process.env.USER_SERVICE_URL || 'http://localhost:3001',
+      timeout: 3000,
+      retryEnabled: true,
+      retryMax: 1,
+      authRequired: true,
+    },
+    {
+      prefix: '/api/v1/orders',
+      upstream: process.env.ORDER_SERVICE_URL || 'http://localhost:3002',
+      timeout: 3000,
+      retryEnabled: true,
+      retryMax: 1,
+      authRequired: true,
+    },
+    {
+      prefix: '/api/v1/payments',
+      upstream: process.env.PAYMENT_SERVICE_URL || 'http://localhost:3003',
+      timeout: 10000, // 支付服务超时更长
+      retryEnabled: false, // 非幂等，不重试
+      retryMax: 0,
+      authRequired: true,
+    },
   ],
 
   auth: {

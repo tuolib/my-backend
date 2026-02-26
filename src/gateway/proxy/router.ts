@@ -1,8 +1,7 @@
 import { createMiddleware } from 'hono/factory';
-import { ApiResult } from '@/utils/response.ts';
-import { logger } from '@/lib/logger.ts';
 import { gatewayConfig } from '../config.ts';
 import type { DownstreamRoute } from '../types.ts';
+import { handleGatewayRequest } from '../executor.ts';
 
 /**
  * 运行时路由表
@@ -40,37 +39,13 @@ export function resolveUpstream(path: string): DownstreamRoute | null {
 }
 
 /**
- * 网关代理中间件（stub — 返回 502 占位）
+ * 网关代理中间件
  *
- * 匹配到下游路由时返回 502 占位响应，未匹配时 fall-through 到本地业务路由。
- *
- * TODO: 生产实现 —
- * - fetch() 转发请求到 upstream，透传 headers
- * - AbortSignal.timeout(route.timeout) 超时控制
- * - GET 请求重试 (route.retryEnabled, route.retryMax)
- * - 熔断器状态机 (closed → open → half-open)
- * - 请求/响应 header 改写（X-Forwarded-For, X-Request-ID 等）
+ * 调用 handleGatewayRequest 编排完整执行流（认证→熔断→调度→响应映射）。
+ * 返回 Response 则网关已处理；返回 null 则 fall-through 到本地业务路由。
  */
 export const gatewayProxyMiddleware = createMiddleware(async (c, next) => {
-  const route = resolveUpstream(c.req.path);
-
-  if (!route) {
-    // 无匹配路由，fall-through 到本地业务路由
-    await next();
-    return;
-  }
-
-  // TODO: 实际代理转发逻辑
-  logger.debug('Gateway proxy stub hit', {
-    path: c.req.path,
-    upstream: route.upstream,
-    prefix: route.prefix,
-  });
-
-  return ApiResult.error(
-    c,
-    `代理转发未实现: ${route.prefix} → ${route.upstream}`,
-    502,
-    { stub: true, upstream: route.upstream }
-  );
+  const result = await handleGatewayRequest(c);
+  if (result) return result;
+  await next();
 });

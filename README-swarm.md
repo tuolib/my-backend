@@ -423,3 +423,5 @@ bash scripts/github/setup-self-hosted-runner.sh
 - 当前 PostgreSQL 是主从流复制，默认不包含自动主库故障切换。
 - 生产高可用建议额外引入主从自动切换方案（例如 Patroni/repmgr）。
 - 生产网关高可用（双网关/LB/证书共享）需单独设计。
+
+LB（Nginx/HAProxy/云 LB），域名改指向 LB VIP，而不是单机 IP

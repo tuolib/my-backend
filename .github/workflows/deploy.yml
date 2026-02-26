@@ -196,7 +196,7 @@ jobs:
           URL="https://${SWARM_DOMAIN}/healthz"
           echo "Smoke testing: ${URL}"
           for i in $(seq 1 30); do
-            if curl -fsS --max-time 5 "${URL}" >/tmp/smoke.out 2>&1; then
+            if curl -6 -fsS --max-time 5 "${URL}" >/tmp/smoke.out 2>&1; then
               echo "✓ Smoke test passed"
               exit 0
             fi

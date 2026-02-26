@@ -395,9 +395,13 @@ networks:
   edge:
     driver: overlay
     attachable: true
+    driver_opts:
+      com.docker.network.enable_ipv6: "true"
   backend:
     driver: overlay
     attachable: true
+    driver_opts:
+      com.docker.network.enable_ipv6: "true"
 
 volumes:
   caddy_data:

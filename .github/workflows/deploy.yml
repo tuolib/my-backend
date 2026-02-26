@@ -179,12 +179,12 @@ jobs:
           LOG_LEVEL=${LOG_LEVEL}
           POSTGRES_DB=${POSTGRES_DB}
           POSTGRES_USER=${POSTGRES_USER}
-          POSTGRES_PASSWORD=password
-          POSTGRES_REPLICATION_PASSWORD=repl_password
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_REPLICATION_PASSWORD=${{ secrets.POSTGRES_REPLICATION_PASSWORD }}
           PGBOUNCER_MAX_CLIENT_CONN=${PGBOUNCER_MAX_CLIENT_CONN}
           PGBOUNCER_DEFAULT_POOL_SIZE=${PGBOUNCER_DEFAULT_POOL_SIZE}
           PGBOUNCER_RESERVE_POOL_SIZE=${PGBOUNCER_RESERVE_POOL_SIZE}
-          JWT_SECRET=change-me-in-prod
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
           RUN_MIGRATION=${RUN_MIGRATION}
           EOF2
 
@@ -196,7 +196,7 @@ jobs:
           URL="https://${SWARM_DOMAIN}/healthz"
           echo "Smoke testing: ${URL}"
           for i in $(seq 1 30); do
-            if curl -6 -fsS --max-time 5 "${URL}" >/tmp/smoke.out 2>&1; then
+            if curl -fsS --max-time 5 "${URL}" >/tmp/smoke.out 2>&1; then
               echo "✓ Smoke test passed"
               exit 0
             fi

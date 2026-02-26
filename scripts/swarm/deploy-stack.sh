@@ -50,6 +50,37 @@ if [[ -z "${NODE_COUNT}" ]]; then
   exit 1
 fi
 
+ACTIVE_API_NODE_COUNT=$(docker node ls \
+  --filter "node.label=tier=api" \
+  --filter "node-status=ready" \
+  --format '{{.ID}}' | wc -l | tr -d ' ')
+ACTIVE_DB_NODE_COUNT=$(docker node ls \
+  --filter "node.label=tier=db" \
+  --filter "node-status=ready" \
+  --format '{{.ID}}' | wc -l | tr -d ' ')
+READY_DB_SLOTS=$(docker node ls \
+  --filter "node.label=tier=db" \
+  --filter "node-status=ready" \
+  --format '{{.Hostname}} {{.ID}}' \
+  | while read -r _host node_id; do
+      docker node inspect "${node_id}" --format '{{ index .Spec.Labels "db_slot" }}' 2>/dev/null || true
+    done \
+  | grep -E '^[0-9]+$' \
+  | sort -n \
+  | uniq \
+  | paste -sd',' -)
+
+MISSING_DB_SLOTS=""
+for slot in 1 2 3 4 5 6 7 8 9 10; do
+  if [[ ",${READY_DB_SLOTS}," != *",${slot},"* ]]; then
+    if [[ -z "${MISSING_DB_SLOTS}" ]]; then
+      MISSING_DB_SLOTS="${slot}"
+    else
+      MISSING_DB_SLOTS="${MISSING_DB_SLOTS},${slot}"
+    fi
+  fi
+done
+
 STACK_FILE=swarm/stack.yml
 SELECTED_MODE=multi
 
@@ -57,7 +88,8 @@ if [[ "${DEPLOY_MODE}" == "single" ]]; then
   STACK_FILE=swarm/stack-single.yml
   SELECTED_MODE=single
 elif [[ "${DEPLOY_MODE}" == "auto" ]]; then
-  if [[ "${NODE_COUNT}" -le 1 ]]; then
+  # Auto mode should choose stack by schedulable capacity, not raw swarm size.
+  if [[ "${ACTIVE_API_NODE_COUNT}" -le 1 || -n "${MISSING_DB_SLOTS}" ]]; then
     STACK_FILE=swarm/stack-single.yml
     SELECTED_MODE=single
   fi
@@ -75,10 +107,29 @@ if [[ -z "${API_REPLICAS}" ]]; then
     API_REPLICAS="${API_REPLICAS_MULTI}"
   fi
 fi
+
+if [[ "${SELECTED_MODE}" == "multi" ]]; then
+  if [[ "${ACTIVE_API_NODE_COUNT}" -eq 0 ]]; then
+    echo "No ready swarm nodes with label tier=api; multi stack cannot schedule api service."
+    echo "Tip: label at least one ready node with: docker node update --label-add tier=api <node>"
+    exit 1
+  fi
+  if [[ -n "${MISSING_DB_SLOTS}" ]]; then
+    echo "Multi stack requires db_slot=1..10, but missing ready slots: ${MISSING_DB_SLOTS}"
+    echo "Tip: either add db nodes/labels, or set DEPLOY_MODE=single for current cluster size."
+    exit 1
+  fi
+  if [[ "${API_REPLICAS}" -gt "${ACTIVE_API_NODE_COUNT}" ]]; then
+    echo "Capping API replicas from ${API_REPLICAS} to ${ACTIVE_API_NODE_COUNT} because max_replicas_per_node=1 in swarm/stack.yml"
+    API_REPLICAS="${ACTIVE_API_NODE_COUNT}"
+  fi
+fi
 export API_REPLICAS
 
 echo "Deploying stack ${STACK_NAME} with image ${IMAGE_REPOSITORY}:${IMAGE_TAG}"
-echo "Swarm nodes: ${NODE_COUNT}, deploy mode: ${SELECTED_MODE}, stack file: ${STACK_FILE}, api replicas: ${API_REPLICAS}"
+echo "Swarm nodes: ${NODE_COUNT}, ready api nodes: ${ACTIVE_API_NODE_COUNT}, ready db nodes: ${ACTIVE_DB_NODE_COUNT}"
+echo "Ready db slots: ${READY_DB_SLOTS:-none}"
+echo "Deploy mode: ${SELECTED_MODE}, stack file: ${STACK_FILE}, api replicas: ${API_REPLICAS}"
 
 # Docker Swarm configs are immutable — content changes require new names.
 # Hash each config file so changed content gets a new config name automatically.
@@ -119,6 +170,14 @@ wait_service() {
         return 0
       fi
       echo "Waiting ${service}: ${replicas}"
+      if [[ "${ready}" == "0" && "${desired}" != "0" ]]; then
+        local scheduling_issue
+        scheduling_issue=$(docker service ps "${service}" --no-trunc --format '{{.CurrentState}} | {{.Error}}' 2>/dev/null \
+          | grep -Eim1 'no suitable node|insufficient|not available|rejected|pending' || true)
+        if [[ -n "${scheduling_issue}" ]]; then
+          echo "Scheduling issue detected for ${service}: ${scheduling_issue}"
+        fi
+      fi
     else
       echo "Waiting ${service}: service not found yet"
     fi

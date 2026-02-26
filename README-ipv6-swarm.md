@@ -16,10 +16,13 @@
 
 ```bash
 # 1. 开放防火墙（如用 ufw）
-ufw allow 2377/tcp   # Swarm 管理
-ufw allow 7946/tcp   # 节点通信
+# 2377/tcp   # Swarm 管理
+# 7946/tcp   # 节点通信
+# 4789/udp   # VXLAN overlay
+ufw allow 2377/tcp
+ufw allow 7946/tcp
 ufw allow 7946/udp
-ufw allow 4789/udp   # VXLAN overlay
+ufw allow 4789/udp
 
 # 2. 仅 IPv6-only 机器需要执行（IPv4 机器跳过）
 sudo bash scripts/swarm/setup-docker-ipv6.sh
@@ -49,9 +52,7 @@ docker swarm join --token SWMTKN-xxx 192.168.1.10:2377
 ## 四、打标签（node-1 上执行）
 
 ```bash
-API_NODES="node-1,node-2,node-3" \
-DB_NODES="node-4,node-5" \
-bash scripts/swarm/label-nodes.sh
+API_NODES="node-1,node-2,node-3" DB_NODES="node-4,node-5" bash scripts/swarm/label-nodes.sh
 ```
 
 ## 五、配置 GitHub Secrets/Variables

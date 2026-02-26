@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/bin/sh
 # 从库初始化脚本：首次启动时从主库克隆数据，之后直接启动 postgres
-set -eo pipefail
+set -eu
 
 PRIMARY_HOST="${PRIMARY_HOST:-postgres-primary}"
 REPLICATION_USER="${REPLICATION_USER:-replicator}"
@@ -8,7 +8,7 @@ REPLICATION_PASSWORD="${REPLICATION_PASSWORD:-repl_password}"
 
 if [ -z "$(ls -A "$PGDATA" 2>/dev/null)" ]; then
   echo ">>> PGDATA 为空，等待主库就绪..."
-  until PGPASSWORD="$POSTGRES_PASSWORD" pg_isready -h "$PRIMARY_HOST" -U "$POSTGRES_USER" -q; do
+  until PGPASSWORD="$POSTGRES_PASSWORD" pg_isready -h "$PRIMARY_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q; do
     echo ">>> 主库未就绪，3 秒后重试..."
     sleep 3
   done

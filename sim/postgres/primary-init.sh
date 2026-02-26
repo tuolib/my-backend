@@ -1,9 +1,15 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 # 创建流复制用户
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-  CREATE USER replicator REPLICATION LOGIN ENCRYPTED PASSWORD '${REPLICATION_PASSWORD:-repl_password}';
+  DO \$\$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'replicator') THEN
+      CREATE USER replicator REPLICATION LOGIN ENCRYPTED PASSWORD '${REPLICATION_PASSWORD:-repl_password}';
+    END IF;
+  END
+  \$\$;
 EOSQL
 
 # 允许从库连接复制

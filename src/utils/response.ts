@@ -11,6 +11,14 @@ export type ApiResponse<T = any> = {
   data: T;
 };
 
+const appendRequestIdFor5xx = (c: Context, message: string, code: number) => {
+  if (code < 500 || code >= 600) return message;
+  if (message.includes('requestId')) return message;
+  const requestId = c.res.headers.get('X-Request-ID') ?? c.req.header('X-Request-ID');
+  if (!requestId) return message;
+  return `${message} (requestId: ${requestId})`;
+};
+
 export const ApiResult = {
   success: <T>(c: Context, data: T = null as any, message = '操作成功') => {
     const response: ApiResponse<T> = { code: 200, success: true, message, data };
@@ -18,7 +26,12 @@ export const ApiResult = {
   },
 
   error: (c: Context, message = '操作失败', code: ContentfulStatusCode = 400, data: any = null) => {
-    const response: ApiResponse = { code, success: false, message, data };
+    const response: ApiResponse = {
+      code,
+      success: false,
+      message: appendRequestIdFor5xx(c, message, code),
+      data,
+    };
     return c.json(response, code);
   },
 };
@@ -41,7 +54,11 @@ export const globalErrorHandler: ErrorHandler = (err, c) => {
     stack: err instanceof Error ? err.stack : undefined,
   });
 
-  return c.json({ code, success: false, message, data: null }, code as ContentfulStatusCode);
+  const responseMessage = appendRequestIdFor5xx(c, message, code);
+  return c.json(
+    { code, success: false, message: responseMessage, data: null },
+    code as ContentfulStatusCode
+  );
 };
 
 export const onZodError = (result: any, c: Context) => {

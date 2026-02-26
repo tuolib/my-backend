@@ -50,21 +50,36 @@ if [[ -z "${NODE_COUNT}" ]]; then
   exit 1
 fi
 
-ACTIVE_API_NODE_COUNT=$(docker node ls \
-  --filter "node.label=tier=api" \
-  --filter "node-status=ready" \
-  --format '{{.ID}}' | wc -l | tr -d ' ')
-ACTIVE_DB_NODE_COUNT=$(docker node ls \
-  --filter "node.label=tier=db" \
-  --filter "node-status=ready" \
-  --format '{{.ID}}' | wc -l | tr -d ' ')
-READY_DB_SLOTS=$(docker node ls \
-  --filter "node.label=tier=db" \
-  --filter "node-status=ready" \
-  --format '{{.Hostname}} {{.ID}}' \
-  | while read -r _host node_id; do
-      docker node inspect "${node_id}" --format '{{ index .Spec.Labels "db_slot" }}' 2>/dev/null || true
-    done \
+node_is_ready_active() {
+  local node_id="$1"
+  local state availability
+  state=$(docker node inspect "${node_id}" --format '{{.Status.State}}' 2>/dev/null || true)
+  availability=$(docker node inspect "${node_id}" --format '{{.Spec.Availability}}' 2>/dev/null || true)
+  [[ "${state}" == "ready" && "${availability}" == "active" ]]
+}
+
+ACTIVE_API_NODE_COUNT=0
+while read -r node_id; do
+  [[ -z "${node_id}" ]] && continue
+  if node_is_ready_active "${node_id}"; then
+    ACTIVE_API_NODE_COUNT=$((ACTIVE_API_NODE_COUNT + 1))
+  fi
+done < <(docker node ls --filter "node.label=tier=api" --format '{{.ID}}')
+
+ACTIVE_DB_NODE_COUNT=0
+READY_DB_SLOT_LINES=""
+while read -r node_id; do
+  [[ -z "${node_id}" ]] && continue
+  if node_is_ready_active "${node_id}"; then
+    ACTIVE_DB_NODE_COUNT=$((ACTIVE_DB_NODE_COUNT + 1))
+    slot=$(docker node inspect "${node_id}" --format '{{ index .Spec.Labels "db_slot" }}' 2>/dev/null || true)
+    if [[ "${slot}" =~ ^[0-9]+$ ]]; then
+      READY_DB_SLOT_LINES+="${slot}"$'\n'
+    fi
+  fi
+done < <(docker node ls --filter "node.label=tier=db" --format '{{.ID}}')
+
+READY_DB_SLOTS=$(printf '%s' "${READY_DB_SLOT_LINES}" \
   | grep -E '^[0-9]+$' \
   | sort -n \
   | uniq \

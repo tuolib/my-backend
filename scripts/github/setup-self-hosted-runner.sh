@@ -136,8 +136,24 @@ configure_runner() {
 
 install_service() {
   cd "${RUNNER_DIR}"
+  local existing_service
+  existing_service=$(systemctl list-unit-files 'actions.runner*.service' --no-legend 2>/dev/null \
+    | awk '{print $1}' \
+    | grep -F ".${RUNNER_NAME}.service" \
+    | head -n1 || true)
 
   echo "Installing and starting runner service..."
+  if [[ -n "${existing_service}" ]]; then
+    echo "Existing runner service detected (${existing_service}), reinstalling..."
+    if [[ "${need_sudo}" == "true" ]]; then
+      sudo ./svc.sh stop || true
+      sudo ./svc.sh uninstall || true
+    else
+      ./svc.sh stop || true
+      ./svc.sh uninstall || true
+    fi
+  fi
+
   if [[ "${need_sudo}" == "true" ]]; then
     sudo ./svc.sh install "$(whoami)"
     sudo ./svc.sh start

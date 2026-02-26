@@ -9,13 +9,23 @@
 - Caddy 网关
 - GitHub Actions 自动构建与发布
 
-## 1. 本地开发（快速模式）
+## 1. Swarm 本地同构开发（多 API + 多数据库）
+
+本地 Swarm 详细手册见：[README-swarm.md](./README-swarm.md)
+
+快速入口：
+- 单机最快跑通：[`README-swarm.md` 单机章节](./README-swarm.md#swarm-local-single)
+- 多机完整演练：[`README-swarm.md` 多机章节](./README-swarm.md#swarm-local-multi)
+- 数据库操作（主从验证）：[`README-swarm.md` 数据库章节](./README-swarm.md#swarm-db-ops)
+
+## 2. 本地开发（快速模式）
 
 ```bash
 bun run dev
 ```
 
 常用命令：
+
 ```bash
 bun run dr
 bun run stop
@@ -24,7 +34,7 @@ bun run migrate
 bun run migrate:down
 ```
 
-## 2. 本地开发（生产同构模拟）
+## 3. 本地开发（生产同构模拟）
 
 使用 `docker-compose.sim.yml` 模拟多 API、多数据库与网关：
 
@@ -35,16 +45,16 @@ bun run sim:down
 bun run sim:clean
 ```
 
-## 3. Swarm 部署（多机/单机）
+## 4. Swarm 部署（多机/单机）
 
 完整 Swarm 方案见：
-- `README-swarm.md`
+- [README-swarm.md](./README-swarm.md)
 - `swarm/stack.yml`
 - `swarm/stack-single.yml`
 - `scripts/swarm/deploy-stack.sh`
 - `.github/workflows/deploy.yml`
 
-## 4. 生产部署（GitHub Actions）
+## 5. 生产部署（GitHub Actions）
 
 工作流：`.github/workflows/deploy.yml`
 
@@ -54,7 +64,7 @@ bun run sim:clean
 3. 在 self-hosted `swarm-manager` runner 上执行 `scripts/swarm/deploy-stack.sh`。
 4. 发布后执行公网健康检查（`/healthz`）。
 
-## 5. 迁移策略
+## 6. 迁移策略
 
 迁移脚本：`src/db/migrate.ts`
 

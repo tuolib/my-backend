@@ -8,6 +8,7 @@ services:
       # 这里的 redis 是下方服务的名称
       - REDIS_URL=redis://redis:6379
       - JWT_SECRET=super_secret_123
+      - LOG_FORMAT=json
     depends_on:
       - redis
       - db

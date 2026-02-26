@@ -32,6 +32,7 @@ services:
       JWT_SECRET: sim-local-secret-do-not-use-in-real-prod
       DB_POOL_MAX: "5"
       RATE_LIMIT_ENABLED: "false"
+      LOG_FORMAT: json
     depends_on:
       pgbouncer-rw:
         condition: service_healthy
@@ -56,6 +57,7 @@ services:
       JWT_SECRET: sim-local-secret-do-not-use-in-real-prod
       DB_POOL_MAX: "5"
       RATE_LIMIT_ENABLED: "false"
+      LOG_FORMAT: json
     depends_on:
       pgbouncer-rw:
         condition: service_healthy

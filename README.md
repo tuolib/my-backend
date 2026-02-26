@@ -54,7 +54,20 @@ bun run sim:clean
 - `scripts/swarm/deploy-stack.sh`
 - `.github/workflows/deploy.yml`
 
-## 5. 生产部署（GitHub Actions）
+## 5. 日志方案（本地 + 服务器）
+
+日志实操文档见：
+- [README-logging.md](./README-logging.md)
+
+快速命令：
+
+```bash
+bun run log:up
+bun run log:tail
+bun run log:down
+```
+
+## 6. 生产部署（GitHub Actions）
 
 工作流：`.github/workflows/deploy.yml`
 
@@ -64,7 +77,7 @@ bun run sim:clean
 3. 在 self-hosted `swarm-manager` runner 上执行 `scripts/swarm/deploy-stack.sh`。
 4. 发布后执行公网健康检查（`/healthz`）。
 
-## 6. 迁移策略
+## 7. 迁移策略
 
 迁移脚本：`src/db/migrate.ts`
 

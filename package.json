@@ -28,7 +28,10 @@
     "sim:logs:pgbouncer-rw": "docker compose -f docker-compose.sim.yml logs -f pgbouncer-rw",
     "sim:logs:tail": "docker compose -f docker-compose.sim.yml logs --tail=200 api-1 postgres-primary",
     "sim:down": "docker compose -f docker-compose.sim.yml down",
-    "sim:clean": "docker compose -f docker-compose.sim.yml down -v"
+    "sim:clean": "docker compose -f docker-compose.sim.yml down -v",
+    "log:up": "docker compose -f docker-compose.logging.yml up -d",
+    "log:down": "docker compose -f docker-compose.logging.yml down",
+    "log:tail": "docker compose -f docker-compose.logging.yml logs -f --tail=200 promtail loki grafana"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.6",

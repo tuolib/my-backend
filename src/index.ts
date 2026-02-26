@@ -4,7 +4,12 @@ import { globalErrorHandler, ApiResult } from '@/utils/response.ts';
 import { checkRedisReadiness, connectRedis } from '@/lib/redis.ts';
 import { checkDatabaseReadiness } from '@/db';
 import { buildRouter } from '@/router.ts';
-import { gatewayRoutes } from '@/gateway/index.ts';
+import {
+  gatewayRoutes,
+  gatewayRateLimitMiddleware,
+  gatewayAuthMiddleware,
+  gatewayProxyMiddleware,
+} from '@/gateway/index.ts';
 import { logger } from '@/lib/logger.ts';
 
 const app = new Hono();
@@ -14,8 +19,13 @@ const port = Number(process.env.PORT || 3000);
 app.use('*', cors());
 app.onError(globalErrorHandler);
 
-// 网关系统路由（/health, /ready）
+// 网关系统路由（/health, /ready — 无需认证/限流）
 app.route('/', gatewayRoutes);
+
+// 网关中间件（stub，默认全部 pass-through，零行为变更）
+app.use('*', gatewayRateLimitMiddleware);
+app.use('*', gatewayAuthMiddleware);
+app.use('*', gatewayProxyMiddleware);
 
 // 挂载所有业务路由（含 request-id 中间件）
 app.route('/', buildRouter());

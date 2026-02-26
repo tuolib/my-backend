@@ -35,6 +35,11 @@ export const gatewayConfig: GatewayConfig = {
     // },
   ],
 
+  auth: {
+    enabled: false, // TODO: 认证步骤启用
+    jwtBlacklistPrefix: 'jwt:blacklist:',
+  },
+
   rateLimit: {
     enabled: false, // TODO: 限流步骤启用
     maxRequests: 100,

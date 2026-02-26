@@ -47,9 +47,27 @@ export type HealthCheckConfig = {
   readinessTimeout: number;
 };
 
+/** 认证配置 */
+export type AuthConfig = {
+  enabled: boolean;
+  /** JWT 黑名单 Redis key 前缀 */
+  jwtBlacklistPrefix: string;
+};
+
+/** 下游路由运行时状态（扩展 ServiceRoute） */
+export type DownstreamRoute = ServiceRoute & {
+  /** 熔断器状态 */
+  circuitState: 'closed' | 'open' | 'half-open';
+  /** 连续失败计数 */
+  failureCount: number;
+  /** 上次熔断打开时间 */
+  lastFailureTime: number;
+};
+
 /** 网关完整配置 */
 export type GatewayConfig = {
   services: ServiceRoute[];
+  auth: AuthConfig;
   rateLimit: RateLimitConfig;
   circuitBreaker: CircuitBreakerConfig;
   healthCheck: HealthCheckConfig;

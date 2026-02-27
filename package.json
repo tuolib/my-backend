@@ -31,7 +31,9 @@
     "sim:clean": "docker compose -f docker-compose.sim.yml down -v",
     "log:up": "docker compose -f docker-compose.logging.yml up -d",
     "log:down": "docker compose -f docker-compose.logging.yml down",
-    "log:tail": "docker compose -f docker-compose.logging.yml logs -f --tail=200 promtail loki grafana"
+    "log:tail": "docker compose -f docker-compose.logging.yml logs -f --tail=200 promtail loki grafana",
+    "ops:maintenance": "bun run scripts/db/run-maintenance.ts",
+    "sim:ops:maintenance": "docker compose -f docker-compose.sim.yml run --rm api-1 bun run ops:maintenance"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.6",

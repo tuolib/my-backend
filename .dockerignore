@@ -22,7 +22,8 @@ apitest
 .github
 
 # 基础设施脚本（仅 CI/运维使用）
-scripts
+scripts/swarm
+scripts/github
 swarm
 sim
 charts
@@ -30,6 +31,8 @@ charts
 # 文档
 *.md
 docs
+claude
+ai-ask-history
 
 # 构建产物
 dist

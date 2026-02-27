@@ -27,6 +27,8 @@ COPY --from=deps    /app/node_modules  ./node_modules
 COPY --from=builder /app/src           ./src
 # migrate.ts 从 migrations/ 目录读取 SQL 文件
 COPY --from=builder /app/migrations    ./migrations
+# 运维脚本
+COPY --from=builder /app/scripts       ./scripts
 COPY package.json tsconfig.json        ./
 
 # 以非 root 用户运行，遵循最小权限原则

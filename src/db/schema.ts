@@ -11,7 +11,6 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   // 阶段三新增字段
   phone: varchar('phone', { length: 20 }),
-  pwdHash: varchar('pwd_hash', { length: 128 }),
   nickname: varchar('nickname', { length: 50 }),
   status: smallint('status').default(1),
 });

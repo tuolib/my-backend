@@ -24,7 +24,7 @@ CDN/WAF → Caddy LB x2 → API Gateway x6 → 微服务层 → 数据层
 
 | 库 | 核心表 | 策略 |
 |----|--------|------|
-| 用户库 | `users` (phone, pwd_hash, status) | 主从读写分离 |
+| 用户库 | `users` (phone, password_hash, status) | 主从读写分离 |
 | 商品库 | `products` + `skus` (JSONB attrs) | Redis 热点缓存 |
 | 订单库 | `orders_{0..63}` | user_id % 64 分表，>90天归档按月分区 |
 | 支付库 | `payments` | 按月 RANGE 分区，pg_cron 自动建分区 |

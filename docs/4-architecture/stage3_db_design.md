@@ -6,12 +6,12 @@
 
 -- ① 用户库
 CREATE TABLE users (
-id         BIGSERIAL PRIMARY KEY,
-phone      VARCHAR(20) UNIQUE NOT NULL,
-pwd_hash   VARCHAR(128) NOT NULL,
-nickname   VARCHAR(50),
-status     SMALLINT DEFAULT 1,
-created_at TIMESTAMPTZ DEFAULT now()
+id             BIGSERIAL PRIMARY KEY,
+phone          VARCHAR(20) UNIQUE NOT NULL,
+password_hash  TEXT NOT NULL,
+nickname       VARCHAR(50),
+status         SMALLINT DEFAULT 1,
+created_at     TIMESTAMPTZ DEFAULT now()
 );
 
 -- ② 商品库

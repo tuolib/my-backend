@@ -1,0 +1,12 @@
+# Override for fast iteration with live code reload
+# Usage: docker compose -f docker-compose.sim.yml -f docker-compose.sim.dev.yml up --build -d
+
+services:
+  api-1:
+    volumes:
+      - ./:/app
+    command: ["bun", "run", "--hot", "src/index.ts"]
+  api-2:
+    volumes:
+      - ./:/app
+    command: ["bun", "run", "--hot", "src/index.ts"]

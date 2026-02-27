@@ -8,7 +8,6 @@ DROP TABLE IF EXISTS products;
 -- 回滚 users 增量变更（不删除 users 表本身）
 ALTER TABLE users DROP COLUMN IF EXISTS status;
 ALTER TABLE users DROP COLUMN IF EXISTS nickname;
-ALTER TABLE users DROP COLUMN IF EXISTS pwd_hash;
 
 DROP INDEX IF EXISTS idx_users_phone;
 ALTER TABLE users ALTER COLUMN phone SET NOT NULL;

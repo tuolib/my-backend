@@ -1,7 +1,7 @@
 import { eq, ilike, sql, and, type SQL } from "drizzle-orm";
-import { db } from "../../shared/db";
-import { products } from "./schema";
-import type { CreateProductDto, UpdateProductDto, ProductQuery } from "./types";
+import { db } from "@/shared/db";
+import { products } from "@/domain/product/schema";
+import type { CreateProductDto, UpdateProductDto, ProductQuery } from "@/domain/product/types";
 
 export const productRepository = {
   async findAll(query: ProductQuery) {

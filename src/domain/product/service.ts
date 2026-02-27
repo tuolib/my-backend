@@ -1,6 +1,6 @@
-import { ConflictError, NotFoundError } from "../../shared/types/errors";
-import { productRepository } from "./repository";
-import type { CreateProductDto, UpdateProductDto, ProductQuery } from "./types";
+import { ConflictError, NotFoundError } from "@/shared/types/errors";
+import { productRepository } from "@/domain/product/repository";
+import type { CreateProductDto, UpdateProductDto, ProductQuery } from "@/domain/product/types";
 
 function toSlug(name: string): string {
   return name

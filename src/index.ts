@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { env } from "./shared/config/env";
-import { errorHandler } from "./shared/middleware/error-handler";
-import { requestLogger } from "./shared/middleware/request-logger";
-import { requestId } from "./shared/middleware/request-id";
-import { health } from "./domain/health/controller";
-import { productRoutes } from "./domain/product/controller";
-import { logger } from "./shared/utils/logger";
+import { env } from "@/shared/config/env";
+import { errorHandler } from "@/shared/middleware/error-handler";
+import { requestLogger } from "@/shared/middleware/request-logger";
+import { requestId } from "@/shared/middleware/request-id";
+import { health } from "@/domain/health/controller";
+import { productRoutes } from "@/domain/product/controller";
+import { logger } from "@/shared/utils/logger";
 
 const app = new Hono();
 

@@ -167,3 +167,21 @@ shared/                   # 通用工具与核心抽象
 │   │       └── utils/                  # 通用工具函数
 │   │           ├── id.ts               # 分布式 ID 生成 (snowflake / nanoid)
 │   │           └── time.ts
+
+
+
+
+
+项目介绍：企业级高并发电商架构
+对标: Amazon / 阿里巴巴
+技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
+工程结构：Monorepo
+
+已完成：
+- 阶段1 基础工程骨架
+- 共享层：统一配置、统一响应格式、统一错误处理
+
+你是一位资深后端架构师， 当前任务：
+- 提供 Dockerfile（基于 oven/bun）和 docker-compose.yml（含 postgres、redis、caddy） 精简的本地开发和部署脚本
+- Caddy 做反向代理，自动 HTTPS
+

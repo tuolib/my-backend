@@ -10,7 +10,8 @@ export const envSchema = z.object({
 
   // Database
   DATABASE_URL: z.string().url(),
-  DATABASE_POOL_SIZE: z.coerce.number().min(1).max(100).default(10),
+  DB_POOL_MAX: z.coerce.number().min(1).max(100).default(20),
+  DB_POOL_IDLE_TIMEOUT: z.coerce.number().min(0).default(30),
 
   // Redis
   REDIS_URL: z.string().url(),
@@ -52,7 +53,8 @@ export interface RuntimeConfig {
   };
   database: {
     url: string;
-    poolSize: number;
+    poolMax: number;
+    poolIdleTimeout: number;
   };
   redis: {
     url: string;
@@ -79,10 +81,11 @@ export function createRuntimeConfig(env: Env): RuntimeConfig {
     },
     database: {
       url: env.DATABASE_URL,
-      poolSize:
+      poolMax:
         env.NODE_ENV === 'production'
-          ? env.DATABASE_POOL_SIZE
-          : Math.min(env.DATABASE_POOL_SIZE, 5),
+          ? env.DB_POOL_MAX
+          : Math.min(env.DB_POOL_MAX, 5),
+      poolIdleTimeout: env.DB_POOL_IDLE_TIMEOUT,
     },
     redis: {
       url: env.REDIS_URL,

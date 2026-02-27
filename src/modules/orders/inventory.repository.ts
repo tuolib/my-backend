@@ -2,6 +2,24 @@ import { dbWrite } from '@/db';
 import { skus, stockLedger, outboxEvents } from '@/db/schema.ts';
 import { eq, sql, and, gte } from 'drizzle-orm';
 
+// ========== 辅助 ==========
+
+function getErrorCode(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  // Direct PG error
+  if ('code' in err && typeof (err as Record<string, unknown>).code === 'string') {
+    return (err as { code: string }).code;
+  }
+  // Drizzle wraps PG error in .cause
+  if ('cause' in err) {
+    const cause = (err as { cause: unknown }).cause;
+    if (typeof cause === 'object' && cause !== null && 'code' in cause) {
+      return (cause as { code: string }).code;
+    }
+  }
+  return undefined;
+}
+
 // ========== 库存流水 ==========
 
 export type StockLedgerInput = {
@@ -30,7 +48,9 @@ export async function appendStockLedger(input: StockLedgerInput) {
     return { inserted: true, row };
   } catch (err: unknown) {
     // PostgreSQL unique_violation = 23505
-    if (typeof err === 'object' && err !== null && 'code' in err && (err as { code: string }).code === '23505') {
+    // Drizzle wraps the PG error: check both err.code and err.cause.code
+    const pgCode = getErrorCode(err);
+    if (pgCode === '23505') {
       return { inserted: false, row: null };
     }
     throw err;
@@ -47,7 +67,8 @@ export async function decrementSkuStockInDb(skuId: bigint | number, qty: number)
   const result = await dbWrite.execute(
     sql`UPDATE skus SET stock = stock - ${qty} WHERE id = ${Number(skuId)} AND stock >= ${qty}`
   );
-  const rowCount = (result as { rowCount?: number }).rowCount ?? 0;
+  // postgres-js uses .count; drizzle may wrap as .rowCount — check both
+  const rowCount = (result as any).rowCount ?? (result as any).count ?? 0;
   return { success: rowCount > 0, rowCount };
 }
 

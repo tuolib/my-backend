@@ -33,7 +33,10 @@
     "log:down": "docker compose -f docker-compose.logging.yml down",
     "log:tail": "docker compose -f docker-compose.logging.yml logs -f --tail=200 promtail loki grafana",
     "ops:maintenance": "bun run scripts/db/run-maintenance.ts",
-    "sim:ops:maintenance": "docker compose -f docker-compose.sim.yml run --rm api-1 bun run ops:maintenance"
+    "sim:ops:maintenance": "docker compose -f docker-compose.sim.yml run --rm api-1 bun run scripts/db/run-maintenance.ts",
+    "stage3:verify": "bun run scripts/db/verify-stage3.ts",
+    "stage3:bench": "bun run scripts/db/benchmark-stage3.ts",
+    "stage3:drill": "bun run scripts/db/drill-stage3-recovery.ts"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.6",

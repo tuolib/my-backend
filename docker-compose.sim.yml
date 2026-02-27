@@ -90,7 +90,7 @@ services:
       postgres-primary:
         condition: service_healthy
     ports:
-      - "5432:5432"  # Mac 访问 localhost:5432 进入写库
+      - "54320:5432"  # Mac 访问 localhost:5432 进入写库
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 5432 2>/dev/null && echo ok || exit 1"]
       interval: 5s
@@ -114,7 +114,7 @@ services:
       postgres-replica:
         condition: service_healthy
     ports:
-      - "5432:5432"  # Mac 访问 localhost:5432 进入写库
+      - "54321:5432"  # Mac 访问 localhost:5432 进入写库
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 5432 2>/dev/null && echo ok || exit 1"]
       interval: 5s

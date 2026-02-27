@@ -1,5 +1,5 @@
 // src/db/schema.ts
-import { pgTable, serial, text, timestamp, boolean, integer, numeric, bigserial, varchar, smallint, jsonb, bigint } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, boolean, integer, numeric, bigserial, varchar, smallint, jsonb, bigint, date, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -79,6 +79,7 @@ export const skus = pgTable('skus', {
   attrs: jsonb('attrs'),
   price: numeric('price', { precision: 12, scale: 2 }),
   amount: numeric('amount', { precision: 12, scale: 2 }),
+  stock: integer('stock').notNull().default(0),
   status: smallint('status').default(0),
   paidAt: timestamp('paid_at', { withTimezone: true }),
 });
@@ -117,4 +118,42 @@ export const ordersArchive = pgTable('orders_archive', {
   total: numeric('total', { precision: 12, scale: 2 }),
   status: smallint('status').default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+});
+
+// ========== 阶段三·第三步：库存流水 + 出站事件 + 归档任务 ==========
+
+export const stockLedger = pgTable('stock_ledger', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  skuId: bigint('sku_id', { mode: 'number' }).notNull(),
+  orderId: bigint('order_id', { mode: 'number' }),
+  delta: integer('delta').notNull(),
+  reason: varchar('reason', { length: 32 }).notNull(),
+  idempotencyKey: varchar('idempotency_key', { length: 64 }).notNull().unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const outboxEvents = pgTable('outbox_events', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  eventType: varchar('event_type', { length: 64 }).notNull(),
+  aggregateType: varchar('aggregate_type', { length: 32 }).notNull(),
+  aggregateId: varchar('aggregate_id', { length: 64 }).notNull(),
+  payload: jsonb('payload').notNull(),
+  status: smallint('status').notNull().default(0),
+  retryCount: integer('retry_count').notNull().default(0),
+  nextRetryAt: timestamp('next_retry_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const archiveJobs = pgTable('archive_jobs', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  jobDate: date('job_date').notNull(),
+  targetTable: varchar('target_table', { length: 64 }).notNull(),
+  status: smallint('status').notNull().default(0),
+  processedRows: bigint('processed_rows', { mode: 'number' }).notNull().default(0),
+  errorMsg: text('error_msg'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

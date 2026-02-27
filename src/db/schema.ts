@@ -1,14 +1,19 @@
 // src/db/schema.ts
-import { pgTable, serial, text, timestamp, boolean, integer, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, boolean, integer, numeric, bigserial, varchar, smallint, jsonb, bigint } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
-  email: text('email').notNull().unique(), // 邮箱作为唯一登录标识
-  passwordHash: text('password_hash').notNull(), // 存储哈希后的密码，严禁明文
-  isActive: boolean('is_active').default(true).notNull(), // 账户状态
-  lastLoginAt: timestamp('last_login_at'), // 最后登录时间
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  lastLoginAt: timestamp('last_login_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  // 阶段三新增字段
+  phone: varchar('phone', { length: 20 }),
+  pwdHash: varchar('pwd_hash', { length: 128 }),
+  nickname: varchar('nickname', { length: 50 }),
+  status: smallint('status').default(1),
 });
 
 export const restaurants = pgTable('restaurants', {
@@ -55,4 +60,61 @@ export const orderItems = pgTable('order_items', {
   unitPrice: numeric('unit_price', { precision: 10, scale: 2 }).notNull(),
   quantity: integer('quantity').notNull(),
   subtotal: numeric('subtotal', { precision: 10, scale: 2 }).notNull(),
+});
+
+// ========== 阶段三·核心基础表 ==========
+
+export const products = pgTable('products', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  title: varchar('title', { length: 200 }).notNull(),
+  categoryId: integer('category_id').notNull(),
+  price: numeric('price', { precision: 12, scale: 2 }).notNull(),
+  status: smallint('status').default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+export const skus = pgTable('skus', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  productId: bigint('product_id', { mode: 'number' }).references(() => products.id),
+  attrs: jsonb('attrs'),
+  price: numeric('price', { precision: 12, scale: 2 }),
+  amount: numeric('amount', { precision: 12, scale: 2 }),
+  status: smallint('status').default(0),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+});
+
+// payments 父表（已改造为 RANGE 分区 by paid_at，子分区: payments_YYYY_MM）
+export const payments = pgTable('payments', {
+  id: bigserial('id', { mode: 'number' }).notNull(),
+  orderId: bigint('order_id', { mode: 'number' }).notNull(),
+  channel: varchar('channel', { length: 20 }),
+  amount: numeric('amount', { precision: 12, scale: 2 }),
+  status: smallint('status').default(0),
+  paidAt: timestamp('paid_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ========== 阶段三·第二步：订单分表 + 归档分区 ==========
+
+/**
+ * 订单分表工厂：orders_00 ~ orders_63（user_id % 64 路由）
+ * 用法：const shard05 = ordersShardTable(5);
+ */
+export function ordersShardTable(shardNo: number) {
+  const name = `orders_${String(shardNo).padStart(2, '0')}`;
+  return pgTable(name, {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    userId: bigint('user_id', { mode: 'number' }).notNull(),
+    total: numeric('total', { precision: 12, scale: 2 }),
+    status: smallint('status').default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  });
+}
+
+// 冷数据归档主表（RANGE 分区 by created_at，子分区: orders_archive_YYYY_MM）
+export const ordersArchive = pgTable('orders_archive', {
+  id: bigint('id', { mode: 'number' }).notNull(),
+  userId: bigint('user_id', { mode: 'number' }).notNull(),
+  total: numeric('total', { precision: 12, scale: 2 }),
+  status: smallint('status').default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
 });

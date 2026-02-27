@@ -18,7 +18,7 @@ CDN/WAF → Caddy LB x2 → API Gateway x6 → 微服务层 → 数据层
 - 认证：JWT + Redis 黑名单校验
 - 限流：IP + UserID 双层令牌桶（Redis DECR）
 - 容错：熔断（半开探测）、超时（默认 3s/支付 10s）、GET 幂等重试 1 次
-- 统一响应：`{ code, data, message, requestId }`
+- 统一响应：`{ code, data, message, success }`
 
 ## 数据库（PG 4 库）
 

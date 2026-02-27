@@ -80,21 +80,157 @@ while read -r node_id; do
 done < <(docker node ls --filter "node.label=tier=db" --format '{{.ID}}')
 
 READY_DB_SLOTS=$(printf '%s' "${READY_DB_SLOT_LINES}" \
-  | grep -E '^[0-9]+$' \
+  | awk '/^[0-9]+$/' \
   | sort -n \
   | uniq \
   | paste -sd',' -)
 
-MISSING_DB_SLOTS=""
-for slot in 1 2 3 4 5 6 7 8 9 10; do
-  if [[ ",${READY_DB_SLOTS}," != *",${slot},"* ]]; then
-    if [[ -z "${MISSING_DB_SLOTS}" ]]; then
-      MISSING_DB_SLOTS="${slot}"
-    else
-      MISSING_DB_SLOTS="${MISSING_DB_SLOTS},${slot}"
-    fi
+HAS_DB_PRIMARY_SLOT=false
+READY_DB_REPLICA_SLOT_LINES=""
+while read -r slot; do
+  [[ -z "${slot}" ]] && continue
+  if [[ "${slot}" == "1" ]]; then
+    HAS_DB_PRIMARY_SLOT=true
+  else
+    READY_DB_REPLICA_SLOT_LINES+="${slot}"$'\n'
   fi
-done
+done < <(printf '%s' "${READY_DB_SLOTS}" | tr ',' '\n')
+
+READY_DB_REPLICA_SLOTS=$(printf '%s' "${READY_DB_REPLICA_SLOT_LINES}" \
+  | awk '/^[0-9]+$/' \
+  | sort -n \
+  | uniq \
+  | paste -sd',' -)
+READY_DB_REPLICA_COUNT=0
+if [[ -n "${READY_DB_REPLICA_SLOTS}" ]]; then
+  READY_DB_REPLICA_COUNT=$(printf '%s' "${READY_DB_REPLICA_SLOTS}" | tr ',' '\n' | wc -l | tr -d ' ')
+fi
+
+generate_dynamic_haproxy_ro_cfg() {
+  local output_file="$1"
+  local replica_count="$2"
+
+  cat > "${output_file}" <<'EOF'
+global
+  log stdout format raw local0
+  maxconn 4096
+
+defaults
+  log global
+  mode tcp
+  option tcplog
+  timeout connect 5s
+  timeout client 60s
+  timeout server 60s
+
+frontend pg_ro
+  bind *:5432
+  default_backend postgres_replicas
+
+backend postgres_replicas
+  balance roundrobin
+  option tcp-check
+  default-server inter 2s rise 2 fall 3
+EOF
+
+  local i
+  for ((i = 1; i <= replica_count; i++)); do
+    echo "  server replica${i} postgres-replica-${i}:5432 check" >> "${output_file}"
+  done
+}
+
+generate_dynamic_multi_stack() {
+  local output_file="$1"
+  local replica_slots_csv="$2"
+  local tmp_file
+  tmp_file=$(mktemp)
+
+  awk '/^  postgres-replica-1:/{exit} {print}' swarm/stack.yml > "${output_file}"
+
+  local i=0
+  local slot
+  while read -r slot; do
+    [[ -z "${slot}" ]] && continue
+    i=$((i + 1))
+    if [[ "${i}" -eq 1 ]]; then
+      cat >> "${output_file}" <<EOF
+
+  postgres-replica-${i}:
+    image: postgres:16-alpine
+    environment: &replica_env
+      POSTGRES_USER: "\${POSTGRES_USER:-user}"
+      POSTGRES_PASSWORD: "\${POSTGRES_PASSWORD:-password}"
+      POSTGRES_DB: "\${POSTGRES_DB:-mydb}"
+      PGDATA: /var/lib/postgresql/data
+      PRIMARY_HOST: postgres-primary
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: "\${POSTGRES_REPLICATION_PASSWORD:-repl_password}"
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: &replica_configs
+      - source: postgres_replica_setup
+        target: /replica-setup.sh
+        mode: 0555
+    volumes:
+      - postgres_replica_${i}_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: &replica_health
+      test: ["CMD-SHELL", "pg_isready -U \$\$POSTGRES_USER -d \$\$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == ${slot}
+      restart_policy:
+        condition: on-failure
+EOF
+    else
+      cat >> "${output_file}" <<EOF
+
+  postgres-replica-${i}:
+    image: postgres:16-alpine
+    environment: *replica_env
+    entrypoint: ["bash", "/replica-setup.sh"]
+    configs: *replica_configs
+    volumes:
+      - postgres_replica_${i}_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck: *replica_health
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.tier == db
+          - node.labels.db_slot == ${slot}
+      restart_policy:
+        condition: on-failure
+EOF
+    fi
+  done < <(printf '%s' "${replica_slots_csv}" | tr ',' '\n')
+
+  awk '/^  haproxy-ro:/{found=1} found{print}' swarm/stack.yml >> "${output_file}"
+
+  if [[ "${i}" -gt 9 ]]; then
+    awk -v max_replica="${i}" '
+      /^configs:$/ {
+        for (n = 10; n <= max_replica; n++) {
+          print "  postgres_replica_" n "_data:"
+        }
+      }
+      { print }
+    ' "${output_file}" > "${tmp_file}"
+    mv "${tmp_file}" "${output_file}"
+  fi
+
+  sed 's#file: ./haproxy/haproxy-ro.cfg#file: ./haproxy/haproxy-ro.generated.cfg#' "${output_file}" > "${tmp_file}"
+  mv "${tmp_file}" "${output_file}"
+}
 
 STACK_FILE=swarm/stack.yml
 SELECTED_MODE=multi
@@ -104,7 +240,7 @@ if [[ "${DEPLOY_MODE}" == "single" ]]; then
   SELECTED_MODE=single
 elif [[ "${DEPLOY_MODE}" == "auto" ]]; then
   # Auto mode should choose stack by schedulable capacity, not raw swarm size.
-  if [[ "${ACTIVE_API_NODE_COUNT}" -le 1 || -n "${MISSING_DB_SLOTS}" ]]; then
+  if [[ "${ACTIVE_API_NODE_COUNT}" -le 1 || "${HAS_DB_PRIMARY_SLOT}" != "true" || "${READY_DB_REPLICA_COUNT}" -lt 1 ]]; then
     STACK_FILE=swarm/stack-single.yml
     SELECTED_MODE=single
   fi
@@ -129,9 +265,14 @@ if [[ "${SELECTED_MODE}" == "multi" ]]; then
     echo "Tip: label at least one ready node with: docker node update --label-add tier=api <node>"
     exit 1
   fi
-  if [[ -n "${MISSING_DB_SLOTS}" ]]; then
-    echo "Multi stack requires db_slot=1..10, but missing ready slots: ${MISSING_DB_SLOTS}"
-    echo "Tip: either add db nodes/labels, or set DEPLOY_MODE=single for current cluster size."
+  if [[ "${HAS_DB_PRIMARY_SLOT}" != "true" ]]; then
+    echo "Multi stack requires a ready db node with db_slot=1 for postgres-primary."
+    echo "Tip: label one ready db node with db_slot=1, or set DEPLOY_MODE=single."
+    exit 1
+  fi
+  if [[ "${READY_DB_REPLICA_COUNT}" -lt 1 ]]; then
+    echo "Multi stack requires at least one ready db replica slot (>1)."
+    echo "Tip: add a db node with db_slot>=2, or set DEPLOY_MODE=single."
     exit 1
   fi
   if [[ "${API_REPLICAS}" -gt "${ACTIVE_API_NODE_COUNT}" ]]; then
@@ -141,9 +282,17 @@ if [[ "${SELECTED_MODE}" == "multi" ]]; then
 fi
 export API_REPLICAS
 
+if [[ "${SELECTED_MODE}" == "multi" ]]; then
+  STACK_FILE=swarm/stack.multi.generated.yml
+  HAPROXY_RO_CFG_PATH=swarm/haproxy/haproxy-ro.generated.cfg
+  generate_dynamic_haproxy_ro_cfg "${HAPROXY_RO_CFG_PATH}" "${READY_DB_REPLICA_COUNT}"
+  generate_dynamic_multi_stack "${STACK_FILE}" "${READY_DB_REPLICA_SLOTS}"
+fi
+
 echo "Deploying stack ${STACK_NAME} with image ${IMAGE_REPOSITORY}:${IMAGE_TAG}"
 echo "Swarm nodes: ${NODE_COUNT}, ready api nodes: ${ACTIVE_API_NODE_COUNT}, ready db nodes: ${ACTIVE_DB_NODE_COUNT}"
 echo "Ready db slots: ${READY_DB_SLOTS:-none}"
+echo "Ready db replica slots (>1): ${READY_DB_REPLICA_SLOTS:-none}"
 echo "Deploy mode: ${SELECTED_MODE}, stack file: ${STACK_FILE}, api replicas: ${API_REPLICAS}"
 
 # Docker Swarm configs are immutable — content changes require new names.
@@ -162,7 +311,7 @@ export POSTGRES_REPLICA_SETUP_HASH=$(config_hash "sim/postgres/replica-setup.sh"
 if [[ "${SELECTED_MODE}" == "single" ]]; then
   export HAPROXY_RO_SINGLE_CFG_HASH=$(config_hash "swarm/haproxy/haproxy-ro-single.cfg")
 else
-  export HAPROXY_RO_CFG_HASH=$(config_hash "swarm/haproxy/haproxy-ro.cfg")
+  export HAPROXY_RO_CFG_HASH=$(config_hash "${HAPROXY_RO_CFG_PATH:-swarm/haproxy/haproxy-ro.cfg}")
 fi
 echo "Config hashes: caddy=${CADDYFILE_HASH} pg-init=${POSTGRES_PRIMARY_INIT_HASH} pg-replica=${POSTGRES_REPLICA_SETUP_HASH}"
 

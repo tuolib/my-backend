@@ -1,0 +1,42 @@
+version: "3.8"
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: 123
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  order-service:
+    build: ../../services/order-service
+    environment:
+      DATABASE_URL: postgres://postgres:123@postgres:5432/orderdb
+      USER_SERVICE_URL: http://user-service:3001
+    depends_on:
+      - postgres
+      - redis
+      - user-service
+
+  user-service:
+    build: ../../services/user-service
+    ports:
+      - "3001:3000"
+
+  inventory-service:
+    build: ../../services/inventory-service
+    ports:
+      - "3002:3000"
+
+  api-gateway:
+    build: ../../apps/api-gateway
+    ports:
+      - "3000:3000"
+    depends_on:
+      - order-service
+      - user-service
+      - inventory-service

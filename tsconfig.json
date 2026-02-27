@@ -12,13 +12,30 @@
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@cache": ["packages/cache"],
+      "@cache/*": ["packages/cache/*"],
+      "@config": ["packages/config"],
+      "@config/*": ["packages/config/*"],
+      "@core": ["packages/core"],
+      "@core/*": ["packages/core/*"],
+      "@database": ["packages/database"],
+      "@database/*": ["packages/database/*"],
+      "@logger": ["packages/logger"],
+      "@logger/*": ["packages/logger/*"],
+      "@middleware": ["packages/middleware"],
+      "@middleware/*": ["packages/middleware/*"],
+      "@response": ["packages/response"],
+      "@response/*": ["packages/response/*"],
+      "@shared-types": ["packages/types"],
+      "@shared-types/*": ["packages/types/*"],
+      "@validation": ["packages/validation"],
+      "@validation/*": ["packages/validation/*"]
     },
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["apps/**/*", "services/**/*", "packages/**/*", "infra/**/*"],
   "exclude": ["node_modules", "dist"]
 }

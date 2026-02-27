@@ -2,9 +2,15 @@
   "name": "ho-ecommerce",
   "version": "1.0.0",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "bun run --hot src/index.ts",
-    "start": "bun run src/index.ts",
+    "dev:gateway": "bun run --filter api-gateway dev",
+    "dev:order": "bun run --filter order-service dev",
+    "dev": "bun run dev:gateway & bun run dev:order",
     "lint": "biome check src/",
     "format": "biome format --write src/"
   },
@@ -12,6 +18,7 @@
     "drizzle-orm": "^0.38.0",
     "hono": "^4.7.0",
     "ioredis": "^5.4.2",
+    "pg": "^8.19.0",
     "pino": "^9.6.0",
     "postgres": "^3.4.5",
     "prettier": "^3.8.1",
@@ -19,6 +26,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
+    "@types/ioredis": "^5.0.0",
     "drizzle-kit": "^0.30.0",
     "typescript": "^5.7.0"
   }

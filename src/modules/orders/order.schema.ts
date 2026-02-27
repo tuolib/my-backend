@@ -10,6 +10,15 @@ export const createOrderSchema = z.object({
       })
     )
     .min(1, '至少选择一个菜品'),
+  // SKU 级库存预扣（电商场景），不传则跳过库存预扣
+  skuItems: z
+    .array(
+      z.object({
+        skuId: z.number().int().positive('skuId 必须为正整数'),
+        quantity: z.number().int().min(1, '数量至少为 1'),
+      })
+    )
+    .optional(),
   remark: z.string().max(200).optional(),
 });
 

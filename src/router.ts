@@ -5,6 +5,7 @@ import { loginRoute } from '@/modules/login/login.route.ts';
 import userRoute from '@/modules/users/user.route.ts';
 import { menuRoute } from '@/modules/menu/menu.route.ts';
 import { orderRoute } from '@/modules/orders/order.route.ts';
+import { internalRoute } from '@/modules/orders/internal.route.ts';
 
 /**
  * 构建完整路由树。
@@ -34,6 +35,9 @@ export const buildRouter = (): Hono => {
   protectedApi.route('/users', userRoute);
   protectedApi.route('/menu', menuRoute);
   protectedApi.route('/orders', orderRoute);
+
+  // 内部调试路由（无需认证，仅开发环境使用）
+  router.route('/internal', internalRoute);
 
   // 统一挂载到 /api/v1
   router.route('/api/v1', publicApi);

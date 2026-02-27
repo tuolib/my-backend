@@ -1,0 +1,82 @@
+### ============================================================
+### 阶段三·第四步 联调测试
+### 前置：需要先登录获取 token，设置 Redis 库存
+### ============================================================
+
+### 变量
+@baseUrl = http://localhost:3000
+@token = <替换为登录返回的 accessToken>
+
+### -----------------------------------------------------------
+### 0. 准备：通过 Redis CLI 设置 SKU 库存（在容器内执行）
+### docker exec -it my-backend-sim-redis-1 redis-cli SET stock:1 100
+### -----------------------------------------------------------
+
+### -----------------------------------------------------------
+### 1. 正常下单 — 带 SKU 库存预扣
+### 预期：200，库存预扣成功，stock_ledger + outbox_events 各写入一条
+### -----------------------------------------------------------
+POST {{baseUrl}}/api/v1/orders/create
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "restaurantId": 1,
+  "items": [
+    { "menuItemId": 1, "quantity": 2 }
+  ],
+  "skuItems": [
+    { "skuId": 1, "quantity": 2 }
+  ],
+  "remark": "库存预扣联调测试"
+}
+
+### -----------------------------------------------------------
+### 2. 库存不足下单
+### 先将 Redis stock:999 设为 0:
+### docker exec -it my-backend-sim-redis-1 redis-cli SET stock:999 0
+### 预期：400，"SKU 999 库存不足"
+### -----------------------------------------------------------
+POST {{baseUrl}}/api/v1/orders/create
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "restaurantId": 1,
+  "items": [
+    { "menuItemId": 1, "quantity": 1 }
+  ],
+  "skuItems": [
+    { "skuId": 999, "quantity": 1 }
+  ]
+}
+
+### -----------------------------------------------------------
+### 3. 手动触发 Outbox 处理
+### 预期：200，返回 { total, sent, failed, errors }
+### -----------------------------------------------------------
+POST {{baseUrl}}/internal/outbox/process
+Content-Type: application/json
+
+### -----------------------------------------------------------
+### 4. 再次触发 Outbox（应无新事件）
+### 预期：total=0
+### -----------------------------------------------------------
+POST {{baseUrl}}/internal/outbox/process
+Content-Type: application/json
+
+### -----------------------------------------------------------
+### 5. 不带 skuItems 的普通下单（向后兼容）
+### 预期：200，不触发库存预扣
+### -----------------------------------------------------------
+POST {{baseUrl}}/api/v1/orders/create
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "restaurantId": 1,
+  "items": [
+    { "menuItemId": 1, "quantity": 1 }
+  ],
+  "remark": "无 SKU 的普通下单"
+}

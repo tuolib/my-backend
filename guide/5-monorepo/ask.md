@@ -93,78 +93,12 @@ packages/
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-ecommerce-monorepo/
-├─ apps/                    # 所有可独立部署的应用
-├─ services/                # 核心业务域服务（未来扩展）
-├─ packages/                # 跨服务共享的基础能力
-├─ infra/                   # 基础设施与部署相关
-├─ configs/                 # 全局统一配置
-├─ scripts/                 # 工程级脚本
-├─ docs/                    # 架构与规范文档
-├─ .docker/                 # Docker 构建相关
-├─ .github/                 # CI/CD（可选）
-├─ bun.lockb
-├─ package.json
-└─ README.md
-
-
-
+1 你觉得需要单独加一个 apps 目录吗？
 apps/
 ├─ api-gateway/             # API 网关（唯一外部入口）
 
 
-services/
-├─ user-service/
-├─ product-service/
-├─ order-service/
-├─ payment-service/
-└─ inventory-service/
-
-
-
-packages/
-├─ core/                    # 核心抽象（不依赖业务）
-│  ├─ app-kernel/           # 应用生命周期 / 启动模型
-│  ├─ http/                 # Request / Response 抽象
-│  ├─ error/                # 错误体系定义
-│  └─ context/              # 请求上下文（trace / auth）
-│
-├─ config/                  # 统一配置加载规范
-│  ├─ env/                  # 环境变量 schema
-│  └─ runtime/              # 多环境配置解析
-│
-├─ response/                # 统一响应格式标准
-│
-├─ logger/                  # 统一日志规范
-│
-├─ cache/                   # Redis 抽象（对接 :contentReference[oaicite:2]{index=2}）
-│
-├─ database/                # DB 抽象（对接 :contentReference[oaicite:3]{index=3}）
-│
-├─ middleware/              # 通用中间件集合
-│
-├─ validation/              # 参数校验规范
-│
-└─ types/                   # 全局 TypeScript 类型
-
-
-
-
-
-
-
-
+2 你觉得需要加一个 infra 目录替换掉你的 packages/database 吗？
 infra/
 ├─ docker/
 │  ├─ api-gateway/
@@ -176,22 +110,60 @@ infra/
 ├─ redis/
 └─ local-dev/               # 本地一键启动方案
 
+infra/postgres/pg-client.ts 的代码：
+import { Pool } from 'pg';
+
+export const pgPool = new Pool({
+connectionString: process.env.DATABASE_URL,
+});
+
+export async function query(sql: string, params?: any[]) {
+return pgPool.query(sql, params);
+}
+
+export interface Database {
+query(sql: string, params?: any[]): Promise<any>
+}
+
+接着专门有一个 packages/database/index.ts 的实例
+let dbInstance: Database
+
+export function setDatabase(db: Database) {
+dbInstance = db
+}
+
+export function getDb(): Database {
+if (!dbInstance) throw new Error("Database not initialized")
+return dbInstance
+}
+
+
+然后在用到的services里进行初始化, 然后这个服务就可以自己调用了 getDb：
+import { setDatabase } from "@database";
+setDatabase({ query });
 
 
 
-
-configs/
-├─ eslint/
-├─ typescript/
-├─ prettier/
-├─ commitlint/
-└─ conventions/             # 命名 / 分层 / 目录规范
-
-
-
-scripts/
-├─ dev/
-├─ build/
-├─ lint/
-├─ test/
-└─ release/
+shared/                   # 通用工具与核心抽象
+│   │   ├── package.json
+│   │   └── src/
+│   │       ├── index.ts                # 统一导出
+│   │       ├── config/                 # 环境变量加载 & 校验 (env schema)
+│   │       │   └── index.ts
+│   │       ├── errors/                 # 统一错误类体系 (AppError, BizError…)
+│   │       │   ├── index.ts
+│   │       │   ├── http-errors.ts      # 400/401/403/404/409/422/500…
+│   │       │   └── error-codes.ts      # 业务错误码枚举
+│   │       ├── response/               # 统一响应格式
+│   │       │   └── index.ts
+│   │       ├── middleware/             # 可复用 Hono 中间件
+│   │       │   ├── error-handler.ts    # 全局异常捕获 → 统一响应
+│   │       │   ├── request-id.ts       # traceId 注入
+│   │       │   ├── logger.ts           # 请求日志
+│   │       │   ├── validate.ts         # Zod 参数校验中间件
+│   │       │   └── auth.ts             # JWT / Session 鉴权 (预留)
+│   │       ├── types/                  # 全局 TS 类型
+│   │       │   └── index.ts
+│   │       └── utils/                  # 通用工具函数
+│   │           ├── id.ts               # 分布式 ID 生成 (snowflake / nanoid)
+│   │           └── time.ts

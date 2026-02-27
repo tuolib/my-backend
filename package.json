@@ -10,9 +10,9 @@
   "scripts": {
     "dev:gateway": "bun run --filter api-gateway dev",
     "dev:order": "bun run --filter order-service dev",
-    "dev": "bun run dev:gateway & bun run dev:order",
-    "lint": "biome check src/",
-    "format": "biome format --write src/"
+    "dev": "bun run dev:gateway",
+    "lint": "prettier check packages/",
+    "format": "prettier format --write packages/"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.0",

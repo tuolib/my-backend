@@ -1,0 +1,14 @@
+{
+  "name": "@ho/shared",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config/index.ts",
+    "./errors": "./src/errors/index.ts",
+    "./response": "./src/response/index.ts",
+    "./middleware": "./src/middleware/index.ts",
+    "./types": "./src/types/index.ts",
+    "./utils/*": "./src/utils/*.ts"
+  }
+}

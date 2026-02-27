@@ -36,7 +36,9 @@ env:
   # workflow_dispatch: 支持手动输入分支；未输入则使用 Run workflow 选择的分支
   DEPLOY_BRANCH: ${{ inputs.deploy_branch || github.ref_name }}
   SWARM_DOMAIN: ${{ vars.SWARM_DOMAIN || 'api.find345.site' }}
-  DEPLOY_MODE: ${{ inputs.deploy_mode || vars.DEPLOY_MODE || 'auto' }}
+  # Keep push-triggered deploys adaptive to current cluster size.
+  # Manual runs can still override via workflow_dispatch input.
+  DEPLOY_MODE: ${{ inputs.deploy_mode || 'auto' }}
   API_REPLICAS_SINGLE: ${{ vars.API_REPLICAS_SINGLE || '2' }}
   API_REPLICAS_MULTI: ${{ vars.API_REPLICAS_MULTI || '10' }}
   DB_POOL_MAX: ${{ vars.DB_POOL_MAX || '5' }}

@@ -6,8 +6,7 @@ Enterprise e-commerce platform — Monorepo (Bun + Hono + Drizzle + PostgreSQL +
 
 ```bash
 bun install          # install dependencies
-bun run dev          # start infra + migrate (one command)
-bun run dev:gateway  # start API Gateway (another terminal)
+bun run dev          # one command: docker + migrate + all services
 ```
 
 ## Scripts
@@ -22,7 +21,7 @@ bun run dev:gateway  # start API Gateway (another terminal)
 | `bun run dev:clean` | Stop and remove containers + volumes (full reset) |
 | `bun run dev:logs` | Tail container logs |
 | `bun run dev:ps` | Show container status |
-| `bun run dev` | One-command dev startup (infra + wait + migrate) |
+| `bun run dev` | One-command startup (infra + migrate + all services) |
 
 ### Database
 
@@ -33,13 +32,6 @@ bun run dev:gateway  # start API Gateway (another terminal)
 | `bun run db:studio` | Launch Drizzle Studio (visual DB browser) |
 | `bun run db:psql` | Connect to PG interactive terminal |
 | `bun run db:reset` | Full DB reset (drop volumes + recreate + migrate) |
-
-### Services
-
-| Command | Description |
-|---------|-------------|
-| `bun run dev:gateway` | Start API Gateway (port 3000) |
-| `bun run dev:order` | Start Order Service |
 
 ### Code Quality
 

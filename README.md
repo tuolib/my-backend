@@ -39,3 +39,10 @@ bun run dev          # one command: docker + migrate + all services
 |---------|-------------|
 | `bun run lint` | Check formatting with Prettier |
 | `bun run format` | Auto-format with Prettier |
+
+
+### test api 
+
+```bash
+bun test --env-file ../../../../.env user.test.ts
+```

@@ -1,16 +1,17 @@
+/**
+ * API Gateway 入口
+ * 唯一外部入口 :3000
+ */
 import { serve } from "bun";
-import { loadEnv, createRuntimeConfig } from "@repo/shared/config";
-import { initDatabase } from "@repo/database";
+import { getConfig } from "@repo/shared";
 import { app } from "./app";
 
-const env = loadEnv();
-const config = createRuntimeConfig(env);
-
-initDatabase(config.database);
+const config = getConfig();
+const port = config.server.ports.gateway;
 
 serve({
   fetch: app.fetch,
-  port: config.server.port,
+  port,
 });
 
-console.log(`API Gateway running at http://localhost:${config.server.port}`);
+console.log(`API Gateway running at http://localhost:${port}`);

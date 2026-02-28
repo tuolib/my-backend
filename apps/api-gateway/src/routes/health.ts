@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getSql, redisIns } from "@repo/database";
+import { connection, redis } from "@repo/database";
 
 const health = new Hono();
 
@@ -7,15 +7,14 @@ health.get("/health", async (c) => {
   const checks: Record<string, string> = {};
 
   try {
-    const sql = getSql();
-    await sql`SELECT 1`;
+    await connection`SELECT 1`;
     checks.pg = "ok";
   } catch {
     checks.pg = "fail";
   }
 
   try {
-    await redisIns.ping();
+    await redis.ping();
     checks.redis = "ok";
   } catch {
     checks.redis = "fail";

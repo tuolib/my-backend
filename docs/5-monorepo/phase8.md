@@ -41,7 +41,7 @@ FROM oven/bun:1-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY version2 .
 
 # 类型检查（可选，CI 中已做）
 # RUN bun run --filter @repo/shared build

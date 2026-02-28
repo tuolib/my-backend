@@ -116,20 +116,24 @@ services/{service-name}/src/
 ```typescript
 // 成功
 {
+  code: 200, 
   success: true,
   data: T,
+  message: '',
   traceId: string
 }
 
 // 失败
 {
+  code: string,
   success: false,
-  error: {
-    code: string,        // 业务错误码，如 "STOCK_INSUFFICIENT"
-    message: string,
-    details?: unknown
-  },
-  traceId: string
+  message: string, // 提示语
+  data: T,
+  meta: {
+    code: string,        // 业务错误码，如 "USER_NOT_FOUND"
+    message: string,     // 人类可读描述
+    details?: unknown    // 可选，校验错误详情等
+  }
 }
 ```
 

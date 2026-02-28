@@ -46,12 +46,7 @@ export async function migrate() {
 // 直接执行: bun run packages/database/src/migrate.ts
 if (import.meta.main) {
   const { initDatabase } = await import('./client');
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    console.error('[migrate] DATABASE_URL is required');
-    process.exit(1);
-  }
-  initDatabase({ url, poolMax: 5, poolIdleTimeout: 30 });
+  initDatabase({ poolMax: 5 });
 
   migrate()
     .then(() => process.exit(0))

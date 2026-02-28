@@ -1,10 +1,37 @@
-import { Hono } from "hono";
+/**
+ * Product Service — Hono app 入口 :3002
+ * 商品管理、分类、SKU、搜索、缓存
+ */
+import { Hono } from 'hono';
+import { requestId, logger, errorHandler } from '@repo/shared';
+import type { AppEnv } from '@repo/shared';
+import productRoutes from './routes/product';
+import categoryRoutes from './routes/category';
+import adminProductRoutes from './routes/admin-product';
+import adminCategoryRoutes from './routes/admin-category';
+import internalRoutes from './routes/internal';
 
-const app = new Hono();
+const app = new Hono<AppEnv>();
 
-app.post("/health", (c) => c.json({ status: "ok", service: "product-service" }));
+// 全局中间件
+app.use('*', requestId());
+app.use('*', logger());
+app.onError(errorHandler);
+
+// 挂载路由
+app.route('/api/v1/product', productRoutes);
+app.route('/api/v1/category', categoryRoutes);
+app.route('/api/v1/admin/product', adminProductRoutes);
+app.route('/api/v1/admin/category', adminCategoryRoutes);
+app.route('/internal/product', internalRoutes);
+
+// 健康检查
+app.post('/health', (c) => c.json({ status: 'ok', service: 'product-service' }));
 
 export default {
-  port: 3002,
+  port: Number(process.env.PRODUCT_SERVICE_PORT) || 3002,
   fetch: app.fetch,
 };
+
+// 导出 app 实例供测试使用
+export { app };

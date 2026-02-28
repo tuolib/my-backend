@@ -100,6 +100,46 @@ export interface OrderAddressDetail {
   postalCode: string | null;
 }
 
+// ────────────────────────────── 支付 DTO ──────────────────────────────
+
+export interface CreatePaymentInput {
+  orderId: string;
+  method: string;
+}
+
+export interface PaymentNotifyInput {
+  orderId: string;
+  transactionId: string;
+  status: 'success' | 'failed';
+  amount: number;
+  method: string;
+  rawData?: Record<string, unknown>;
+}
+
+export interface QueryPaymentInput {
+  orderId: string;
+}
+
+export interface PaymentInfo {
+  paymentId: string;
+  method: string;
+  amount: string;
+  payUrl: string;
+}
+
+export interface PaymentStatusResult {
+  orderId: string;
+  orderStatus: string;
+  payments: Array<{
+    id: string;
+    method: string;
+    amount: string;
+    status: string;
+    transactionId: string | null;
+    createdAt: Date;
+  }>;
+}
+
 // ────────────────────────────── 跨服务类型 ──────────────────────────────
 
 /** product-service /internal/product/sku/batch 返回的 SKU 详情 */

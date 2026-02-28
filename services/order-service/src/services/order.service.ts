@@ -174,8 +174,23 @@ export async function create(
 
       return createdOrder;
     });
-  } catch (err) {
-    // PG 事务失败 → 回滚库存预扣
+  } catch (err: any) {
+    // PG unique constraint on idempotency_key (code 23505) → 并发幂等竞争
+    // 释放本次库存预扣，返回先成功插入的那条订单
+    if (err?.code === '23505' && String(err?.constraint_name ?? err?.message ?? '').includes('idempotency')) {
+      console.warn(`[order-service] idempotency race detected, releasing stock for ${orderId}`);
+      await productClient.releaseStock(stockItems, orderId);
+      const winner = await orderRepo.findByIdempotencyKey(idempotencyKey);
+      if (winner) {
+        return {
+          orderId: winner.id,
+          orderNo: winner.orderNo,
+          payAmount: winner.payAmount,
+          expiresAt: winner.expiresAt,
+        };
+      }
+    }
+    // 其他 PG 事务失败 → 回滚库存预扣并抛出
     console.error(`[order-service] PG transaction failed, releasing stock: ${(err as Error).message}`);
     await productClient.releaseStock(stockItems, orderId);
     throw err;

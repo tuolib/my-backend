@@ -1,9 +1,10 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { RuntimeConfig } from '@repo/shared/config';
+import * as schema from './schema';
 
 let sql: ReturnType<typeof postgres> | null = null;
-let db: ReturnType<typeof drizzle> | null = null;
+let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
 /** 从 RuntimeConfig 初始化连接池 */
 export function initDatabase(config: RuntimeConfig['database']) {
@@ -13,7 +14,7 @@ export function initDatabase(config: RuntimeConfig['database']) {
     idle_timeout: config.poolIdleTimeout,
     connect_timeout: 10,
   });
-  db = drizzle(sql);
+  db = drizzle(sql, { schema });
   return { db, sql };
 }
 

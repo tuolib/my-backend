@@ -5,23 +5,7 @@
 
 ## 阶段 2：数据库建模与分层
 
-### 目标
-设计面向高并发电商的 PostgreSQL 数据模型，建立 Repository 模式，为读写分离预留接口。
-
-### 操作清单
-- [ ] 选择 ORM/Query Builder（Drizzle ORM 推荐）
-- [ ] 设计核心表：users, products, skus, categories, orders, order_items, cart_items, payments, inventory
-- [ ] 建立数据库迁移体系（drizzle-kit）
-- [ ] 抽象 Repository 基类（CRUD 泛型）
-- [ ] 数据库连接池配置（pg pool）
-- [ ] 软删除、乐观锁（version 字段）、审计字段（created_at, updated_at, deleted_at）
-
-
-你是一位数据库架构师。请为高并发电商系统设计 PostgreSQL 数据模型。
-
-技术栈：Bun + Drizzle ORM + PostgreSQL
-
-
+# stop pre
 
 项目介绍：企业级高并发电商架构
 对标: Amazon / 阿里巴巴
@@ -48,13 +32,13 @@
 
 你是一位数据库架构师。请为高并发电商系统设计 PostgreSQL 数据模型。
 
-现在要做的是将这个模块分成多步骤实施，请告诉我第一步给Claude Code的提示词，不要超出500 token消耗
+现在要做的是将这个模块分成多步骤实施，请告诉我第一步给Claude Code的提示词
 
 
 
 
 
-
+# step 1
 
 项目介绍：企业级高并发电商架构
 对标: Amazon / 阿里巴巴
@@ -78,6 +62,9 @@
 - [ ] 抽象 Repository 基类（CRUD 泛型）
 - [ ] 数据库连接池配置（pg pool）
 - [ ] 软删除、乐观锁（version 字段）、审计字段（created_at, updated_at, deleted_at）
+
+
+你是一位数据库架构师。请为高并发电商系统设计 PostgreSQL 数据模型。
 
 请完成阶段2第一步——数据库基础设施搭建：
 
@@ -110,6 +97,8 @@
 
 
 
+# step 2
+
 
 项目介绍：企业级高并发电商架构
 对标: Amazon / 阿里巴巴
@@ -121,5 +110,178 @@
 - 共享层：统一配置、统一响应格式、统一错误处理
 - 基础设施：Dockerfile, docker-compose, Caddyfile
 
-要求：
-@package.json 中生成一个本地docker 启动的命令行，区分生产和本地开发环境
+当前处于阶段：阶段2，数据库建模与分层
+
+目标：
+- 设计面向高并发电商的 PostgreSQL 数据模型，建立 Repository 模式，为读写分离预留接口。
+
+
+项目背景：Bun + Hono Monorepo 电商项目，packages/database 已完成 Drizzle ORM 连接池配置。
+
+
+你是一位数据库架构师。请为高并发电商系统设计 PostgreSQL 数据模型。
+
+请完成阶段2第二步——核心商品域表结构设计：
+
+在 packages/database/src/schema/ 下创建以下文件：
+
+1. _common.ts — 公共字段工厂函数：
+    - baseColumns：id(uuid pk default gen_random_uuid), created_at, updated_at
+    - softDelete：deleted_at (timestamp nullable)
+    - optimisticLock：version (integer default 1 not null)
+    - 所有时间字段用 timestamp with time zone
+
+2. users.ts — 用户表：
+    - 继承 baseColumns + softDelete
+    - email (unique, not null), password_hash, nickname, phone (unique nullable)
+    - status enum: active, inactive, banned
+    - email_verified_at (timestamp nullable)
+    - 索引：email, phone, status
+
+3. categories.ts — 商品分类（支持无限层级）：
+    - 继承 baseColumns + softDelete
+    - name, slug (unique), parent_id (self ref nullable), sort_order, is_active
+    - ltree 或 materialized path 字段 path 用于高效层级查询
+    - 索引：slug, parent_id, path
+
+4. products.ts — 商品SPU：
+    - 继承 baseColumns + softDelete + optimisticLock
+    - name, slug (unique), description (text), brand
+    - category_id (fk categories), status enum: draft, active, inactive
+    - 索引：slug, category_id, status
+
+5. skus.ts — 商品SKU（实际售卖单元）：
+    - 继承 baseColumns + softDelete + optimisticLock
+    - product_id (fk products), sku_code (unique), price (numeric(12,2)), original_price
+    - attributes (jsonb，存规格如 {"颜色":"红","尺码":"XL"})
+    - stock (integer default 0), low_stock_threshold (integer default 10)
+    - is_active (boolean default true)
+    - 索引：product_id, sku_code, is_active
+    - stock 字段加 CHECK >= 0
+
+6. schema/index.ts 统一导出所有表和 relations
+
+设计原则：
+- SPU/SKU 分离，SKU 才持有价格和库存
+- 所有金额用 numeric(12,2) 不用 float
+- 枚举用 pgEnum 定义
+- 定义 drizzle relations（一对多、多对一）
+- 每个表文件底部导出 insert/select 的 Zod schema（用 createInsertSchema）
+
+
+
+
+
+# step 3
+
+
+项目介绍：企业级高并发电商架构
+对标: Amazon / 阿里巴巴
+技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
+工程结构：Monorepo
+
+已完成：
+- 阶段1 基础工程骨架
+- 共享层：统一配置、统一响应格式、统一错误处理
+- 基础设施：Dockerfile, docker-compose, Caddyfile
+
+当前处于阶段：阶段2，数据库建模与分层
+
+目标：
+- 设计面向高并发电商的 PostgreSQL 数据模型，建立 Repository 模式，为读写分离预留接口。
+
+项目背景：Bun + Hono Monorepo 电商项目，packages/database/src/schema/ 已完成 _common.ts, users.ts, categories.ts, products.ts, skus.ts。
+
+请完成阶段2第三步——订单与交易域表结构设计：
+
+在 packages/database/src/schema/ 下创建以下文件：
+
+1. cart_items.ts — 购物车：
+    - 继承 baseColumns
+    - user_id (fk users, not null), sku_id (fk skus, not null)
+    - quantity (integer, CHECK > 0)
+    - unique 约束 (user_id, sku_id) 防重复
+    - 索引：user_id
+    - 注意：购物车不需要软删除和乐观锁，直接硬删
+
+2. orders.ts — 订单主表：
+    - 继承 baseColumns + softDelete + optimisticLock
+    - order_no (varchar(32) unique not null) — 业务单号，非自增
+    - user_id (fk users, not null)
+    - status pgEnum: pending_payment, paid, shipping, delivered, completed, cancelled, refunding, refunded
+    - total_amount, discount_amount, shipping_fee, pay_amount — 全部 numeric(12,2)
+    - address_snapshot (jsonb) — 下单时收货地址快照，不依赖地址表
+    - paid_at, shipped_at, completed_at, cancelled_at (timestamp nullable)
+    - cancel_reason (text nullable)
+    - 索引：order_no, user_id, status, created_at DESC
+
+3. order_items.ts — 订单明细：
+    - 继承 baseColumns
+    - order_id (fk orders), sku_id (fk skus)
+    - product_snapshot (jsonb) — 下单时商品名称、图片、规格快照
+    - price (numeric(12,2)), quantity (integer CHECK > 0)
+    - subtotal (numeric(12,2)) — 冗余小计 = price * quantity
+    - 索引：order_id, sku_id
+
+4. payments.ts — 支付记录：
+    - 继承 baseColumns
+    - order_id (fk orders), payment_no (varchar(64) unique)
+    - method pgEnum: alipay, wechat, credit_card, balance
+    - amount (numeric(12,2))
+    - status pgEnum: pending, success, failed, refunded
+    - provider_transaction_id (varchar nullable) — 第三方流水号
+    - paid_at (timestamp nullable), raw_response (jsonb nullable)
+    - 索引：order_id, payment_no, status
+
+5. inventory_logs.ts — 库存流水（审计追踪）：
+    - 继承 baseColumns（无需软删除，流水不可删）
+    - sku_id (fk skus), change_quantity (integer, 可正可负)
+    - type pgEnum: purchase_in, sale_out, return_in, adjust, lock, unlock
+    - reference_type (varchar) + reference_id (uuid) — 多态关联(order/adjustment等)
+    - before_stock, after_stock (integer) — 变更前后快照
+    - operator_id (uuid nullable) — 操作人
+    - 索引：sku_id, type, created_at DESC, (reference_type, reference_id)
+
+6. 更新 schema/index.ts 统一导出所有新表和 relations
+
+7. 补充 relations 定义：
+    - user hasMany orders, cart_items
+    - order hasMany order_items, payments
+    - order_item belongsTo order, sku
+    - sku hasMany inventory_logs, cart_items
+    - payment belongsTo order
+
+设计原则：
+- 订单快照（地址、商品）保证历史数据不可变
+- 金额全部 numeric(12,2)，subtotal 冗余存储避免运行时计算
+- inventory_logs 只追加不修改，保证库存可审计可回溯
+- order_no 由业务层生成（如时间戳+随机），不暴露自增ID
+
+
+# step 4
+
+
+项目介绍：企业级高并发电商架构
+对标: Amazon / 阿里巴巴
+技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
+工程结构：Monorepo
+
+已完成：
+- 阶段1 基础工程骨架
+- 共享层：统一配置、统一响应格式、统一错误处理
+- 基础设施：Dockerfile, docker-compose, Caddyfile
+
+当前处于阶段：阶段2，数据库建模与分层
+
+目标：
+- 设计面向高并发电商的 PostgreSQL 数据模型，建立 Repository 模式，为读写分离预留接口。
+
+
+
+
+
+
+
+
+
+

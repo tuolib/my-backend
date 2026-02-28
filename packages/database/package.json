@@ -10,6 +10,7 @@
   "dependencies": {
     "@repo/shared": "workspace:*",
     "drizzle-orm": "^0.38.0",
+    "drizzle-zod": "^0.8.3",
     "ioredis": "^5.4.2",
     "postgres": "^3.4.5"
   },

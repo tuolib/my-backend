@@ -4,23 +4,23 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/ho_ecommerce
+      DATABASE_URL: postgres://user:password@db:5432/ecom
       REDIS_URL: redis://redis:6379
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
       redis:
         condition: service_healthy
     networks:
       - internal
 
-  postgres:
+  db:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ho_ecommerce
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ecom
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:

@@ -1,35 +1,22 @@
+/**
+ * 请求日志中间件 — 记录请求/响应摘要
+ * 格式：[traceId] POST /api/v1/product/list → 200 (12ms)
+ */
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../types/context';
-import type { AppLogger } from '../types/context';
 
-/** 请求日志中间件 — 记录请求/响应摘要 */
-export function requestLoggerMiddleware(logger: AppLogger): MiddlewareHandler<AppEnv> {
+export function logger(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const start = performance.now();
-
-    logger.info(
-      {
-        requestId: c.get('requestId'),
-        method: c.req.method,
-        path: c.req.path,
-        userAgent: c.req.header('User-Agent'),
-      },
-      'Incoming request'
-    );
+    const method = c.req.method;
+    const path = c.req.path;
 
     await next();
 
     const duration = Math.round(performance.now() - start);
+    const traceId = c.get('traceId') ?? '-';
+    const status = c.res.status;
 
-    logger.info(
-      {
-        requestId: c.get('requestId'),
-        method: c.req.method,
-        path: c.req.path,
-        status: c.res.status,
-        duration,
-      },
-      'Request completed'
-    );
+    console.log(`[${traceId}] ${method} ${path} → ${status} (${duration}ms)`);
   };
 }

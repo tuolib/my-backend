@@ -3,30 +3,29 @@
  * 用于 Hono 中间件与路由之间传递请求级别信息
  */
 import type { Env } from 'hono';
-import type { Nullable, ID } from './index';
+import type { ID } from './index';
 
-/** 认证用户信息 */
+/** 认证用户信息（注入到 context 中的精简结构） */
 export interface AuthUser {
   userId: ID;
-  role: 'admin' | 'user' | 'guest';
+  email: string;
 }
 
-/** JWT Payload */
-export interface JwtPayload {
+/** Access Token JWT Payload */
+export interface AccessTokenPayload {
   sub: string;
-  role: AuthUser['role'];
+  email: string;
+  jti: string;
   iat: number;
   exp: number;
 }
 
-/** 请求上下文 */
-export interface RequestContext {
-  traceId: string;
-  requestId: string;
-  auth: Nullable<AuthUser>;
-  startTime: number;
-  clientIp: string;
-  userAgent: string;
+/** Refresh Token JWT Payload */
+export interface RefreshTokenPayload {
+  sub: string;
+  jti: string;
+  iat: number;
+  exp: number;
 }
 
 /** Hono 变量绑定类型 */
@@ -34,7 +33,9 @@ export interface AppEnv extends Env {
   Variables: {
     requestId: string;
     traceId: string;
-    auth: Nullable<AuthUser>;
-    requestContext: RequestContext;
+    userId: string;
+    userEmail: string;
+    tokenJti: string;
+    validated: unknown;
   };
 }

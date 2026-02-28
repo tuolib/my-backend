@@ -47,15 +47,26 @@ export type {
 
 export type {
   AuthUser,
-  JwtPayload,
-  RequestContext,
+  AccessTokenPayload,
+  RefreshTokenPayload,
   AppEnv,
 } from './types/context';
 
 // ── utils ──
 export { generateId, generateOrderNo } from './utils/id';
 export { now, addMinutes, addDays, isExpired, formatISO } from './utils/time';
+export { hashPassword, verifyPassword, sha256 } from './utils/hash';
+export {
+  signAccessToken,
+  verifyAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+} from './utils/jwt';
 
 // ── middleware ──
-// 中间件模块将在 Phase 2 Step 2 中完善并导出
-// 当前骨架文件存在于 src/middleware/ 但依赖尚未安装（@hono/zod-validator 等）
+export { requestId } from './middleware/request-id';
+export { logger } from './middleware/logger';
+export { errorHandler } from './middleware/error-handler';
+export { validate } from './middleware/validate';
+export { createAuthMiddleware } from './middleware/auth';
+export { createIdempotentMiddleware } from './middleware/idempotent';

@@ -6,7 +6,9 @@
     "dev": "bun --env-file=../../.env run --watch src/index.ts"
   },
   "dependencies": {
+    "@repo/database": "workspace:*",
     "@repo/shared": "workspace:*",
-    "@repo/database": "workspace:*"
+    "hono": "^4.12.3",
+    "zod": "^4.3.6"
   }
 }

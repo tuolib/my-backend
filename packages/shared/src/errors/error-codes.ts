@@ -7,6 +7,7 @@ export const ErrorCode = {
   CONFLICT: 'CONFLICT',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   TOO_MANY_REQUESTS: 'TOO_MANY_REQUESTS',
+  OPTIMISTIC_LOCK_CONFLICT: 'OPTIMISTIC_LOCK_CONFLICT',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

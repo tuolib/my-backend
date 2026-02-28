@@ -13,6 +13,7 @@ export {
   ConflictError,
   InternalError,
   TooManyRequestsError,
+  OptimisticLockError,
 } from './errors/http-errors';
 
 // response

@@ -10,4 +10,5 @@ export {
   ConflictError,
   InternalError,
   TooManyRequestsError,
+  OptimisticLockError,
 } from './http-errors';

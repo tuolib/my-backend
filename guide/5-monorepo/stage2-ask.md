@@ -192,6 +192,8 @@
 
 项目背景：Bun + Hono Monorepo 电商项目，packages/database/src/schema/ 已完成 _common.ts, users.ts, categories.ts, products.ts, skus.ts。
 
+你是一位数据库架构师
+
 请完成阶段2第三步——订单与交易域表结构设计：
 
 在 packages/database/src/schema/ 下创建以下文件：
@@ -278,6 +280,72 @@
 
 
 
+项目背景：Bun + Hono Monorepo 电商项目，packages/database/src/schema/ 已完成全部表结构（users, categories, products, skus, cart_items, orders, order_items, payments, inventory_logs）。
+
+你是一位数据库架构师
+
+请完成阶段2第四步——Repository 模式抽象与数据库迁移体系：
+
+一、Repository 基类 packages/database/src/repository/base.repository.ts：
+
+1. BaseRepository<TTable, TInsert, TSelect> 泛型类：
+    - 构造函数接收 db 实例和 table 引用
+    - findById(id: string): Promise<TSelect | null>
+    - findMany(options: QueryOptions): Promise<PaginatedResult<TSelect>>
+        - QueryOptions: { where?, orderBy?, page?, pageSize?, includeDeleted? }
+        - PaginatedResult: { data, total, page, pageSize, totalPages }
+    - create(data: TInsert): Promise<TSelect>
+    - createMany(data: TInsert[]): Promise<TSelect[]>
+    - update(id: string, data: Partial<TInsert>): Promise<TSelect | null>
+        - 自动更新 updated_at
+    - delete(id: string): Promise<boolean>
+
+2. SoftDeleteRepository 继承 BaseRepository：
+    - 重写 delete → 设置 deleted_at 而非真删
+    - 重写 findById/findMany → 默认过滤 deleted_at IS NULL
+    - restore(id: string): Promise<TSelect | null>
+    - forceDelete(id: string): Promise<boolean>
+
+3. VersionedRepository 继承 SoftDeleteRepository：
+    - 重写 update → WHERE id = ? AND version = ? 乐观锁
+    - 更新时 version + 1
+    - 冲突时抛出 OptimisticLockError（自定义错误类）
+
+4. 事务支持：
+    - withTransaction<T>(fn: (tx) => Promise<T>): Promise<T>
+    - 事务内的操作复用同一个 tx 连接
+
+二、具体 Repository packages/database/src/repository/：
+
+- user.repository.ts extends SoftDeleteRepository
+    - findByEmail(email), findByPhone(phone)
+- product.repository.ts extends VersionedRepository
+    - findBySlug(slug), findByCategoryId(categoryId, options)
+- sku.repository.ts extends VersionedRepository
+    - findByProductId(productId), findBySkuCode(code)
+    - decrementStock(skuId, quantity) — 用 SQL: stock = stock - ? WHERE stock >= ? 原子操作防超卖
+- order.repository.ts extends VersionedRepository
+    - findByOrderNo(orderNo), findByUserId(userId, options)
+- inventory-log.repository.ts extends BaseRepository（流水只追加）
+    - findBySkuId(skuId, options)
+
+三、统一导出 packages/database/src/repository/index.ts
+
+四、数据库迁移体系：
+- 在 packages/database/package.json 中添加脚本：
+    - "db:generate": "drizzle-kit generate"
+    - "db:migrate": "drizzle-kit migrate"
+    - "db:studio": "drizzle-kit studio"
+- 运行 db:generate 生成首次迁移文件到 drizzle/ 目录
+
+五、更新 packages/database/src/index.ts：
+- 导出 db client、全部 schema、全部 repository、类型定义
+
+设计原则：
+- Repository 方法全部返回 Promise，为读写分离预留（未来 readDb/writeDb 切换）
+- decrementStock 必须用原子 SQL 不用 ORM 读改写
+- 分页查询用 COUNT + LIMIT OFFSET，返回统一分页结构
+- OptimisticLockError 继承自 @repo/shared 的自定义错误体系
 
 
 

@@ -5,7 +5,13 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
-    "./schema": "./src/schema/index.ts"
+    "./schema": "./src/schema/index.ts",
+    "./repository": "./src/repository/index.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@repo/shared": "workspace:*",

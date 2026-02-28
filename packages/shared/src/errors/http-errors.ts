@@ -53,3 +53,10 @@ export class TooManyRequestsError extends AppError {
     super(429, message, ErrorCode.TOO_MANY_REQUESTS);
   }
 }
+
+export class OptimisticLockError extends AppError {
+  constructor(resource: string, id: string) {
+    super(409, `${resource} #${id} has been modified by another request`, ErrorCode.OPTIMISTIC_LOCK_CONFLICT);
+    this.name = 'OptimisticLockError';
+  }
+}

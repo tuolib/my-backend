@@ -105,6 +105,56 @@ Relations 完整映射
 
 # step 4
 
+完成总结
 
+一、Repository 基类体系 (packages/database/src/repository/base.repository.ts)
+
+┌──────────────────────┬──────────────────────┬────────────────────────────────────────────────────────────────────┐
+│          类          │         继承         │                              核心能力                              │
+├──────────────────────┼──────────────────────┼────────────────────────────────────────────────────────────────────┤
+│ BaseRepository       │ —                    │ findById, findMany(分页), create, createMany, update, delete,      │
+│                      │                      │ withTransaction                                                    │
+├──────────────────────┼──────────────────────┼────────────────────────────────────────────────────────────────────┤
+│ SoftDeleteRepository │ BaseRepository       │ 重写 delete→设置 deleted_at; findById/findMany 默认过滤已删除;     │
+│                      │                      │ restore, forceDelete                                               │
+├──────────────────────┼──────────────────────┼────────────────────────────────────────────────────────────────────┤
+│ VersionedRepository  │ SoftDeleteRepository │ 重写 update→WHERE version = ? 乐观锁; 冲突抛 OptimisticLockError   │
+└──────────────────────┴──────────────────────┴────────────────────────────────────────────────────────────────────┘
+
+二、具体 Repository
+
+┌────────────────────────┬──────────────────────┬───────────────────────────────────────────────────────────────┐
+│       Repository       │         继承         │                           专属方法                            │
+├────────────────────────┼──────────────────────┼───────────────────────────────────────────────────────────────┤
+│ UserRepository         │ SoftDeleteRepository │ findByEmail, findByPhone                                      │
+├────────────────────────┼──────────────────────┼───────────────────────────────────────────────────────────────┤
+│ ProductRepository      │ VersionedRepository  │ findBySlug, findByCategoryId                                  │
+├────────────────────────┼──────────────────────┼───────────────────────────────────────────────────────────────┤
+│ SkuRepository          │ VersionedRepository  │ findByProductId, findBySkuCode, decrementStock(原子SQL防超卖) │
+├────────────────────────┼──────────────────────┼───────────────────────────────────────────────────────────────┤
+│ OrderRepository        │ VersionedRepository  │ findByOrderNo, findByUserId                                   │
+├────────────────────────┼──────────────────────┼───────────────────────────────────────────────────────────────┤
+│ InventoryLogRepository │ BaseRepository       │ findBySkuId（只追加，无删除）                                 │
+└────────────────────────┴──────────────────────┴───────────────────────────────────────────────────────────────┘
+
+三、错误体系扩展 (@repo/shared/errors)
+
+- 新增 OPTIMISTIC_LOCK_CONFLICT 错误码
+- 新增 OptimisticLockError 类 (409 Conflict)
+
+四、Package.json 脚本
+
+"db:generate": "drizzle-kit generate"
+"db:migrate":  "drizzle-kit migrate"
+"db:studio":   "drizzle-kit studio"
+
+五、首次迁移
+
+- drizzle/0000_ordinary_chameleon.sql — 9 表 + 6 enum + 28 索引 + 9 FK + 3 CHECK 约束
+
+六、导出更新
+
+- packages/database/src/index.ts — 统一导出 client、schema、repository
+- package.json 新增 ./repository 子路径导出
 
 

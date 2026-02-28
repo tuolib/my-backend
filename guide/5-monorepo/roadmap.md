@@ -1,3 +1,5 @@
+
+
 # 企业级高并发电商架构 — 分段标准流程
 
 > **对标**: Amazon / 阿里巴巴
@@ -497,3 +499,7 @@ controller → service → repository 分层，输出完整代码。
 ---
 
 > **开始方式**：复制「阶段 1 的提示词」发给 AI，拿到代码后本地运行验证，再进入下一阶段。
+
+
+
+enterprise-ecommerce-architecture-roadmap.md

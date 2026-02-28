@@ -7,6 +7,7 @@ let db: ReturnType<typeof drizzle> | null = null;
 
 /** 从 RuntimeConfig 初始化连接池 */
 export function initDatabase(config: RuntimeConfig['database']) {
+  console.log('Initializing database...', config);
   sql = postgres(config.url, {
     max: config.poolMax,
     idle_timeout: config.poolIdleTimeout,

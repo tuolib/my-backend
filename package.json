@@ -10,7 +10,13 @@
   "scripts": {
     "dev:gateway": "bun run --filter api-gateway dev",
     "dev:order": "bun run --filter order-service dev",
+    "dev:up": "bun run dev:gateway",
     "dev": "bun run dev:gateway",
+    "docker:dev": "docker compose -f infra/local-dev/docker-compose.yml up -d redis postgres",
+    "docker:dev:down": "docker compose -f infra/local-dev/docker-compose.yml down",
+    "docker:prod": "docker compose up --build -d",
+    "docker:prod:down": "docker compose down",
+    "docker:prod:logs": "docker compose logs -f",
     "lint": "prettier check packages/",
     "format": "prettier format --write packages/"
   },

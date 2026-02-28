@@ -107,3 +107,19 @@
    └── package.json
 
 不要创建任何表结构，只搭建数据库连接基础设施。确保类型安全，代码简洁。
+
+
+
+
+项目介绍：企业级高并发电商架构
+对标: Amazon / 阿里巴巴
+技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
+工程结构：Monorepo
+
+已完成：
+- 阶段1 基础工程骨架
+- 共享层：统一配置、统一响应格式、统一错误处理
+- 基础设施：Dockerfile, docker-compose, Caddyfile
+
+要求：
+@package.json 中生成一个本地docker 启动的命令行，区分生产和本地开发环境

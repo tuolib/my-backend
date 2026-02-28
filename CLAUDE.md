@@ -133,7 +133,8 @@ services/{service-name}/src/
     code: string,        // 业务错误码，如 "USER_NOT_FOUND"
     message: string,     // 人类可读描述
     details?: unknown    // 可选，校验错误详情等
-  }
+  },
+  traceId: string
 }
 ```
 

@@ -1,88 +1,95 @@
-import type { Context } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import type { z } from 'zod';
-import type { PaginatedResult, PaginationParams } from '../types';
+/**
+ * 统一响应构建器
+ * 严格遵循 CLAUDE.md 定义的响应格式：code + success + data + message + meta + traceId
+ * traceId 由中间件注入，此处先占位空字符串
+ */
+import type { AppError } from '../errors/http-errors';
 
-/** 统一接口响应类型 */
-export type ApiResponse<T = unknown> = {
-  code: number;
-  success: boolean;
-  message: string | null;
+// ────────────────────────────── 类型定义 ──────────────────────────────
+
+/** 分页元信息 */
+export interface PaginationMeta {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+/** 分页数据包装 */
+export interface PaginatedData<T> {
+  items: T[];
+  pagination: PaginationMeta;
+}
+
+/** 成功响应 */
+export interface SuccessResponse<T> {
+  code: 200;
+  success: true;
   data: T;
-  meta?: Record<string, unknown>;
-};
+  message: string;
+  traceId: string;
+}
 
-/** 5xx 错误追加 requestId 辅助 */
-const appendRequestIdFor5xx = (c: Context, message: string, code: number): string => {
-  if (code < 500 || code >= 600) return message;
-  if (message.includes('requestId')) return message;
-  const requestId = c.res.headers.get('X-Request-ID') ?? c.req.header('X-Request-ID');
-  if (!requestId) return message;
-  return `${message} (requestId: ${requestId})`;
-};
+/** 错误响应 */
+export interface ErrorResponse {
+  code: number;
+  success: false;
+  message: string;
+  data: null;
+  meta: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+  traceId: string;
+}
 
-/** 统一响应工具 */
-export const ApiResult = {
-  /** 成功响应 */
-  success: <T>(
-    c: Context,
-    data: T = null as T,
-    message = '操作成功',
-    meta?: Record<string, unknown>
-  ) => {
-    const response: ApiResponse<T> = { code: 200, success: true, message, data, meta };
-    return c.json(response, 200);
-  },
+/** 通用 API 响应类型 */
+export type ApiResponse<T> = SuccessResponse<T> | ErrorResponse;
 
-  /** 错误响应 */
-  error: (
-    c: Context,
-    message = '操作失败',
-    code: ContentfulStatusCode = 400,
-    data: unknown = null,
-    meta?: Record<string, unknown>
-  ) => {
-    const response: ApiResponse = {
-      code,
-      success: false,
-      message: appendRequestIdFor5xx(c, message, code),
-      data,
-      meta,
-    };
-    return c.json(response, code);
-  },
+// ────────────────────────────── 构建函数 ──────────────────────────────
 
-  /** 分页响应 */
-  paginated: <T>(
-    c: Context,
-    data: T[],
-    pagination: PaginationParams & { total: number },
-    message = '操作成功'
-  ) => {
-    const result: PaginatedResult<T> = {
-      items: data,
-      total: pagination.total,
-      page: pagination.page,
-      pageSize: pagination.pageSize,
-    };
-    const response: ApiResponse<PaginatedResult<T>> = {
-      code: 200,
-      success: true,
-      message,
-      data: result,
-      meta: {
-        totalPages: Math.ceil(pagination.total / pagination.pageSize),
-      },
-    };
-    return c.json(response, 200);
-  },
-};
+/** 构建成功响应 */
+export function success<T>(data: T, message = ''): SuccessResponse<T> {
+  return {
+    code: 200,
+    success: true,
+    data,
+    message,
+    traceId: '',
+  };
+}
 
-/** Zod validator hook — 用于 @hono/zod-validator 的 hook 参数 */
-export const onZodError = (result: { success: boolean; error?: z.ZodError }, c: Context) => {
-  if (!result.success) {
-    const error = result.error!;
-    const message = error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
-    return c.json({ code: 400, success: false, message, data: null } satisfies ApiResponse, 400);
-  }
-};
+/** 构建错误响应 */
+export function error(err: AppError, traceId = ''): ErrorResponse {
+  return {
+    code: err.statusCode,
+    success: false,
+    message: err.message,
+    data: null,
+    meta: {
+      code: err.errorCode || 'INTERNAL_ERROR',
+      message: err.message,
+      ...(err.details !== undefined && { details: err.details }),
+    },
+    traceId,
+  };
+}
+
+/** 构建分页成功响应 */
+export function paginated<T>(
+  items: T[],
+  pagination: PaginationMeta,
+  message = ''
+): SuccessResponse<PaginatedData<T>> {
+  return {
+    code: 200,
+    success: true,
+    data: {
+      items,
+      pagination,
+    },
+    message,
+    traceId: '',
+  };
+}

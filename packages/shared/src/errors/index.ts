@@ -1,14 +1,18 @@
-export { ErrorCode } from './error-codes';
+/**
+ * 错误模块统一导出
+ */
+export { ErrorCode, errorMessages } from './error-codes';
 export type { ErrorCode as ErrorCodeType } from './error-codes';
 
 export {
   AppError,
-  NotFoundError,
-  ValidationError,
+  BadRequestError,
   UnauthorizedError,
   ForbiddenError,
+  NotFoundError,
   ConflictError,
+  ValidationError,
+  RateLimitError,
   InternalError,
-  TooManyRequestsError,
-  OptimisticLockError,
+  BizError,
 } from './http-errors';

@@ -7,7 +7,7 @@ import { getConfig, InternalError } from '@repo/shared';
 import type { SkuDetail } from '../types';
 
 const config = getConfig();
-const PRODUCT_SERVICE_URL = `http://localhost:${config.server.ports.product}`;
+const PRODUCT_SERVICE_URL = config.services.productUrl;
 
 /** 批量查询 SKU 详情（含商品信息 + 首图） */
 export async function fetchSkuBatch(skuIds: string[]): Promise<SkuDetail[]> {

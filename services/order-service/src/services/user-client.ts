@@ -7,7 +7,7 @@ import { getConfig } from '@repo/shared';
 import type { UserAddressDetail } from '../types';
 
 const config = getConfig();
-const USER_SERVICE_URL = `http://localhost:${config.server.ports.user}`;
+const USER_SERVICE_URL = config.services.userUrl;
 
 /** 根据地址 ID 和用户 ID 获取收货地址详情 */
 export async function fetchAddress(

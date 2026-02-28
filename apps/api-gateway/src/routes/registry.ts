@@ -13,12 +13,7 @@ interface ServiceRoute {
 /** 构建路由注册表（根据环境变量动态生成 target URL） */
 function buildRegistry(): ServiceRoute[] {
   const config = getConfig();
-  const { user, product, cart, order } = config.server.ports;
-
-  const userUrl = `http://localhost:${user}`;
-  const productUrl = `http://localhost:${product}`;
-  const cartUrl = `http://localhost:${cart}`;
-  const orderUrl = `http://localhost:${order}`;
+  const { userUrl, productUrl, cartUrl, orderUrl } = config.services;
 
   // 按前缀长度降序排列，确保最长前缀优先匹配
   return [

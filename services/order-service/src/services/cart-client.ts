@@ -5,7 +5,7 @@
 import { getConfig } from '@repo/shared';
 
 const config = getConfig();
-const CART_SERVICE_URL = `http://localhost:${config.server.ports.cart}`;
+const CART_SERVICE_URL = config.services.cartUrl;
 
 /** 清理购物车中已下单的 SKU（best effort，失败只记日志） */
 export async function clearCartItems(

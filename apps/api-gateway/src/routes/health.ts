@@ -33,7 +33,7 @@ async function checkService(url: string): Promise<string> {
 
 export async function healthCheck(c: Context<AppEnv>) {
   const config = getConfig();
-  const { user, product, cart, order } = config.server.ports;
+  const { userUrl, productUrl, cartUrl, orderUrl } = config.services;
 
   const checks: HealthChecks = {
     gateway: 'ok',
@@ -50,10 +50,10 @@ export async function healthCheck(c: Context<AppEnv>) {
     await Promise.allSettled([
       connection`SELECT 1`.then(() => 'ok' as const).catch(() => 'down' as const),
       redis.ping().then(() => 'ok' as const).catch(() => 'down' as const),
-      checkService(`http://localhost:${user}/health`),
-      checkService(`http://localhost:${product}/health`),
-      checkService(`http://localhost:${cart}/health`),
-      checkService(`http://localhost:${order}/health`),
+      checkService(`${userUrl}/health`),
+      checkService(`${productUrl}/health`),
+      checkService(`${cartUrl}/health`),
+      checkService(`${orderUrl}/health`),
     ]);
 
   checks.postgres = pgResult.status === 'fulfilled' ? pgResult.value : 'down';

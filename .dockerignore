@@ -5,5 +5,8 @@ dist
 .idea
 .claude
 .env
-*.md
-drizzle/*.sql
+*.test.ts
+__tests__
+.DS_Store
+docs/
+guide/

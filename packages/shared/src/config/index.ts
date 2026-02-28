@@ -45,6 +45,12 @@ const envSchema = z.object({
     .string()
     .default('')
     .transform((s) => s.split(',').filter(Boolean)),
+
+  // ── 下游服务 URL（Docker 环境使用容器名） ──
+  USER_SERVICE_URL: z.string().optional(),
+  PRODUCT_SERVICE_URL: z.string().optional(),
+  CART_SERVICE_URL: z.string().optional(),
+  ORDER_SERVICE_URL: z.string().optional(),
 });
 
 export { envSchema };
@@ -84,6 +90,12 @@ export interface AppConfig {
   };
   cors: {
     origins: string[];
+  };
+  services: {
+    userUrl: string;
+    productUrl: string;
+    cartUrl: string;
+    orderUrl: string;
   };
 }
 
@@ -138,6 +150,12 @@ export function getConfig(): AppConfig {
     },
     cors: {
       origins: env.CORS_ORIGINS,
+    },
+    services: {
+      userUrl: env.USER_SERVICE_URL || `http://localhost:${env.USER_SERVICE_PORT}`,
+      productUrl: env.PRODUCT_SERVICE_URL || `http://localhost:${env.PRODUCT_SERVICE_PORT}`,
+      cartUrl: env.CART_SERVICE_URL || `http://localhost:${env.CART_SERVICE_PORT}`,
+      orderUrl: env.ORDER_SERVICE_URL || `http://localhost:${env.ORDER_SERVICE_PORT}`,
     },
   };
 }

@@ -64,6 +64,12 @@
       "dependencies": {
         "@repo/database": "workspace:*",
         "@repo/shared": "workspace:*",
+        "hono": "^4.7.6",
+        "zod": "^3.24.4",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.8.2",
       },
     },
     "services/order-service": {

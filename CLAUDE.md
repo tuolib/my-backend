@@ -116,23 +116,23 @@ services/{service-name}/src/
 ```typescript
 // 成功
 {
-  code: 200, 
+  code: 200,
   success: true,
   data: T,
-  message: '',
+  message: "",
   traceId: string
 }
 
 // 失败
 {
-  code: string,
+  code: number,            // HTTP 状态码
   success: false,
-  message: string, // 提示语
-  data: T,
+  message: string,         // 用户可见提示语
+  data: null,
   meta: {
-    code: string,        // 业务错误码，如 "USER_NOT_FOUND"
-    message: string,     // 人类可读描述
-    details?: unknown    // 可选，校验错误详情等
+    code: string,          // 业务错误码，如 "USER_NOT_FOUND"
+    message: string,       // 开发者可读描述
+    details?: unknown      // 可选，校验错误详情等
   },
   traceId: string
 }

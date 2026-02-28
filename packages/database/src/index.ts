@@ -1,20 +1,17 @@
-// --- Client ---
-export { initDatabase, getDb, getSql, closeDatabase } from './client';
-export { redisIns } from './redis';
+/**
+ * @repo/database 统一导出
+ * 连接层 + Schema + 迁移
+ * Lua 脚本和 seed 在下一步添加
+ */
+
+// ── Client ──
+export { db, connection } from './client';
+
+// ── Redis ──
+export { redis, createRedis } from './redis';
+
+// ── Migration ──
 export { migrate } from './migrate';
 
-// --- Schema ---
+// ── Schema ──
 export * from './schema';
-
-// --- Repository ---
-export {
-  BaseRepository,
-  SoftDeleteRepository,
-  VersionedRepository,
-  UserRepository,
-  ProductRepository,
-  SkuRepository,
-  OrderRepository,
-  InventoryLogRepository,
-} from './repository';
-export type { QueryOptions } from './repository';

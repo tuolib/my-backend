@@ -1,10 +1,22 @@
+/**
+ * Redis 连接封装（ioredis）
+ * 通过 getConfig() 获取连接配置，禁止直接使用 process.env
+ */
 import Redis from 'ioredis';
+import { getConfig } from '@repo/shared';
 
-const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const config = getConfig();
 
-export const redisIns = new Redis(REDIS_URL, {
-  maxRetriesPerRequest: 3,
-  retryStrategy(times) {
-    return Math.min(times * 200, 2000);
-  },
-});
+export function createRedis(): Redis {
+  return new Redis(config.redis.url, {
+    maxRetriesPerRequest: 3,
+    retryStrategy(times) {
+      if (times > 3) return null;
+      return Math.min(times * 200, 2000);
+    },
+    lazyConnect: true,
+  });
+}
+
+/** 默认实例（大多数场景直接使用） */
+export const redis = createRedis();

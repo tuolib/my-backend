@@ -1,40 +1,19 @@
+/**
+ * PostgreSQL 连接池（postgres.js + Drizzle ORM）
+ * 通过 getConfig() 获取连接配置，禁止直接使用 process.env
+ */
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import type { RuntimeConfig } from '@repo/shared/config';
+import { getConfig } from '@repo/shared';
 import * as schema from './schema';
 
-let sql: ReturnType<typeof postgres> | null = null;
-let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
+const config = getConfig();
 
-/** 从 RuntimeConfig 初始化连接池 */
-export function initDatabase(config: RuntimeConfig['database']) {
-  console.log('Initializing database...', config);
-  sql = postgres(config.url, {
-    max: config.poolMax,
-    idle_timeout: config.poolIdleTimeout,
-    connect_timeout: 10,
-  });
-  db = drizzle(sql, { schema });
-  return { db, sql };
-}
+const connection = postgres(config.database.url, {
+  max: config.database.poolMax,
+  idle_timeout: config.database.poolIdleTimeout,
+  connect_timeout: 5,
+});
 
-/** 获取 Drizzle ORM 实例 */
-export function getDb() {
-  if (!db) throw new Error('Database not initialized. Call initDatabase() first.');
-  return db;
-}
-
-/** 获取 postgres.js 底层连接池 */
-export function getSql() {
-  if (!sql) throw new Error('Database not initialized. Call initDatabase() first.');
-  return sql;
-}
-
-/** 关闭连接池 */
-export async function closeDatabase() {
-  if (sql) {
-    await sql.end();
-    sql = null;
-    db = null;
-  }
-}
+export const db = drizzle(connection, { schema });
+export { connection };

@@ -5,18 +5,17 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
-    "./schema": "./src/schema/index.ts",
-    "./repository": "./src/repository/index.ts"
+    "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "generate": "drizzle-kit generate",
+    "migrate": "bun run src/migrate.ts",
+    "seed": "bun run src/seed.ts",
+    "studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@repo/shared": "workspace:*",
     "drizzle-orm": "^0.38.0",
-    "drizzle-zod": "^0.8.3",
     "ioredis": "^5.4.2",
     "postgres": "^3.4.5"
   },

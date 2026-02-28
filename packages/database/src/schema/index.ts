@@ -1,28 +1,62 @@
-// --- Enums ---
-export { userStatusEnum } from './users';
-export { productStatusEnum } from './products';
-export { orderStatusEnum } from './orders';
-export { paymentMethodEnum, paymentStatusEnum } from './payments';
-export { inventoryLogTypeEnum } from './inventory_logs';
+/**
+ * Schema 统一导出
+ * 三个域：user_service, product_service, order_service
+ */
 
-// --- Tables ---
-export { users, usersRelations } from './users';
-export { categories, categoriesRelations } from './categories';
-export { products, productsRelations } from './products';
-export { skus, skusRelations } from './skus';
-export { cartItems, cartItemsRelations } from './cart_items';
-export { orders, ordersRelations } from './orders';
-export { orderItems, orderItemsRelations } from './order_items';
-export { payments, paymentsRelations } from './payments';
-export { inventoryLogs, inventoryLogsRelations } from './inventory_logs';
+// ── User Service 域 ──
+export {
+  userServiceSchema,
+  users,
+  userAddresses,
+  refreshTokens,
+  usersRelations,
+  userAddressesRelations,
+  refreshTokensRelations,
+} from './users';
+export type {
+  User, NewUser,
+  UserAddress, NewUserAddress,
+  RefreshToken, NewRefreshToken,
+} from './users';
 
-// --- Zod Schemas ---
-export { insertUserSchema, selectUserSchema } from './users';
-export { insertCategorySchema, selectCategorySchema } from './categories';
-export { insertProductSchema, selectProductSchema } from './products';
-export { insertSkuSchema, selectSkuSchema } from './skus';
-export { insertCartItemSchema, selectCartItemSchema } from './cart_items';
-export { insertOrderSchema, selectOrderSchema } from './orders';
-export { insertOrderItemSchema, selectOrderItemSchema } from './order_items';
-export { insertPaymentSchema, selectPaymentSchema } from './payments';
-export { insertInventoryLogSchema, selectInventoryLogSchema } from './inventory_logs';
+// ── Product Service 域 ──
+export {
+  productServiceSchema,
+  categories,
+  products,
+  productCategories,
+  productImages,
+  skus,
+  categoriesRelations,
+  productsRelations,
+  productCategoriesRelations,
+  productImagesRelations,
+  skusRelations,
+} from './products';
+export type {
+  Category, NewCategory,
+  Product, NewProduct,
+  ProductImage, NewProductImage,
+  Sku, NewSku,
+} from './products';
+
+// ── Order Service 域 ──
+export {
+  orderServiceSchema,
+  orders,
+  orderItems,
+  orderAddresses,
+  paymentRecords,
+  stockOperations,
+  ordersRelations,
+  orderItemsRelations,
+  orderAddressesRelations,
+  paymentRecordsRelations,
+} from './orders';
+export type {
+  Order, NewOrder,
+  OrderItem, NewOrderItem,
+  OrderAddress, NewOrderAddress,
+  PaymentRecord, NewPaymentRecord,
+  StockOperation, NewStockOperation,
+} from './orders';

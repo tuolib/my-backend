@@ -1,23 +1,15 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-
-export interface DatabaseConfig {
-  url: string;
-  poolMax: number;
-  poolIdleTimeout: number;
-}
+import type { RuntimeConfig } from '@repo/shared/config';
 
 let sql: ReturnType<typeof postgres> | null = null;
 let db: ReturnType<typeof drizzle> | null = null;
 
-/** 从配置或环境变量初始化连接池 */
-export function initDatabase(config?: Partial<DatabaseConfig>) {
-  const url = config?.url ?? process.env.DATABASE_URL;
-  if (!url) throw new Error('DATABASE_URL is required');
-
-  sql = postgres(url, {
-    max: config?.poolMax ?? (Number(process.env.DB_POOL_MAX) || 20),
-    idle_timeout: config?.poolIdleTimeout ?? (Number(process.env.DB_POOL_IDLE_TIMEOUT) || 30),
+/** 从 RuntimeConfig 初始化连接池 */
+export function initDatabase(config: RuntimeConfig['database']) {
+  sql = postgres(config.url, {
+    max: config.poolMax,
+    idle_timeout: config.poolIdleTimeout,
     connect_timeout: 10,
   });
   db = drizzle(sql);

@@ -8,6 +8,7 @@ import type { AppEnv } from '@repo/shared';
 import { success } from '@repo/shared';
 import * as userService from '../services/user.service';
 import * as userRepo from '../repositories/user.repo';
+import * as addressRepo from '../repositories/address.repo';
 import type { UserProfile } from '../types';
 
 const internal = new Hono<AppEnv>();
@@ -36,6 +37,16 @@ internal.post('/batch', async (c) => {
     updatedAt: u.updatedAt,
   }));
   return c.json(success(profiles));
+});
+
+// POST /internal/user/address/detail — 根据地址 ID 获取地址信息（order-service 使用）
+internal.post('/address/detail', async (c) => {
+  const { addressId, userId } = await c.req.json<{ addressId: string; userId: string }>();
+  const address = await addressRepo.findById(addressId);
+  if (!address || address.userId !== userId) {
+    return c.json(success(null));
+  }
+  return c.json(success(address));
 });
 
 export default internal;

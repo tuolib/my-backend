@@ -7,6 +7,12 @@
   },
   "dependencies": {
     "@repo/shared": "workspace:*",
-    "@repo/database": "workspace:*"
+    "@repo/database": "workspace:*",
+    "hono": "^4.7.6",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "@types/bun": "latest"
   }
 }

@@ -13,39 +13,29 @@ version: "3.8"
 
 services:
   # ══════════════════════════════════════════════════
-  # 基础设施层 — PostgreSQL（约束到 Manager/数据节点）
+  # 基础设施层 — etcd 分布式共识（Patroni Leader 选举）
+  # 3 节点集群，分布在 S1(db-1)、S2(db-2)、S3(gateway)
   # ══════════════════════════════════════════════════
 
-  postgres-primary:
-    image: postgres:16-alpine
-    hostname: postgres-primary
+  etcd-1:
+    image: bitnami/etcd:3.5
+    hostname: etcd-1
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      POSTGRES_DB: ecommerce
-    secrets:
-      - postgres_password
-    configs:
-      - source: pg_conf
-        target: /etc/postgresql/postgresql.conf
-      - source: pg_init_sql
-        target: /docker-entrypoint-initdb.d/01-init.sql
-      - source: pg_init_replication
-        target: /docker-entrypoint-initdb.d/02-replication.sh
-        mode: 0755
+      ETCD_NAME: etcd-1
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-1:2380
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-1:2379
+      ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
+      ALLOW_NONE_AUTHENTICATION: "yes"
     volumes:
-      - pg_primary_data:/var/lib/postgresql/data
-    command: >-
-      postgres
-      -c config_file=/etc/postgresql/postgresql.conf
-      -c wal_level=replica
-      -c max_wal_senders=5
-      -c max_replication_slots=5
-      -c hot_standby=on
+      - etcd1_data:/bitnami/etcd
     networks:
       - app_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD", "etcdctl", "endpoint", "health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -53,7 +43,120 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.role == db-primary
+          - node.labels.role == db-1
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  etcd-2:
+    image: bitnami/etcd:3.5
+    hostname: etcd-2
+    environment:
+      ETCD_NAME: etcd-2
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-2:2380
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-2:2379
+      ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    volumes:
+      - etcd2_data:/bitnami/etcd
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.role == db-2
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  etcd-3:
+    image: bitnami/etcd:3.5
+    hostname: etcd-3
+    environment:
+      ETCD_NAME: etcd-3
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-3:2380
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-3:2379
+      ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    volumes:
+      - etcd3_data:/bitnami/etcd
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.role == gateway
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  # ══════════════════════════════════════════════════
+  # 基础设施层 — Patroni（PostgreSQL 高可用管理）
+  # 两个独立服务（非 replicas:2），确保 HAProxy 能用稳定 DNS 做健康检查
+  # ══════════════════════════════════════════════════
+
+  patroni-1:
+    image: ${REGISTRY}/ecom-patroni:${TAG:-latest}
+    hostname: patroni-1
+    environment:
+      PATRONI_NAME: patroni-1
+      PGDATA: /var/lib/postgresql/data
+    secrets:
+      - postgres_password
+      - replication_password
+    configs:
+      - source: patroni_yml
+        target: /etc/patroni/patroni.yml
+      - source: patroni_post_init
+        target: /usr/local/bin/post-init.sh
+        mode: 0755
+    volumes:
+      - pg_primary_data:/var/lib/postgresql/data
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.role == db-1
       resources:
         limits:
           cpus: "1.0"
@@ -63,47 +166,36 @@ services:
         delay: 5s
         max_attempts: 5
 
-  postgres-replica:
-    image: postgres:16-alpine
-    hostname: postgres-replica
+  patroni-2:
+    image: ${REGISTRY}/ecom-patroni:${TAG:-latest}
+    hostname: patroni-2
+    environment:
+      PATRONI_NAME: patroni-2
+      PGDATA: /var/lib/postgresql/data
     secrets:
       - postgres_password
+      - replication_password
     configs:
-      - source: pg_replica_conf
-        target: /etc/postgresql/postgresql.conf
+      - source: patroni_yml
+        target: /etc/patroni/patroni.yml
+      - source: patroni_post_init
+        target: /usr/local/bin/post-init.sh
+        mode: 0755
     volumes:
       - pg_replica_data:/var/lib/postgresql/data
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        set -e
-        chown -R postgres:postgres /var/lib/postgresql/data
-        chmod 700 /var/lib/postgresql/data
-        if [ ! -s "/var/lib/postgresql/data/PG_VERSION" ]; then
-          echo "=== Initializing replica from primary ==="
-          until PGPASSWORD=$$(cat /run/secrets/postgres_password) pg_isready -h postgres-primary -U postgres; do
-            echo "Waiting for primary to be ready..."
-            sleep 3
-          done
-          rm -rf /var/lib/postgresql/data/*
-          PGPASSWORD=$$(cat /run/secrets/postgres_password) gosu postgres pg_basebackup \
-            -h postgres-primary -U postgres -D /var/lib/postgresql/data \
-            -Fp -Xs -R -P
-          echo "=== Replica initialized successfully ==="
-        fi
-        exec gosu postgres postgres -c config_file=/etc/postgresql/postgresql.conf
     networks:
       - app_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     deploy:
       replicas: 1
       placement:
         constraints:
-          - node.labels.role == db-replica
+          - node.labels.role == db-2
       resources:
         limits:
           cpus: "1.0"
@@ -112,6 +204,43 @@ services:
         condition: on-failure
         delay: 10s
         max_attempts: 5
+
+  # ══════════════════════════════════════════════════
+  # 基础设施层 — HAProxy（PG 连接路由）
+  # 通过 Patroni REST API 自动发现 Leader，应用只需连 haproxy:5432
+  # ══════════════════════════════════════════════════
+
+  haproxy:
+    image: haproxy:2.9-alpine
+    hostname: haproxy
+    configs:
+      - source: haproxy_cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+    ports:
+      - target: 7000
+        published: 7000
+        mode: ingress
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD-SHELL", "haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      replicas: 2
+      placement:
+        constraints:
+          - node.role == manager
+        preferences:
+          - spread: node.id
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
 
   # ══════════════════════════════════════════════════
   # 基础设施层 — Redis（约束到 Manager/数据节点）
@@ -137,7 +266,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.role == db-primary
+          - node.labels.role == db-1
       resources:
         limits:
           cpus: "0.5"
@@ -166,7 +295,7 @@ services:
       replicas: 1
       placement:
         constraints:
-          - node.labels.role == db-replica
+          - node.labels.role == db-2
       resources:
         limits:
           cpus: "0.5"
@@ -273,7 +402,7 @@ services:
         export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
         export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
         export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
+        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@haproxy:5432/ecommerce"
         exec bun run apps/api-gateway/src/index.ts
     networks:
       - app_net
@@ -325,7 +454,7 @@ services:
         export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
         export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
         export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
+        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@haproxy:5432/ecommerce"
         exec bun run services/user-service/src/index.ts
     networks:
       - app_net
@@ -377,7 +506,7 @@ services:
         export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
         export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
         export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
+        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@haproxy:5432/ecommerce"
         exec bun run services/product-service/src/index.ts
     networks:
       - app_net
@@ -430,7 +559,7 @@ services:
         export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
         export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
         export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
+        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@haproxy:5432/ecommerce"
         exec bun run services/cart-service/src/index.ts
     networks:
       - app_net
@@ -485,7 +614,7 @@ services:
         export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
         export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
         export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
+        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@haproxy:5432/ecommerce"
         exec bun run services/order-service/src/index.ts
     networks:
       - app_net
@@ -535,6 +664,9 @@ networks:
 volumes:
   pg_primary_data:
   pg_replica_data:
+  etcd1_data:
+  etcd2_data:
+  etcd3_data:
   redis_primary_data:
   redis_replica_data:
   caddy_data:
@@ -546,6 +678,8 @@ volumes:
 
 secrets:
   postgres_password:
+    external: true
+  replication_password:
     external: true
   jwt_access_secret:
     external: true
@@ -559,14 +693,12 @@ secrets:
 # ══════════════════════════════════════════════════
 
 configs:
-  pg_conf:
-    file: ../postgres/postgresql.conf
-  pg_init_sql:
-    file: ../postgres/init.sql
-  pg_init_replication:
-    file: ./pg-init-replication.sh
-  pg_replica_conf:
-    file: ./pg-replica.conf
+  patroni_yml:
+    file: ../patroni/patroni.yml
+  patroni_post_init:
+    file: ../patroni/post-init.sh
+  haproxy_cfg:
+    file: ../haproxy/haproxy.cfg
   redis_conf:
     file: ../redis/redis.conf
   redis_sentinel_conf:

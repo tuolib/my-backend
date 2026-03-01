@@ -75,6 +75,8 @@ jobs:
             dockerfile: services/cart-service/Dockerfile
           - name: order-service
             dockerfile: services/order-service/Dockerfile
+          - name: patroni
+            dockerfile: infra/patroni/Dockerfile
 
     steps:
       - name: Checkout

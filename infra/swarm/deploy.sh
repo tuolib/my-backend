@@ -92,23 +92,23 @@ set_labels() {
   fi
 
   echo "请为每个节点分配角色："
-  echo "  db-primary  — S1: PG 主 + Redis 主（数据层）"
-  echo "  db-replica  — S2: PG 从 + Redis 从（数据层）"
-  echo "  gateway     — S3: Caddy 反向代理（入口层）"
+  echo "  db-1     — S1: PG 数据节点 + Redis 主 + etcd（数据层）"
+  echo "  db-2     — S2: PG 数据节点 + Redis 从 + etcd（数据层）"
+  echo "  gateway  — S3: Caddy 反向代理 + etcd（入口层）"
   echo "  (Worker 节点 S4/S5 无需标签，仅需 worker 角色)"
   echo ""
 
   # 交互式设置标签
   for node in $nodes; do
-    read -rp "节点 ${node} 的角色 [db-primary/db-replica/gateway/skip]: " role
+    read -rp "节点 ${node} 的角色 [db-1/db-2/gateway/skip]: " role
     case "$role" in
-      db-primary)
-        docker node update --label-add role=db-primary "$node"
-        log_ok "$node → db-primary"
+      db-1)
+        docker node update --label-add role=db-1 "$node"
+        log_ok "$node → db-1"
         ;;
-      db-replica)
-        docker node update --label-add role=db-replica "$node"
-        log_ok "$node → db-replica"
+      db-2)
+        docker node update --label-add role=db-2 "$node"
+        log_ok "$node → db-2"
         ;;
       gateway)
         docker node update --label-add role=gateway "$node"
@@ -137,7 +137,7 @@ set_labels() {
 create_secrets() {
   log_info "═══ 创建 Docker Secrets ═══"
 
-  local secrets=(postgres_password jwt_access_secret jwt_refresh_secret internal_secret)
+  local secrets=(postgres_password replication_password jwt_access_secret jwt_refresh_secret internal_secret)
 
   for secret in "${secrets[@]}"; do
     if docker secret inspect "$secret" &>/dev/null; then
@@ -154,7 +154,7 @@ create_secrets() {
       local min_len=8
       case "$secret" in
         jwt_access_secret|jwt_refresh_secret) min_len=16 ;;
-        internal_secret) min_len=8 ;;
+        internal_secret|replication_password) min_len=8 ;;
       esac
 
       if [ ${#value} -lt $min_len ]; then
@@ -221,7 +221,7 @@ deploy_stack() {
   fi
 
   # 检查 Secrets 是否存在
-  local secrets=(postgres_password jwt_access_secret jwt_refresh_secret internal_secret)
+  local secrets=(postgres_password replication_password jwt_access_secret jwt_refresh_secret internal_secret)
   for secret in "${secrets[@]}"; do
     if ! docker secret inspect "$secret" &>/dev/null; then
       log_error "Secret '$secret' 不存在，请先执行: $0 secrets"
@@ -230,13 +230,13 @@ deploy_stack() {
   done
 
   # 检查节点标签
-  local has_primary has_replica has_gateway
-  has_primary=$(docker node ls -q | xargs -I{} docker node inspect --format '{{index .Spec.Labels "role"}}' {} 2>/dev/null | grep -c "db-primary" || true)
-  has_replica=$(docker node ls -q | xargs -I{} docker node inspect --format '{{index .Spec.Labels "role"}}' {} 2>/dev/null | grep -c "db-replica" || true)
+  local has_db1 has_db2 has_gateway
+  has_db1=$(docker node ls -q | xargs -I{} docker node inspect --format '{{index .Spec.Labels "role"}}' {} 2>/dev/null | grep -c "db-1" || true)
+  has_db2=$(docker node ls -q | xargs -I{} docker node inspect --format '{{index .Spec.Labels "role"}}' {} 2>/dev/null | grep -c "db-2" || true)
   has_gateway=$(docker node ls -q | xargs -I{} docker node inspect --format '{{index .Spec.Labels "role"}}' {} 2>/dev/null | grep -c "gateway" || true)
 
-  if [ "$has_primary" -eq 0 ] || [ "$has_replica" -eq 0 ] || [ "$has_gateway" -eq 0 ]; then
-    log_error "缺少必要的节点标签（需要 db-primary, db-replica, gateway），请先执行: $0 labels"
+  if [ "$has_db1" -eq 0 ] || [ "$has_db2" -eq 0 ] || [ "$has_gateway" -eq 0 ]; then
+    log_error "缺少必要的节点标签（需要 db-1, db-2, gateway），请先执行: $0 labels"
     exit 1
   fi
 

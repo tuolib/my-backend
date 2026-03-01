@@ -58,9 +58,6 @@ services:
         limits:
           cpus: "1.0"
           memory: 1024M
-        reservations:
-          cpus: "0.5"
-          memory: 512M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -111,9 +108,6 @@ services:
         limits:
           cpus: "1.0"
           memory: 1024M
-        reservations:
-          cpus: "0.5"
-          memory: 512M
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -148,9 +142,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -180,9 +171,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -218,9 +206,6 @@ services:
         limits:
           cpus: "0.1"
           memory: 64M
-        reservations:
-          cpus: "0.05"
-          memory: 32M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -255,16 +240,14 @@ services:
         limits:
           cpus: "0.5"
           memory: 256M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
       restart_policy:
         condition: on-failure
         delay: 5s
 
   # ══════════════════════════════════════════════════
   # 应用层 — 微服务（约束到 Worker 节点 S4/S5）
-  # 每个服务 2 副本，start-first 滚动更新实现零停机
+  # 单副本部署，start-first 滚动更新
+  # 扩容时调整 replicas: 2 并添加 reservations
   # ══════════════════════════════════════════════════
 
   api-gateway:
@@ -301,7 +284,7 @@ services:
       retries: 3
       start_period: 30s
     deploy:
-      replicas: 2
+      replicas: 1
       placement:
         constraints:
           - node.role == worker
@@ -319,9 +302,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -356,7 +336,7 @@ services:
       retries: 3
       start_period: 30s
     deploy:
-      replicas: 2
+      replicas: 1
       placement:
         constraints:
           - node.role == worker
@@ -374,9 +354,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -411,7 +388,7 @@ services:
       retries: 3
       start_period: 30s
     deploy:
-      replicas: 2
+      replicas: 1
       placement:
         constraints:
           - node.role == worker
@@ -429,9 +406,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -467,7 +441,7 @@ services:
       retries: 3
       start_period: 30s
     deploy:
-      replicas: 2
+      replicas: 1
       placement:
         constraints:
           - node.role == worker
@@ -485,9 +459,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -525,7 +496,7 @@ services:
       retries: 3
       start_period: 30s
     deploy:
-      replicas: 2
+      replicas: 1
       placement:
         constraints:
           - node.role == worker
@@ -543,9 +514,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s

@@ -1,6 +1,6 @@
 /**
  * 健康检查路由 — 聚合所有下游服务 + 基础设施状态
- * POST /health
+ * GET|POST /health
  * 每个下游服务设 3 秒超时，单个服务故障不影响整体响应
  */
 import type { Context } from 'hono';
@@ -63,8 +63,17 @@ export async function healthCheck(c: Context<AppEnv>) {
   checks.cartService = cartResult.status === 'fulfilled' ? cartResult.value : 'down';
   checks.orderService = orderResult.status === 'fulfilled' ? orderResult.value : 'down';
 
-  const allOk = Object.values(checks).every((v) => v === 'ok');
-  const status = allOk ? 200 : 503;
+  // 核心基础设施：gateway + postgres + redis 决定 HTTP 状态码
+  const coreOk =
+    checks.gateway === 'ok' &&
+    checks.postgres === 'ok' &&
+    checks.redis === 'ok';
 
-  return c.json({ status: allOk ? 'healthy' : 'degraded', checks }, status);
+  // 下游服务状态仅作为信息展示，不影响 HTTP 状态码
+  // Swarm 并行启动时下游服务可能暂时不可用，不应导致 503
+  const allOk = Object.values(checks).every((v) => v === 'ok');
+  const status = coreOk ? 200 : 503;
+  const label = allOk ? 'healthy' : coreOk ? 'degraded' : 'unhealthy';
+
+  return c.json({ status: label, checks }, status);
 }

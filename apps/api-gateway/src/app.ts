@@ -33,6 +33,7 @@ app.use('*', idempotentGate());     // 7. 幂等（仅特定路由）
 app.onError(errorHandler);          // 8. 全局错误处理
 
 // ── 健康检查 ──
+app.get('/health', healthCheck);
 app.post('/health', healthCheck);
 
 // ── 路由转发（捕获所有 /api/v1/* 请求）──

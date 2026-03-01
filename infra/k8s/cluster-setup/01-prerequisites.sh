@@ -41,11 +41,13 @@ apt-get update -qq
 apt-get install -y -qq apt-transport-https ca-certificates curl gnupg lsb-release
 
 # Docker 官方 GPG key + apt 源（containerd 从 Docker 仓库安装）
+# 自动检测 debian / ubuntu
+DISTRO=$(. /etc/os-release && echo "$ID")
 install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+curl -fsSL "https://download.docker.com/linux/${DISTRO}/gpg" | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
 echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${DISTRO} \
   $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
 
 apt-get update -qq

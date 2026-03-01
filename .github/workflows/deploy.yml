@@ -140,6 +140,20 @@ jobs:
           echo "registry=ghcr.io/${OWNER_LC}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout (for stack file)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra
+
+      - name: Copy stack configs to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SWARM_HOST }}
+          username: ${{ secrets.SWARM_USER }}
+          key: ${{ secrets.SWARM_SSH_KEY }}
+          source: "infra/"
+          target: /opt/ecom
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -156,55 +170,78 @@ jobs:
             # 登录 GHCR（用于 --with-registry-auth 转发凭证到 Worker 节点）
             echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-            # 逐个服务滚动更新，顺序执行限制爆炸半径
             SERVICES="api-gateway user-service product-service cart-service order-service"
 
-            for SVC in ${SERVICES}; do
-              IMAGE="${REGISTRY}/ecom-${SVC}:${TAG}"
+            # 判断是首次部署还是滚动更新
+            if ! docker service inspect "${STACK}_api-gateway" >/dev/null 2>&1; then
               echo "══════════════════════════════════════════"
-              echo "Updating ${STACK}_${SVC} → ${IMAGE}"
+              echo "Stack not found — running initial deployment"
               echo "══════════════════════════════════════════"
 
-              docker service update \
-                --with-registry-auth \
-                --image "${IMAGE}" \
-                "${STACK}_${SVC}"
+              cd /opt/ecom/infra/swarm
+              REGISTRY="${REGISTRY}" TAG="${TAG}" \
+                docker stack deploy \
+                  --compose-file docker-stack.yml \
+                  --with-registry-auth \
+                  "${STACK}"
 
-              # 等待服务收敛（最多 180 秒）
-              echo "Waiting for ${STACK}_${SVC} to converge..."
-              TIMEOUT=180
-              ELAPSED=0
-              while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
-                STATE=$(docker service inspect --format '{{.UpdateStatus.State}}' "${STACK}_${SVC}" 2>/dev/null || echo "unknown")
-                case "${STATE}" in
-                  completed)
-                    echo "✓ ${SVC} update completed"
-                    break
-                    ;;
-                  rollback_completed)
-                    echo "✗ ${SVC} rolled back! Aborting pipeline."
-                    exit 1
-                    ;;
-                  paused)
-                    echo "✗ ${SVC} update paused! Aborting pipeline."
-                    exit 1
-                    ;;
-                  *)
-                    sleep 5
-                    ELAPSED=$((ELAPSED + 5))
-                    ;;
-                esac
+              echo "Waiting for services to start..."
+              sleep 30
+
+              docker service ls --filter "name=${STACK}_"
+              echo ""
+              echo "Initial deployment complete."
+            else
+              echo "Stack exists — rolling update"
+
+              # 逐个服务滚动更新，顺序执行限制爆炸半径
+              for SVC in ${SERVICES}; do
+                IMAGE="${REGISTRY}/ecom-${SVC}:${TAG}"
+                echo "══════════════════════════════════════════"
+                echo "Updating ${STACK}_${SVC} → ${IMAGE}"
+                echo "══════════════════════════════════════════"
+
+                docker service update \
+                  --with-registry-auth \
+                  --image "${IMAGE}" \
+                  "${STACK}_${SVC}"
+
+                # 等待服务收敛（最多 180 秒）
+                echo "Waiting for ${STACK}_${SVC} to converge..."
+                TIMEOUT=180
+                ELAPSED=0
+                while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
+                  STATE=$(docker service inspect --format '{{.UpdateStatus.State}}' "${STACK}_${SVC}" 2>/dev/null || echo "unknown")
+                  case "${STATE}" in
+                    completed)
+                      echo "✓ ${SVC} update completed"
+                      break
+                      ;;
+                    rollback_completed)
+                      echo "✗ ${SVC} rolled back! Aborting pipeline."
+                      exit 1
+                      ;;
+                    paused)
+                      echo "✗ ${SVC} update paused! Aborting pipeline."
+                      exit 1
+                      ;;
+                    *)
+                      sleep 5
+                      ELAPSED=$((ELAPSED + 5))
+                      ;;
+                  esac
+                done
+
+                if [ ${ELAPSED} -ge ${TIMEOUT} ]; then
+                  echo "✗ ${SVC} did not converge within ${TIMEOUT}s"
+                  exit 1
+                fi
               done
 
-              if [ ${ELAPSED} -ge ${TIMEOUT} ]; then
-                echo "✗ ${SVC} did not converge within ${TIMEOUT}s"
-                exit 1
-              fi
-            done
-
-            echo ""
-            echo "All services updated successfully."
-            docker service ls --filter "name=${STACK}_"
+              echo ""
+              echo "All services updated successfully."
+              docker service ls --filter "name=${STACK}_"
+            fi
 
   # ─── Job ④ 外部健康检查 ─────────────────────────────────────────────────────
   smoke-test:

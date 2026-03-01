@@ -675,18 +675,25 @@ secrets:
 
 # ══════════════════════════════════════════════════
 # Configs — 配置文件挂载（路径相对于本文件位置）
+# Docker Swarm configs 不可变，用 TAG 做版本后缀实现滚动更新
 # ══════════════════════════════════════════════════
 
 configs:
   patroni_yml:
+    name: patroni_yml-${TAG:-latest}
     file: ../patroni/patroni.yml
   patroni_post_init:
+    name: patroni_post_init-${TAG:-latest}
     file: ../patroni/post-init.sh
   haproxy_cfg:
+    name: haproxy_cfg-${TAG:-latest}
     file: ../haproxy/haproxy.cfg
   redis_conf:
+    name: redis_conf-${TAG:-latest}
     file: ../redis/redis.conf
   redis_sentinel_conf:
+    name: redis_sentinel_conf-${TAG:-latest}
     file: ./redis-sentinel.conf
   caddyfile:
+    name: caddyfile-${TAG:-latest}
     file: ./Caddyfile.prod

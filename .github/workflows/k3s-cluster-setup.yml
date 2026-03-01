@@ -8,7 +8,8 @@
 #   01-install-server (S1) → 02-join-server (额外 server)
 #   → 03-join-agent (worker) → 04-install-operators (S1)
 #
-# 所有 SCP/SSH 操作自动重试 3 次（间隔 15 秒），防止偶发连接中断
+# k3s 启动时会修改 iptables/网络配置，可能导致 SSH 断连（exit 255）
+# 因此安装和验证拆成独立步骤，安装步骤容忍断连，验证步骤重试确认
 
 name: K3s Cluster Setup
 
@@ -55,7 +56,7 @@ concurrency:
 
 env:
   SSH_USER: ${{ vars.K3S_SSH_USER || 'root' }}
-  SSH_OPTS: "-o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=15"
+  SSH_OPTS: "-o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=10"
 
 jobs:
   # ─── Step 01: 安装首个 server ─────────────────────────────────────────────────
@@ -94,21 +95,35 @@ jobs:
               "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}:/opt/ecom/infra/k3s/cluster-setup/"
 
       - name: Run 01-install-server.sh on S1
+        run: |
+          set +e
+          ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+            "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" bash -s <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          export K3S_MODE="${{ inputs.mode }}"
+          export NODE_IP="${{ vars.K3S_S1_HOST }}"
+          export K3S_EXTRA_SANS="${{ vars.K3S_EXTRA_SANS || '' }}"
+          export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
+          chmod +x /opt/ecom/infra/k3s/cluster-setup/01-install-server.sh
+          /opt/ecom/infra/k3s/cluster-setup/01-install-server.sh
+          REMOTE_SCRIPT
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 255 ]; then
+            echo "::warning::SSH disconnected during k3s install (expected during network setup)"
+          elif [ $EXIT_CODE -ne 0 ]; then
+            exit $EXIT_CODE
+          fi
+
+      - name: Verify k3s server on S1
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 12
-          max_attempts: 1
+          timeout_minutes: 5
+          max_attempts: 10
+          retry_wait_seconds: 15
           command: |
             ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
-              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" bash -s <<'REMOTE_SCRIPT'
-            set -euo pipefail
-            export K3S_MODE="${{ inputs.mode }}"
-            export NODE_IP="${{ vars.K3S_S1_HOST }}"
-            export K3S_EXTRA_SANS="${{ vars.K3S_EXTRA_SANS || '' }}"
-            export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
-            chmod +x /opt/ecom/infra/k3s/cluster-setup/01-install-server.sh
-            /opt/ecom/infra/k3s/cluster-setup/01-install-server.sh
-            REMOTE_SCRIPT
+              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" \
+              'systemctl is-active k3s && echo "k3s server is running"'
 
       - name: Get node token from S1
         id: token
@@ -127,7 +142,7 @@ jobs:
         if: always()
         run: rm -f ~/.ssh/k3s_key
 
-  # ─── Step 02: 追加 server 节点（仅 multi 模式） ──────────────────────────────
+  # ─── Step 02: 追加 server 节点（仅 multi 模式，串行执行） ──────────────────────
   join-server:
     name: "02 Join Server (${{ matrix.host }})"
     needs: install-server
@@ -189,27 +204,42 @@ jobs:
 
       - name: Run 02-join-server.sh on ${{ matrix.host }}
         if: steps.host.outputs.skip != 'true'
+        run: |
+          set +e
+          ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+            "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" bash -s <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          export K3S_URL="https://${{ vars.K3S_S1_HOST }}:6443"
+          export K3S_TOKEN="${{ needs.install-server.outputs.node_token }}"
+          export NODE_IP="${{ steps.host.outputs.ip }}"
+          export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
+          chmod +x /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
+          /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
+          REMOTE_SCRIPT
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 255 ]; then
+            echo "::warning::SSH disconnected during k3s join (expected during network setup)"
+          elif [ $EXIT_CODE -ne 0 ]; then
+            exit $EXIT_CODE
+          fi
+
+      - name: Verify k3s server on ${{ matrix.host }}
+        if: steps.host.outputs.skip != 'true'
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 12
-          max_attempts: 1
+          timeout_minutes: 5
+          max_attempts: 10
+          retry_wait_seconds: 15
           command: |
             ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
-              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" bash -s <<'REMOTE_SCRIPT'
-            set -euo pipefail
-            export K3S_URL="https://${{ vars.K3S_S1_HOST }}:6443"
-            export K3S_TOKEN="${{ needs.install-server.outputs.node_token }}"
-            export NODE_IP="${{ steps.host.outputs.ip }}"
-            export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
-            chmod +x /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
-            /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
-            REMOTE_SCRIPT
+              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" \
+              'systemctl is-active k3s && echo "k3s server is running on ${{ matrix.host }}"'
 
       - name: Cleanup SSH key
         if: always()
         run: rm -f ~/.ssh/k3s_key
 
-  # ─── Step 03: 追加 agent 节点（仅 multi 模式） ───────────────────────────────
+  # ─── Step 03: 追加 agent 节点（仅 multi 模式，串行执行） ───────────────────────
   join-agent:
     name: "03 Join Agent (${{ matrix.host }})"
     needs: [install-server, join-server]
@@ -271,21 +301,36 @@ jobs:
 
       - name: Run 03-join-agent.sh on ${{ matrix.host }}
         if: steps.host.outputs.skip != 'true'
+        run: |
+          set +e
+          ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+            "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" bash -s <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          export K3S_URL="https://${{ vars.K3S_S1_HOST }}:6443"
+          export K3S_TOKEN="${{ needs.install-server.outputs.node_token }}"
+          export NODE_IP="${{ steps.host.outputs.ip }}"
+          export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
+          chmod +x /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
+          /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
+          REMOTE_SCRIPT
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 255 ]; then
+            echo "::warning::SSH disconnected during k3s agent join (expected during network setup)"
+          elif [ $EXIT_CODE -ne 0 ]; then
+            exit $EXIT_CODE
+          fi
+
+      - name: Verify k3s-agent on ${{ matrix.host }}
+        if: steps.host.outputs.skip != 'true'
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 12
-          max_attempts: 1
+          timeout_minutes: 5
+          max_attempts: 10
+          retry_wait_seconds: 15
           command: |
             ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
-              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" bash -s <<'REMOTE_SCRIPT'
-            set -euo pipefail
-            export K3S_URL="https://${{ vars.K3S_S1_HOST }}:6443"
-            export K3S_TOKEN="${{ needs.install-server.outputs.node_token }}"
-            export NODE_IP="${{ steps.host.outputs.ip }}"
-            export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
-            chmod +x /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
-            /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
-            REMOTE_SCRIPT
+              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" \
+              'systemctl is-active k3s-agent && echo "k3s-agent is running on ${{ matrix.host }}"'
 
       - name: Cleanup SSH key
         if: always()

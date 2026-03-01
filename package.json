@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:up": "docker compose up -d",
+    "dev:up": "docker compose up -d postgres redis",
     "dev:stop": "docker compose stop",
     "dev:down": "docker compose down",
     "dev:clean": "docker compose down -v",

@@ -1,7 +1,6 @@
 # kubeadm-config.yaml — kubeadm 集群初始化配置
 # 使用 kube-vip 提供 Control Plane HA VIP
 # 适用于 5 节点自建机房部署（3 Control Plane + 2 Worker）
----
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: ClusterConfiguration
 kubernetesVersion: "v1.29.0"

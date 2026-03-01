@@ -1,0 +1,409 @@
+# k3s 集群初始化（仅手动触发，一次性使用）
+#
+# 支持两种模式:
+#   single — 单节点（默认），所有组件运行在一台 VPS 上
+#   multi  — 多节点 HA，server + agent 分布式部署
+#
+# 自动 SSH 到目标服务器，按顺序执行:
+#   01-install-server (S1) → 02-join-server (额外 server)
+#   → 03-join-agent (worker) → 04-install-operators (S1)
+#
+# 所有 SCP/SSH 操作自动重试 3 次（间隔 15 秒），防止偶发连接中断
+
+name: K3s Cluster Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "集群模式"
+        required: true
+        type: choice
+        default: "single"
+        options:
+          - single
+          - multi
+      step:
+        description: "执行到哪一步（用于断点续跑）"
+        required: true
+        type: choice
+        default: "all"
+        options:
+          - all
+          - 01-install-server
+          - 02-join-server
+          - 03-join-agent
+          - 04-install-operators
+
+concurrency:
+  group: k3s-cluster-setup
+  cancel-in-progress: false
+
+# ─── 配置说明 ──────────────────────────────────────────────────────────────────
+# GitHub Secrets:
+#   K3S_SSH_KEY               — SSH 私钥
+#
+# GitHub Variables:
+#   K3S_SSH_USER              — SSH 用户名（默认 root）
+#   K3S_S1_HOST               — 首个 server IP（必须）
+#   K3S_S2_HOST               — 第二个 server IP（multi 模式可选）
+#   K3S_S3_HOST               — 第三个 server IP（multi 模式可选）
+#   K3S_A1_HOST               — Agent 1 IP（multi 模式可选）
+#   K3S_A2_HOST               — Agent 2 IP（multi 模式可选）
+#   K3S_EXTRA_SANS            — 额外 TLS SAN（可选，如域名）
+#   K3S_VERSION               — 指定 k3s 版本（可选）
+
+env:
+  SSH_USER: ${{ vars.K3S_SSH_USER || 'root' }}
+  SSH_OPTS: "-o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ServerAliveInterval=15"
+
+jobs:
+  # ─── Step 01: 安装首个 server ─────────────────────────────────────────────────
+  install-server:
+    name: "01 Install Server (S1)"
+    if: inputs.step == 'all' || inputs.step == '01-install-server'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      node_token: ${{ steps.token.outputs.node_token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k3s/cluster-setup
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.K3S_SSH_KEY }}" > ~/.ssh/k3s_key
+          chmod 600 ~/.ssh/k3s_key
+
+      - name: SCP scripts to S1
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 3
+          max_attempts: 3
+          retry_wait_seconds: 15
+          command: |
+            ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" \
+              'mkdir -p /opt/ecom/infra/k3s/cluster-setup'
+            scp ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              infra/k3s/cluster-setup/* \
+              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}:/opt/ecom/infra/k3s/cluster-setup/"
+
+      - name: Run 01-install-server.sh on S1
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 12
+          max_attempts: 1
+          command: |
+            ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" bash -s <<'REMOTE_SCRIPT'
+            set -euo pipefail
+            export K3S_MODE="${{ inputs.mode }}"
+            export NODE_IP="${{ vars.K3S_S1_HOST }}"
+            export K3S_EXTRA_SANS="${{ vars.K3S_EXTRA_SANS || '' }}"
+            export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
+            chmod +x /opt/ecom/infra/k3s/cluster-setup/01-install-server.sh
+            /opt/ecom/infra/k3s/cluster-setup/01-install-server.sh
+            REMOTE_SCRIPT
+
+      - name: Get node token from S1
+        id: token
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 3
+          max_attempts: 3
+          retry_wait_seconds: 15
+          command: |
+            TOKEN=$(ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" \
+              'cat /var/lib/rancher/k3s/server/node-token')
+            echo "node_token=${TOKEN}" >> "$GITHUB_OUTPUT"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/k3s_key
+
+  # ─── Step 02: 追加 server 节点（仅 multi 模式） ──────────────────────────────
+  join-server:
+    name: "02 Join Server (${{ matrix.host }})"
+    needs: install-server
+    if: >-
+      inputs.mode == 'multi' &&
+      (inputs.step == 'all' || inputs.step == '02-join-server') &&
+      (needs.install-server.result == 'success' || inputs.step == '02-join-server')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [S2, S3]
+
+    steps:
+      - name: Resolve host IP
+        id: host
+        run: |
+          case "${{ matrix.host }}" in
+            S2) IP="${{ vars.K3S_S2_HOST }}" ;;
+            S3) IP="${{ vars.K3S_S3_HOST }}" ;;
+          esac
+          if [[ -z "${IP}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "${{ matrix.host }} 未配置，跳过"
+          else
+            echo "ip=${IP}" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.host.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k3s/cluster-setup
+
+      - name: Setup SSH key
+        if: steps.host.outputs.skip != 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.K3S_SSH_KEY }}" > ~/.ssh/k3s_key
+          chmod 600 ~/.ssh/k3s_key
+
+      - name: SCP script to ${{ matrix.host }}
+        if: steps.host.outputs.skip != 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 3
+          max_attempts: 3
+          retry_wait_seconds: 15
+          command: |
+            ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" \
+              'mkdir -p /opt/ecom/infra/k3s/cluster-setup'
+            scp ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              infra/k3s/cluster-setup/02-join-server.sh \
+              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}:/opt/ecom/infra/k3s/cluster-setup/"
+
+      - name: Run 02-join-server.sh on ${{ matrix.host }}
+        if: steps.host.outputs.skip != 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 12
+          max_attempts: 1
+          command: |
+            ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" bash -s <<'REMOTE_SCRIPT'
+            set -euo pipefail
+            export K3S_URL="https://${{ vars.K3S_S1_HOST }}:6443"
+            export K3S_TOKEN="${{ needs.install-server.outputs.node_token }}"
+            export NODE_IP="${{ steps.host.outputs.ip }}"
+            export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
+            chmod +x /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
+            /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
+            REMOTE_SCRIPT
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/k3s_key
+
+  # ─── Step 03: 追加 agent 节点（仅 multi 模式） ───────────────────────────────
+  join-agent:
+    name: "03 Join Agent (${{ matrix.host }})"
+    needs: [install-server, join-server]
+    if: >-
+      inputs.mode == 'multi' &&
+      (inputs.step == 'all' || inputs.step == '03-join-agent') &&
+      (needs.join-server.result == 'success' || needs.join-server.result == 'skipped' || inputs.step == '03-join-agent')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [A1, A2]
+
+    steps:
+      - name: Resolve host IP
+        id: host
+        run: |
+          case "${{ matrix.host }}" in
+            A1) IP="${{ vars.K3S_A1_HOST }}" ;;
+            A2) IP="${{ vars.K3S_A2_HOST }}" ;;
+          esac
+          if [[ -z "${IP}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "${{ matrix.host }} 未配置，跳过"
+          else
+            echo "ip=${IP}" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.host.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k3s/cluster-setup
+
+      - name: Setup SSH key
+        if: steps.host.outputs.skip != 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.K3S_SSH_KEY }}" > ~/.ssh/k3s_key
+          chmod 600 ~/.ssh/k3s_key
+
+      - name: SCP script to ${{ matrix.host }}
+        if: steps.host.outputs.skip != 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 3
+          max_attempts: 3
+          retry_wait_seconds: 15
+          command: |
+            ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" \
+              'mkdir -p /opt/ecom/infra/k3s/cluster-setup'
+            scp ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              infra/k3s/cluster-setup/03-join-agent.sh \
+              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}:/opt/ecom/infra/k3s/cluster-setup/"
+
+      - name: Run 03-join-agent.sh on ${{ matrix.host }}
+        if: steps.host.outputs.skip != 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 12
+          max_attempts: 1
+          command: |
+            ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ steps.host.outputs.ip }}" bash -s <<'REMOTE_SCRIPT'
+            set -euo pipefail
+            export K3S_URL="https://${{ vars.K3S_S1_HOST }}:6443"
+            export K3S_TOKEN="${{ needs.install-server.outputs.node_token }}"
+            export NODE_IP="${{ steps.host.outputs.ip }}"
+            export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
+            chmod +x /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
+            /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
+            REMOTE_SCRIPT
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/k3s_key
+
+  # ─── Step 04: 安装 Operators ─────────────────────────────────────────────────
+  install-operators:
+    name: "04 Install Operators (S1)"
+    needs: [install-server, join-server, join-agent]
+    if: >-
+      always() &&
+      (inputs.step == 'all' || inputs.step == '04-install-operators') &&
+      (needs.install-server.result == 'success' || inputs.step == '04-install-operators')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k3s/cluster-setup
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.K3S_SSH_KEY }}" > ~/.ssh/k3s_key
+          chmod 600 ~/.ssh/k3s_key
+
+      - name: SCP script to S1
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 3
+          max_attempts: 3
+          retry_wait_seconds: 15
+          command: |
+            scp ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              infra/k3s/cluster-setup/04-install-operators.sh \
+              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}:/opt/ecom/infra/k3s/cluster-setup/"
+
+      - name: Run 04-install-operators.sh on S1
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 1
+          command: |
+            ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" bash -s <<REMOTE_SCRIPT
+            set -euo pipefail
+            export K3S_MODE="${{ inputs.mode }}"
+            export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+            # 多节点模式：解析节点名
+            if [[ "${K3S_MODE}" == "multi" ]]; then
+              export S1_NODE="\$(hostname)"
+              export S2_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S2_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S2_HOST }}')"
+              export S3_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S3_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S3_HOST }}')"
+              export S4_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_A1_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_A1_HOST }}')"
+              export S5_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_A2_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_A2_HOST }}')"
+              echo "节点映射:"
+              echo "  S1=\${S1_NODE} S2=\${S2_NODE} S3=\${S3_NODE} S4(A1)=\${S4_NODE} S5(A2)=\${S5_NODE}"
+            fi
+
+            chmod +x /opt/ecom/infra/k3s/cluster-setup/04-install-operators.sh
+            /opt/ecom/infra/k3s/cluster-setup/04-install-operators.sh
+            REMOTE_SCRIPT
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/k3s_key
+
+  # ─── 最终验证 ────────────────────────────────────────────────────────────────
+  verify:
+    name: "Verify Cluster"
+    needs: install-operators
+    if: always() && (needs.install-operators.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.K3S_SSH_KEY }}" > ~/.ssh/k3s_key
+          chmod 600 ~/.ssh/k3s_key
+
+      - name: Verify cluster status
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 3
+          max_attempts: 3
+          retry_wait_seconds: 15
+          command: |
+            ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" bash -s <<'REMOTE_SCRIPT'
+            export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+            echo "══════════ Nodes ══════════"
+            kubectl get nodes -o wide
+
+            echo ""
+            echo "══════════ System Pods ══════════"
+            kubectl get pods -A
+
+            echo ""
+            echo "══════════ StorageClass ══════════"
+            kubectl get storageclass
+
+            echo ""
+            echo "══════════ Cluster Ready ══════════"
+            READY=$(kubectl get nodes --no-headers | grep -c " Ready")
+            TOTAL=$(kubectl get nodes --no-headers | wc -l)
+            echo "${READY}/${TOTAL} nodes ready"
+            if [ "${READY}" -eq "${TOTAL}" ]; then
+              echo "✓ k3s 集群初始化成功！可以开始部署应用了。"
+            else
+              echo "✗ 部分节点未就绪，请检查。"
+              exit 1
+            fi
+            REMOTE_SCRIPT
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/k3s_key

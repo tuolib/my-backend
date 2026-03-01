@@ -1,0 +1,89 @@
+# values-k3s.yaml — k3s 生产环境覆盖值（轻量级单节点优化）
+# 用法: helm install ecom . -f values-k3s.yaml
+#
+# 与 values.yaml（k8s 生产）的区别:
+#   - 所有 nodeSelector 设为 {}（单节点调度）
+#   - 实例数和副本数降为 1（节省资源）
+#   - CPU/内存资源减半（适配低配 VPS）
+#   - 多节点用户可通过 --set 覆盖 nodeSelector
+
+postgresql:
+  instances: 1
+  storage:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  nodeSelector: {}
+
+redis:
+  clusterSize: 1
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  nodeSelector: {}
+
+apiGateway:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  nodeSelector: {}
+
+userService:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  nodeSelector: {}
+
+productService:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  nodeSelector: {}
+
+cartService:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  nodeSelector: {}
+
+orderService:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  nodeSelector: {}

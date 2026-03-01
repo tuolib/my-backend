@@ -1,9 +1,11 @@
-# CI/CD — 微服务构建 & K8s 自动部署
+# CI/CD — 微服务构建 & K8s/K3s 自动部署
 #
-# push to main / workflow_dispatch → 类型检查 → 构建 5 个镜像 → SSH 部署到 K8s → 健康检查
+# push to main / workflow_dispatch → 类型检查 → 构建 5 个镜像 → SSH 部署到 K8s/K3s → 健康检查
 # PR to main                       → 类型检查 → 构建（不推送、不部署）
+#
+# platform 选择: push/PR 默认 k8s, workflow_dispatch 可选 k8s 或 k3s
 
-name: Build & Deploy (K8s)
+name: Build & Deploy
 
 on:
   push:
@@ -12,14 +14,22 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      platform:
+        description: "目标平台"
+        required: true
+        type: choice
+        default: "k8s"
+        options:
+          - k8s
+          - k3s
       image_tag:
         description: "Custom image tag (leave blank = SHA)"
         required: false
         default: ""
 
-# 同分支只保留最后一次运行
+# 同分支只保留最后一次运行（按平台隔离）
 concurrency:
-  group: deploy-k8s-${{ github.ref }}
+  group: deploy-${{ inputs.platform || 'k8s' }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -27,6 +37,7 @@ permissions:
   packages: write
 
 env:
+  PLATFORM: ${{ inputs.platform || 'k8s' }}
   DOMAIN: api.find345.site
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────────
@@ -118,9 +129,9 @@ jobs:
           echo "- **Image**: \`${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Pushed**: \`${{ github.event_name != 'pull_request' }}\`" >> "$GITHUB_STEP_SUMMARY"
 
-  # ─── Job ③ SSH 到 K8s Control Plane，Helm 部署 ─────────────────────────────
+  # ─── Job ③ SSH 到 K8s/K3s 节点，Helm 部署 ──────────────────────────────────
   deploy:
-    name: Deploy to K8s
+    name: Deploy to ${{ inputs.platform || 'k8s' }}
     needs: build-images
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -130,7 +141,7 @@ jobs:
       url: https://api.find345.site
 
     steps:
-      - name: Compute image tag
+      - name: Compute image tag and platform config
         id: vars
         run: |
           OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
@@ -138,6 +149,16 @@ jobs:
           TAG="${CUSTOM_TAG:-${GITHUB_SHA::12}}"
           echo "registry=ghcr.io/${OWNER_LC}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          # 根据平台选择 SSH 目标和 values 文件
+          PLATFORM="${{ env.PLATFORM }}"
+          if [[ "${PLATFORM}" == "k3s" ]]; then
+            echo "values_flag=-f /opt/ecom/infra/k8s/ecom-chart/values-k3s.yaml" >> "$GITHUB_OUTPUT"
+            echo "kubeconfig_export=export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> "$GITHUB_OUTPUT"
+          else
+            echo "values_flag=" >> "$GITHUB_OUTPUT"
+            echo "kubeconfig_export=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Checkout (Helm Chart only)
         uses: actions/checkout@v4
@@ -147,29 +168,33 @@ jobs:
       - name: Copy Helm Chart to server
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.K8S_SSH_HOST }}
-          username: ${{ secrets.K8S_SSH_USER }}
-          key: ${{ secrets.K8S_SSH_KEY }}
+          host: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_HOST || secrets.K8S_SSH_HOST }}
+          username: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_USER || secrets.K8S_SSH_USER }}
+          key: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_KEY || secrets.K8S_SSH_KEY }}
           source: "infra/k8s/ecom-chart/"
           target: /opt/ecom
 
       - name: Helm deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.K8S_SSH_HOST }}
-          username: ${{ secrets.K8S_SSH_USER }}
-          key: ${{ secrets.K8S_SSH_KEY }}
+          host: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_HOST || secrets.K8S_SSH_HOST }}
+          username: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_USER || secrets.K8S_SSH_USER }}
+          key: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_KEY || secrets.K8S_SSH_KEY }}
           script: |
             set -euo pipefail
+
+            # k3s 需要指定 KUBECONFIG
+            ${{ steps.vars.outputs.kubeconfig_export }}
 
             REGISTRY="${{ steps.vars.outputs.registry }}"
             TAG="${{ steps.vars.outputs.tag }}"
             NAMESPACE="ecom"
             RELEASE="ecom"
             CHART="/opt/ecom/infra/k8s/ecom-chart"
+            PLATFORM="${{ env.PLATFORM }}"
 
             echo "══════════════════════════════════════════"
-            echo "Deploying ${RELEASE} to K8s (tag: ${TAG})"
+            echo "Deploying ${RELEASE} to ${PLATFORM} (tag: ${TAG})"
             echo "══════════════════════════════════════════"
 
             # 确保 namespace 存在
@@ -183,17 +208,33 @@ jobs:
               --docker-password="${{ secrets.GHCR_PAT }}" \
               --dry-run=client -o yaml | kubectl apply -f -
 
+            # 根据平台选择 secrets（K8S_ 或 K3S_ 前缀）
+            if [[ "${PLATFORM}" == "k3s" ]]; then
+              PG_PASS="${{ secrets.K3S_POSTGRES_PASSWORD }}"
+              REPL_PASS="${{ secrets.K3S_REPLICATION_PASSWORD }}"
+              JWT_ACCESS="${{ secrets.K3S_JWT_ACCESS_SECRET }}"
+              JWT_REFRESH="${{ secrets.K3S_JWT_REFRESH_SECRET }}"
+              INTERNAL="${{ secrets.K3S_INTERNAL_SECRET }}"
+            else
+              PG_PASS="${{ secrets.K8S_POSTGRES_PASSWORD }}"
+              REPL_PASS="${{ secrets.K8S_REPLICATION_PASSWORD }}"
+              JWT_ACCESS="${{ secrets.K8S_JWT_ACCESS_SECRET }}"
+              JWT_REFRESH="${{ secrets.K8S_JWT_REFRESH_SECRET }}"
+              INTERNAL="${{ secrets.K8S_INTERNAL_SECRET }}"
+            fi
+
             # Helm 部署/升级
             helm upgrade --install "${RELEASE}" "${CHART}" \
               --namespace "${NAMESPACE}" \
+              ${{ steps.vars.outputs.values_flag }} \
               --set "global.registry=${REGISTRY}" \
               --set "global.imageTag=${TAG}" \
               --set "global.imagePullSecrets[0]=ghcr-pull-secret" \
-              --set "secrets.postgresPassword=${{ secrets.K8S_POSTGRES_PASSWORD }}" \
-              --set "secrets.replicationPassword=${{ secrets.K8S_REPLICATION_PASSWORD }}" \
-              --set "secrets.jwtAccessSecret=${{ secrets.K8S_JWT_ACCESS_SECRET }}" \
-              --set "secrets.jwtRefreshSecret=${{ secrets.K8S_JWT_REFRESH_SECRET }}" \
-              --set "secrets.internalSecret=${{ secrets.K8S_INTERNAL_SECRET }}" \
+              --set "secrets.postgresPassword=${PG_PASS}" \
+              --set "secrets.replicationPassword=${REPL_PASS}" \
+              --set "secrets.jwtAccessSecret=${JWT_ACCESS}" \
+              --set "secrets.jwtRefreshSecret=${JWT_REFRESH}" \
+              --set "secrets.internalSecret=${INTERNAL}" \
               --wait \
               --timeout 300s
 
@@ -245,14 +286,21 @@ jobs:
       - name: Deploy summary
         if: always()
         run: |
-          echo "## K8s Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
+          PLATFORM="${{ env.PLATFORM }}"
+          if [[ "${PLATFORM}" == "k3s" ]]; then
+            PLATFORM_LABEL="K3s (Helm)"
+          else
+            PLATFORM_LABEL="Kubernetes (Helm)"
+          fi
+
+          echo "## ${PLATFORM_LABEL} Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Commit** | \`${GITHUB_SHA::12}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Branch** | \`${GITHUB_REF_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Domain** | [https://${{ env.DOMAIN }}](https://${{ env.DOMAIN }}) |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Platform** | Kubernetes (Helm) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Platform** | ${PLATFORM_LABEL} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Trigger** | \`${GITHUB_EVENT_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Actor** | \`${GITHUB_ACTOR}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"

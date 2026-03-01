@@ -85,6 +85,19 @@ PG Superuser Secret 名称
 {{- end }}
 
 {{/*
+imagePullSecrets（拉取私有镜像仓库凭证）
+用法: {{ include "ecom.imagePullSecrets" . | nindent 6 }}
+*/}}
+{{- define "ecom.imagePullSecrets" -}}
+{{- if .Values.global.imagePullSecrets }}
+imagePullSecrets:
+{{- range .Values.global.imagePullSecrets }}
+  - name: {{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 通用环境变量（所有微服务共享）
 */}}
 {{- define "ecom.commonEnv" -}}

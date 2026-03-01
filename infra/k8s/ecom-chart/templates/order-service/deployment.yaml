@@ -26,6 +26,7 @@ spec:
         app.kubernetes.io/name: order-service
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- include "ecom.imagePullSecrets" . | nindent 6 }}
       terminationGracePeriodSeconds: 30
       nodeSelector:
         {{- toYaml .Values.orderService.nodeSelector | nindent 8 }}

@@ -1,9 +1,9 @@
-# CI/CD — 微服务构建 & Swarm 自动部署
+# CI/CD — 微服务构建 & K8s 自动部署
 #
-# push to main / workflow_dispatch → 类型检查 → 构建 5 个镜像 → SSH 部署到 Swarm → 健康检查
+# push to main / workflow_dispatch → 类型检查 → 构建 5 个镜像 → SSH 部署到 K8s → 健康检查
 # PR to main                       → 类型检查 → 构建（不推送、不部署）
 
-name: Build & Deploy
+name: Build & Deploy (K8s)
 
 on:
   push:
@@ -19,7 +19,7 @@ on:
 
 # 同分支只保留最后一次运行
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-k8s-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -27,8 +27,7 @@ permissions:
   packages: write
 
 env:
-  STACK_NAME: ecom
-  SWARM_DOMAIN: api.find345.site
+  DOMAIN: api.find345.site
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────────
 
@@ -75,8 +74,6 @@ jobs:
             dockerfile: services/cart-service/Dockerfile
           - name: order-service
             dockerfile: services/order-service/Dockerfile
-          - name: patroni
-            dockerfile: infra/patroni/Dockerfile
 
     steps:
       - name: Checkout
@@ -121,9 +118,9 @@ jobs:
           echo "- **Image**: \`${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Pushed**: \`${{ github.event_name != 'pull_request' }}\`" >> "$GITHUB_STEP_SUMMARY"
 
-  # ─── Job ③ SSH 部署到 Swarm Manager ─────────────────────────────────────────
+  # ─── Job ③ SSH 到 K8s Control Plane，Helm 部署 ─────────────────────────────
   deploy:
-    name: Deploy to Swarm
+    name: Deploy to K8s
     needs: build-images
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -142,111 +139,75 @@ jobs:
           echo "registry=ghcr.io/${OWNER_LC}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout (for stack file)
+      - name: Checkout (Helm Chart only)
         uses: actions/checkout@v4
         with:
-          sparse-checkout: infra
+          sparse-checkout: infra/k8s
 
-      - name: Copy stack configs to server
+      - name: Copy Helm Chart to server
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.SWARM_HOST }}
-          username: ${{ secrets.SWARM_USER }}
-          key: ${{ secrets.SWARM_SSH_KEY }}
-          source: "infra/"
+          host: ${{ secrets.K8S_SSH_HOST }}
+          username: ${{ secrets.K8S_SSH_USER }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          source: "infra/k8s/ecom-chart/"
           target: /opt/ecom
 
-      - name: Deploy via SSH
+      - name: Helm deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.SWARM_HOST }}
-          username: ${{ secrets.SWARM_USER }}
-          key: ${{ secrets.SWARM_SSH_KEY }}
+          host: ${{ secrets.K8S_SSH_HOST }}
+          username: ${{ secrets.K8S_SSH_USER }}
+          key: ${{ secrets.K8S_SSH_KEY }}
           script: |
             set -euo pipefail
 
             REGISTRY="${{ steps.vars.outputs.registry }}"
             TAG="${{ steps.vars.outputs.tag }}"
-            STACK="${{ env.STACK_NAME }}"
+            NAMESPACE="ecom"
+            RELEASE="ecom"
+            CHART="/opt/ecom/infra/k8s/ecom-chart"
 
-            # 登录 GHCR（用于 --with-registry-auth 转发凭证到 Worker 节点）
-            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-            SERVICES="api-gateway user-service product-service cart-service order-service"
-
-            # 移除旧的非 ecom stack（如果存在），释放端口
-            for OLD_STACK in $(docker stack ls --format '{{.Name}}' 2>/dev/null); do
-              if [ "${OLD_STACK}" != "${STACK}" ]; then
-                echo "Removing old stack: ${OLD_STACK}"
-                docker stack rm "${OLD_STACK}"
-                echo "Waiting for old stack to drain..."
-                for _ in $(seq 1 12); do
-                  REMAINING=$(docker service ls --filter "name=${OLD_STACK}_" -q 2>/dev/null | wc -l)
-                  [ "${REMAINING}" -eq 0 ] && break
-                  sleep 5
-                done
-                echo "✓ Old stack removed"
-              fi
-            done
-
-            # docker stack deploy 是幂等的：首次创建全部服务，后续应用配置变更 + 镜像更新
-            cd /opt/ecom/infra/swarm
             echo "══════════════════════════════════════════"
-            echo "Deploying stack ${STACK} (tag: ${TAG})"
+            echo "Deploying ${RELEASE} to K8s (tag: ${TAG})"
             echo "══════════════════════════════════════════"
 
-            REGISTRY="${REGISTRY}" TAG="${TAG}" \
-              docker stack deploy \
-                --compose-file docker-stack.yml \
-                --with-registry-auth \
-                "${STACK}"
+            # 确保 namespace 存在
+            kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
-            # 等待每个应用服务收敛
-            for SVC in ${SERVICES}; do
-              echo ""
-              echo "Waiting for ${STACK}_${SVC} to converge..."
-              TIMEOUT=180
-              ELAPSED=0
-              while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
-                # 检查是否所有副本都 Running
-                REPLICAS=$(docker service ls --filter "name=${STACK}_${SVC}" --format '{{.Replicas}}' 2>/dev/null || echo "0/0")
-                CURRENT=$(echo "${REPLICAS}" | cut -d'/' -f1)
-                DESIRED=$(echo "${REPLICAS}" | cut -d'/' -f2)
+            # 创建/更新 GHCR 拉镜像凭证（私有仓库需要）
+            kubectl create secret docker-registry ghcr-pull-secret \
+              --namespace="${NAMESPACE}" \
+              --docker-server=ghcr.io \
+              --docker-username="${{ github.actor }}" \
+              --docker-password="${{ secrets.GHCR_PAT }}" \
+              --dry-run=client -o yaml | kubectl apply -f -
 
-                if [ "${CURRENT}" = "${DESIRED}" ] && [ "${DESIRED}" != "0" ]; then
-                  echo "✓ ${SVC} ready (${REPLICAS})"
-                  break
-                fi
-
-                # 检查滚动更新是否失败
-                STATE=$(docker service inspect --format '{{.UpdateStatus.State}}' "${STACK}_${SVC}" 2>/dev/null || echo "")
-                case "${STATE}" in
-                  rollback_completed)
-                    echo "✗ ${SVC} rolled back! Aborting pipeline."
-                    docker service ps "${STACK}_${SVC}" --no-trunc 2>/dev/null | head -5
-                    exit 1
-                    ;;
-                  paused)
-                    echo "✗ ${SVC} update paused! Aborting pipeline."
-                    docker service ps "${STACK}_${SVC}" --no-trunc 2>/dev/null | head -5
-                    exit 1
-                    ;;
-                esac
-
-                sleep 5
-                ELAPSED=$((ELAPSED + 5))
-              done
-
-              if [ ${ELAPSED} -ge ${TIMEOUT} ]; then
-                echo "✗ ${SVC} did not converge within ${TIMEOUT}s"
-                docker service ps "${STACK}_${SVC}" --no-trunc 2>/dev/null | head -5
-                exit 1
-              fi
-            done
+            # Helm 部署/升级
+            helm upgrade --install "${RELEASE}" "${CHART}" \
+              --namespace "${NAMESPACE}" \
+              --set "global.registry=${REGISTRY}" \
+              --set "global.imageTag=${TAG}" \
+              --set "global.imagePullSecrets[0]=ghcr-pull-secret" \
+              --set "secrets.postgresPassword=${{ secrets.K8S_POSTGRES_PASSWORD }}" \
+              --set "secrets.replicationPassword=${{ secrets.K8S_REPLICATION_PASSWORD }}" \
+              --set "secrets.jwtAccessSecret=${{ secrets.K8S_JWT_ACCESS_SECRET }}" \
+              --set "secrets.jwtRefreshSecret=${{ secrets.K8S_JWT_REFRESH_SECRET }}" \
+              --set "secrets.internalSecret=${{ secrets.K8S_INTERNAL_SECRET }}" \
+              --wait \
+              --timeout 300s
 
             echo ""
-            echo "══════════ Final status ══════════"
-            docker service ls --filter "name=${STACK}_"
+            echo "══════════ Pod Status ══════════"
+            kubectl get pods -n "${NAMESPACE}" -o wide
+
+            echo ""
+            echo "══════════ Services ══════════"
+            kubectl get svc -n "${NAMESPACE}"
+
+            echo ""
+            echo "══════════ Helm Release ══════════"
+            helm list -n "${NAMESPACE}"
 
   # ─── Job ④ 外部健康检查 ─────────────────────────────────────────────────────
   smoke-test:
@@ -259,7 +220,7 @@ jobs:
     steps:
       - name: Health check
         run: |
-          URL="https://${{ env.SWARM_DOMAIN }}/health"
+          URL="https://${{ env.DOMAIN }}/health"
           echo "Smoke testing: ${URL}"
 
           for i in $(seq 1 20); do
@@ -284,13 +245,14 @@ jobs:
       - name: Deploy summary
         if: always()
         run: |
-          echo "## Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "## K8s Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Commit** | \`${GITHUB_SHA::12}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Branch** | \`${GITHUB_REF_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Domain** | [https://${{ env.SWARM_DOMAIN }}](https://${{ env.SWARM_DOMAIN }}) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Domain** | [https://${{ env.DOMAIN }}](https://${{ env.DOMAIN }}) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Platform** | Kubernetes (Helm) |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Trigger** | \`${GITHUB_EVENT_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Actor** | \`${GITHUB_ACTOR}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"

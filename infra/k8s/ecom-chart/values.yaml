@@ -7,6 +7,7 @@ global:
   registry: "registry.example.com/ecom"
   imageTag: "latest"
   imagePullPolicy: IfNotPresent
+  imagePullSecrets: []    # CI/CD 通过 --set 传入，如 ["ghcr-pull-secret"]
 
 # ============ Secrets（部署时必须通过 --set 传入） ============
 secrets:

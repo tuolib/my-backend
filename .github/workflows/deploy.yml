@@ -207,7 +207,17 @@ jobs:
               echo "Waiting for services to start..."
               sleep 30
 
+              echo ""
+              echo "══════════ Service status ══════════"
               docker service ls --filter "name=${STACK}_"
+
+              echo ""
+              echo "══════════ Replica status ══════════"
+              for SVC in ${SERVICES} caddy postgres-primary redis-primary; do
+                echo "--- ${STACK}_${SVC} ---"
+                docker service ps "${STACK}_${SVC}" --no-trunc 2>/dev/null | head -5 || echo "(not found)"
+              done
+
               echo ""
               echo "Initial deployment complete."
             else
@@ -273,13 +283,13 @@ jobs:
     steps:
       - name: Health check
         run: |
-          URL="https://${{ env.SWARM_DOMAIN }}/api/v1/gateway/health"
+          URL="https://${{ env.SWARM_DOMAIN }}/health"
           echo "Smoke testing: ${URL}"
 
           for i in $(seq 1 20); do
             HTTP_CODE=$(curl -s -o /tmp/health.json -w '%{http_code}' \
               --max-time 10 \
-              -X POST "${URL}" 2>/dev/null || echo "000")
+              -X POST "${URL}" 2>/dev/null) || HTTP_CODE="000"
 
             if [ "${HTTP_CODE}" = "200" ]; then
               echo "✓ Health check passed (attempt ${i}/20)"

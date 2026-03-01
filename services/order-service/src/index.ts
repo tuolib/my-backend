@@ -25,8 +25,10 @@ app.route('/api/v1/payment', paymentRoutes);
 app.route('/api/v1/admin/order', adminRoutes);
 app.route('/internal/order', internalRoutes);
 
-// ── 健康检查 ──
-app.post('/health', (c) => c.json({ status: 'ok', service: 'order-service' }));
+// ── 健康检查（GET + POST 双支持）──
+const orderHealth = (c: any) => c.json({ status: 'ok', service: 'order-service' });
+app.get('/health', orderHealth);
+app.post('/health', orderHealth);
 
 // ── 超时自动取消定时任务 ──
 const timeoutChecker = new OrderTimeoutChecker();

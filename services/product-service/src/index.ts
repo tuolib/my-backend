@@ -34,8 +34,10 @@ app.route('/api/v1/admin/stock', adminStockRoutes);
 app.route('/internal/product', internalRoutes);
 app.route('/internal/stock', stockRoutes);
 
-// 健康检查
-app.post('/health', (c) => c.json({ status: 'ok', service: 'product-service' }));
+// 健康检查（GET + POST 双支持）
+const productHealth = (c: any) => c.json({ status: 'ok', service: 'product-service' });
+app.get('/health', productHealth);
+app.post('/health', productHealth);
 
 export default {
   port: Number(process.env.PRODUCT_SERVICE_PORT) || 3002,

@@ -22,8 +22,10 @@ app.onError(errorHandler);
 app.route('/api/v1/cart', cartRoutes);
 app.route('/internal/cart', internalRoutes);
 
-// 健康检查
-app.post('/health', (c) => c.json({ status: 'ok', service: 'cart-service' }));
+// 健康检查（GET + POST 双支持）
+const cartHealth = (c: any) => c.json({ status: 'ok', service: 'cart-service' });
+app.get('/health', cartHealth);
+app.post('/health', cartHealth);
 
 export default {
   port: config.server.ports.cart,

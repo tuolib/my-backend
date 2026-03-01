@@ -23,8 +23,10 @@ app.route('/api/v1/user', userRoutes);
 app.route('/api/v1/user/address', addressRoutes);
 app.route('/internal/user', internalRoutes);
 
-// 健康检查
-app.post('/health', (c) => c.json({ status: 'ok', service: 'user-service' }));
+// 健康检查（GET + POST 双支持）
+const userHealth = (c: any) => c.json({ status: 'ok', service: 'user-service' });
+app.get('/health', userHealth);
+app.post('/health', userHealth);
 
 export default {
   port: Number(process.env.USER_SERVICE_PORT) || 3001,

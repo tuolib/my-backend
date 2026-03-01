@@ -1,7 +1,7 @@
 # K3s 部署指南（GitHub Actions 自动化）
 
 > 面向新手的一步一步操作手册。
-> 假设你有一台低配 VPS（1 CPU / 1 GB 内存），一个 GitHub 仓库，一个域名。
+> 支持**单节点**（1 台低配 VPS）和**多节点**（3-5 台 VPS）两种模式。
 
 ---
 
@@ -14,19 +14,29 @@
 5. [运行 Build & Deploy Workflow](#5-运行-build--deploy-workflow)
 6. [验证部署结果](#6-验证部署结果)
 7. [常见问题排查](#7-常见问题排查)
+8. [多节点部署（multi 模式）](#8-多节点部署multi-模式)
 
 ---
 
 ## 1. 前置准备
 
+### 选择你的模式
+
+| 模式 | 节点数 | 适用场景 | 最低配置 |
+|------|--------|----------|----------|
+| **single** | 1 台 | 个人项目 / 低配 VPS | 1 CPU / 1 GB 内存 / 10 GB 磁盘 |
+| **multi** | 3-5 台 | 生产环境 / 高可用 | 每台 2 CPU / 2 GB 内存 / 20 GB 磁盘 |
+
+> 不确定选哪个？先用 **single** 模式部署，后续可以随时扩展为 multi。
+
 ### 你需要的东西
 
 | 项目 | 说明 |
 |------|------|
-| **VPS** | 至少 1 CPU / 1 GB 内存 / 10 GB 磁盘，推荐 Ubuntu 22.04 |
+| **VPS** | 单节点 1 台，多节点 3-5 台，推荐 Ubuntu 22.04 |
 | **GitHub 仓库** | 已推送本项目代码到 main 分支 |
 | **域名**（可选） | 如 `api.find345.site`，已指向 VPS 的 IP |
-| **SSH 密钥对** | 用于 GitHub Actions SSH 到 VPS |
+| **SSH 密钥对** | 用于 GitHub Actions SSH 到 VPS（所有节点共用一个） |
 
 ### 生成 SSH 密钥对（如果还没有）
 
@@ -65,15 +75,26 @@ chmod 600 ~/.ssh/authorized_keys
 
 ### 2.2 确保防火墙放行端口
 
+在**每台 VPS** 上执行：
+
 ```bash
-# 如果用 ufw
+# 如果用 ufw（所有节点都需要）
 ufw allow 22/tcp     # SSH
 ufw allow 80/tcp     # HTTP（Let's Encrypt 验证用）
 ufw allow 443/tcp    # HTTPS
-ufw allow 6443/tcp   # K3s API（多节点需要，单节点可选）
+ufw allow 6443/tcp   # K3s API（多节点必须，单节点可选）
+
+# 多节点额外端口（节点间通信）
+ufw allow 8472/udp   # Flannel VXLAN（多节点必须）
+ufw allow 10250/tcp  # kubelet metrics（多节点必须）
+ufw allow 2379:2380/tcp  # etcd（仅 server 节点间）
 ```
 
+> **单节点**只需前 4 个端口。**多节点**全部都要。
+
 ### 2.3 创建工作目录
+
+在**每台 VPS** 上执行：
 
 ```bash
 mkdir -p /opt/ecom/infra/k3s/cluster-setup
@@ -131,15 +152,26 @@ mkdir -p /opt/ecom/infra/k3s/cluster-setup
 
 点击顶部 **"Variables"** 标签（在 Secrets 旁边），点击 **"New repository variable"**：
 
+#### 单节点（必须）
+
 | Name | Value | 说明 |
 |------|-------|------|
 | `K3S_S1_HOST` | `你的VPS_IP` | 如 `203.0.113.10`（和 K3S_SSH_HOST 一样） |
 
-> 单节点部署只需要这一个 Variable。多节点的 `K3S_S2_HOST`、`K3S_A1_HOST` 等**不需要添加**。
+#### 多节点（额外添加）
+
+| Name | Value | 说明 |
+|------|-------|------|
+| `K3S_S2_HOST` | 第 2 台 server IP | 如 `203.0.113.11`（可选，追加 control-plane） |
+| `K3S_S3_HOST` | 第 3 台 server IP | 如 `203.0.113.12`（可选，追加 control-plane） |
+| `K3S_S4_HOST` | Agent 1 IP | 如 `203.0.113.13`（可选，worker 节点） |
+| `K3S_S5_HOST` | Agent 2 IP | 如 `203.0.113.14`（可选，worker 节点） |
+
+> 单节点只需 `K3S_S1_HOST`。没配置的多节点 Variable 会自动跳过。
 
 ### 3.4 检查清单
 
-确认你已添加以下内容（打勾确认）：
+#### 单节点
 
 ```
 Secrets（共 9 个）：
@@ -155,6 +187,16 @@ Secrets（共 9 个）：
 
 Variables（共 1 个）：
  ☐ K3S_S1_HOST
+```
+
+#### 多节点（在单节点基础上追加）
+
+```
+Variables（额外 2-4 个）：
+ ☐ K3S_S2_HOST        （第 2 台 server）
+ ☐ K3S_S3_HOST        （第 3 台 server，可选）
+ ☐ K3S_S4_HOST        （Agent 1，可选）
+ ☐ K3S_S5_HOST        （Agent 2，可选）
 ```
 
 ---
@@ -224,7 +266,9 @@ vps123   Ready    control-plane,master   5m    v1.29.2+k3s1
 
 1. 点击右侧 **"Run workflow"** 按钮
 2. 弹出配置框：
-   - **目标平台**：选择 `k3s`
+   - **目标平台**：
+     - 单节点选 `k3s-single`
+     - 多节点选 `k3s-multi`
    - **Custom image tag**：留空（自动使用 commit SHA）
 3. 点击绿色 **"Run workflow"** 按钮
 
@@ -435,6 +479,138 @@ kubectl delete namespace ecom
 
 ---
 
+## 8. 多节点部署（multi 模式）
+
+> 如果你只有 1 台 VPS，跳过这一节。以下面向有 3-5 台 VPS 的场景。
+
+### 8.1 单节点 vs 多节点对比
+
+| 维度 | 单节点 (single) | 多节点 (multi) |
+|------|----------------|---------------|
+| values 文件 | `values-k3s.yaml` | `values-k3s-multi.yaml` |
+| PG 实例 | 1（仅主库） | 2（主 + 备） |
+| Redis 节点 | 1 | 3（主 + 2 副本） |
+| 服务副本 | 各 1 个 | 各 2 个 |
+| nodeSelector | 全部 `{}`（不限制） | 按角色分布（见下方） |
+| Nginx Ingress | 任意节点运行 | 仅 `role=ingress` 节点 |
+| etcd | 单节点内嵌 | `--cluster-init` 分布式 etcd |
+
+### 8.2 节点角色规划
+
+多节点模式下，`04-install-operators.sh` 会自动给节点打标签：
+
+```
+S1 (server)  → role=data      ← PG 主库 + Redis
+S2 (server)  → role=data      ← PG 备库 + Redis
+S3 (server)  → role=ingress   ← Nginx Ingress Controller
+A1 (agent)   → role=app       ← 微服务 Pod
+A2 (agent)   → role=app       ← 微服务 Pod
+```
+
+> 不一定需要 5 台。最少 **3 台**（S1 + S2 + S3）也能跑，A1/A2 不配置会自动跳过。
+
+### 8.3 多节点操作步骤
+
+#### 步骤一：所有节点做基础配置
+
+在**每台 VPS** 上重复 [第 2 节](#2-vps-基础配置) 的操作：
+- 添加同一个 SSH 公钥
+- 开放防火墙端口（包括多节点额外端口）
+- 创建 `/opt/ecom/...` 目录
+
+#### 步骤二：GitHub 添加多节点 Variables
+
+在 [第 3.3 节](#33-添加-variables) 基础上，额外添加节点 IP：
+
+```
+Variables（示例 5 节点）：
+  K3S_S1_HOST = 203.0.113.10   ← 已有
+  K3S_S2_HOST = 203.0.113.11   ← 新增
+  K3S_S3_HOST = 203.0.113.12   ← 新增
+  K3S_S4_HOST = 203.0.113.13   ← 新增
+  K3S_S5_HOST = 203.0.113.14   ← 新增
+```
+
+#### 步骤三：运行集群初始化（选 multi 模式）
+
+```
+Actions → K3s Cluster Setup → Run workflow
+  集群模式: multi          ← 重要！不是 single
+  执行到哪一步: all
+```
+
+执行流程：
+
+```
+01 Install Server (S1)              ← 安装 k3s + 启用 etcd
+02 Join Server (S2) + (S3)          ← 追加 2 个 control-plane（并行）
+03 Join Agent (A1) + (A2)           ← 追加 2 个 worker（并行）
+04 Install Operators (S1)           ← 打节点标签 + 安装 Operator
+Verify Cluster                      ← 验证 5/5 节点 Ready
+```
+
+#### 步骤四：运行部署（选 k3s-multi 平台）
+
+```
+Actions → Build & Deploy → Run workflow
+  目标平台: k3s-multi      ← 重要！不是 k3s-single
+  Custom image tag: （留空）
+```
+
+这会使用 `values-k3s-multi.yaml`，自动将 Pod 按 nodeSelector 分配到正确节点。
+
+#### 步骤五：验证多节点分布
+
+SSH 到任意 server 节点：
+
+```bash
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+# 查看节点标签
+kubectl get nodes --show-labels
+
+# 确认 PG Pod 在 data 节点上
+kubectl get pods -n ecom -l cnpg.io/cluster=ecom-pg -o wide
+
+# 确认服务 Pod 在 app 节点上
+kubectl get pods -n ecom -l app=ecom-api-gateway -o wide
+
+# 确认 Ingress 在 ingress 节点上
+kubectl get pods -n ingress-nginx -o wide
+```
+
+### 8.4 3 节点精简方案
+
+如果只有 3 台 VPS，不配置 `K3S_S4_HOST` 和 `K3S_S5_HOST` 即可：
+
+```
+S1 → role=data      ← PG + Redis + 微服务（混合调度）
+S2 → role=data      ← PG 备 + Redis 副本
+S3 → role=ingress   ← Nginx Ingress
+```
+
+> 注意：3 节点方案中微服务会调度到 S1/S2（data 节点上），因为没有 `role=app` 节点。
+> 如需精确控制，可以给 S1 追加标签：`kubectl label node <S1> role=app --overwrite`
+
+### 8.5 手动部署脚本（多节点）
+
+如果不使用 GitHub Actions，也可以在 server 节点上手动部署：
+
+```bash
+cd /path/to/my-backend/infra/k3s
+
+# 设置多节点模式
+export K3S_MODE=multi
+export REGISTRY=ghcr.io/你的用户名
+export TAG=latest
+
+./deploy.sh setup    # 交互式配置 secrets
+./deploy.sh build    # 构建镜像
+./deploy.sh deploy   # Helm 部署（自动使用 values-k3s-multi.yaml）
+```
+
+---
+
 ## 附录：后续 push 代码的自动部署
 
 默认 push 到 main 分支会自动触发 **k8s** 部署（为了不破坏现有流程）。
@@ -442,7 +618,7 @@ kubectl delete namespace ecom
 如果希望 push 时也部署到 k3s，需要手动运行 workflow：
 
 ```
-Actions → Build & Deploy → Run workflow → 目标平台: k3s → Run workflow
+Actions → Build & Deploy → Run workflow → 目标平台: k3s-single（或 k3s-multi）→ Run workflow
 ```
 
 > 两个平台的部署互不影响，可以同时运行。

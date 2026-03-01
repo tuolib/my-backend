@@ -21,7 +21,8 @@ on:
         default: "k8s"
         options:
           - k8s
-          - k3s
+          - k3s-single
+          - k3s-multi
       image_tag:
         description: "Custom image tag (leave blank = SHA)"
         required: false
@@ -152,12 +153,18 @@ jobs:
 
           # 根据平台选择 SSH 目标和 values 文件
           PLATFORM="${{ env.PLATFORM }}"
-          if [[ "${PLATFORM}" == "k3s" ]]; then
+          if [[ "${PLATFORM}" == "k3s-multi" ]]; then
+            echo "values_flag=-f /opt/ecom/infra/k8s/ecom-chart/values-k3s-multi.yaml" >> "$GITHUB_OUTPUT"
+            echo "kubeconfig_export=export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> "$GITHUB_OUTPUT"
+            echo "is_k3s=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${PLATFORM}" == "k3s-single" ]]; then
             echo "values_flag=-f /opt/ecom/infra/k8s/ecom-chart/values-k3s.yaml" >> "$GITHUB_OUTPUT"
             echo "kubeconfig_export=export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> "$GITHUB_OUTPUT"
+            echo "is_k3s=true" >> "$GITHUB_OUTPUT"
           else
             echo "values_flag=" >> "$GITHUB_OUTPUT"
             echo "kubeconfig_export=" >> "$GITHUB_OUTPUT"
+            echo "is_k3s=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout (Helm Chart only)
@@ -168,18 +175,18 @@ jobs:
       - name: Copy Helm Chart to server
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_HOST || secrets.K8S_SSH_HOST }}
-          username: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_USER || secrets.K8S_SSH_USER }}
-          key: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_KEY || secrets.K8S_SSH_KEY }}
+          host: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_HOST || secrets.K8S_SSH_HOST }}
+          username: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_USER || secrets.K8S_SSH_USER }}
+          key: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_KEY || secrets.K8S_SSH_KEY }}
           source: "infra/k8s/ecom-chart/"
           target: /opt/ecom
 
       - name: Helm deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_HOST || secrets.K8S_SSH_HOST }}
-          username: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_USER || secrets.K8S_SSH_USER }}
-          key: ${{ env.PLATFORM == 'k3s' && secrets.K3S_SSH_KEY || secrets.K8S_SSH_KEY }}
+          host: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_HOST || secrets.K8S_SSH_HOST }}
+          username: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_USER || secrets.K8S_SSH_USER }}
+          key: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_KEY || secrets.K8S_SSH_KEY }}
           script: |
             set -euo pipefail
 
@@ -209,7 +216,7 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
 
             # 根据平台选择 secrets（K8S_ 或 K3S_ 前缀）
-            if [[ "${PLATFORM}" == "k3s" ]]; then
+            if [[ "${PLATFORM}" == k3s* ]]; then
               PG_PASS="${{ secrets.K3S_POSTGRES_PASSWORD }}"
               REPL_PASS="${{ secrets.K3S_REPLICATION_PASSWORD }}"
               JWT_ACCESS="${{ secrets.K3S_JWT_ACCESS_SECRET }}"
@@ -287,8 +294,8 @@ jobs:
         if: always()
         run: |
           PLATFORM="${{ env.PLATFORM }}"
-          if [[ "${PLATFORM}" == "k3s" ]]; then
-            PLATFORM_LABEL="K3s (Helm)"
+          if [[ "${PLATFORM}" == k3s* ]]; then
+            PLATFORM_LABEL="K3s ${PLATFORM#k3s-} (Helm)"
           else
             PLATFORM_LABEL="Kubernetes (Helm)"
           fi

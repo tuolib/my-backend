@@ -8,9 +8,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CHART_DIR="${PROJECT_ROOT}/infra/k8s/ecom-chart"
-VALUES_FILE="${CHART_DIR}/values-k3s.yaml"
 NAMESPACE="ecom"
 RELEASE_NAME="ecom"
+
+# k3s 模式：single（默认）或 multi
+K3S_MODE="${K3S_MODE:-single}"
+if [[ "${K3S_MODE}" == "multi" ]]; then
+  VALUES_FILE="${CHART_DIR}/values-k3s-multi.yaml"
+else
+  VALUES_FILE="${CHART_DIR}/values-k3s.yaml"
+fi
 
 # k3s 默认 kubeconfig
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
@@ -203,7 +210,7 @@ cmd_deploy() {
     HELM_ARGS+=(--set "services.corsOrigins=${CORS_ORIGINS}")
   fi
 
-  log_info "部署 Helm Chart (release=${RELEASE_NAME}, tag=${TAG}, values=values-k3s.yaml)..."
+  log_info "部署 Helm Chart (release=${RELEASE_NAME}, tag=${TAG}, mode=${K3S_MODE}, values=$(basename "${VALUES_FILE}"))..."
   helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     --create-namespace \
@@ -370,7 +377,7 @@ usage() {
   echo "命令:"
   echo "  setup     初始化命名空间、验证 Operator、交互式创建 Secret"
   echo "  build     构建并推送所有服务镜像"
-  echo "  deploy    Helm 部署/升级（使用 values-k3s.yaml）"
+  echo "  deploy    Helm 部署/升级（根据 K3S_MODE 选择 values 文件）"
   echo "  status    查看集群状态"
   echo "  destroy   卸载 Helm release 并清理资源"
   echo "  migrate   手动触发数据库迁移"
@@ -380,6 +387,7 @@ usage() {
   echo "环境变量:"
   echo "  REGISTRY       (必须) 镜像仓库地址，如 registry.example.com/ecom"
   echo "  TAG            (可选) 镜像标签，默认 latest"
+  echo "  K3S_MODE       (可选) single 或 multi，默认 single"
   echo "  KUBECONFIG     (可选) 默认 /etc/rancher/k3s/k3s.yaml"
   echo "  CORS_ORIGINS   (可选) 允许的跨域来源，逗号分隔"
 }

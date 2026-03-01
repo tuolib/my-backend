@@ -45,11 +45,11 @@ concurrency:
 #
 # GitHub Variables:
 #   K3S_SSH_USER              — SSH 用户名（默认 root）
-#   K3S_S1_HOST               — 首个 server IP（必须）
-#   K3S_S2_HOST               — 第二个 server IP（multi 模式可选）
-#   K3S_S3_HOST               — 第三个 server IP（multi 模式可选）
-#   K3S_A1_HOST               — Agent 1 IP（multi 模式可选）
-#   K3S_A2_HOST               — Agent 2 IP（multi 模式可选）
+#   K3S_S1_HOST               — S1 IP（server，必须）
+#   K3S_S2_HOST               — S2 IP（server，multi 可选）
+#   K3S_S3_HOST               — S3 IP（server，multi 可选）
+#   K3S_S4_HOST               — S4 IP（agent，multi 可选）
+#   K3S_S5_HOST               — S5 IP（agent，multi 可选）
 #   K3S_EXTRA_SANS            — 额外 TLS SAN（可选，如域名）
 #   K3S_VERSION               — 指定 k3s 版本（可选）
 
@@ -221,15 +221,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: [A1, A2]
+        host: [S4, S5]
 
     steps:
       - name: Resolve host IP
         id: host
         run: |
           case "${{ matrix.host }}" in
-            A1) IP="${{ vars.K3S_A1_HOST }}" ;;
-            A2) IP="${{ vars.K3S_A2_HOST }}" ;;
+            S4) IP="${{ vars.K3S_S4_HOST }}" ;;
+            S5) IP="${{ vars.K3S_S5_HOST }}" ;;
           esac
           if [[ -z "${IP}" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -340,10 +340,10 @@ jobs:
               export S1_NODE="\$(hostname)"
               export S2_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S2_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S2_HOST }}')"
               export S3_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S3_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S3_HOST }}')"
-              export S4_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_A1_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_A1_HOST }}')"
-              export S5_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_A2_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_A2_HOST }}')"
+              export S4_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S4_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S4_HOST }}')"
+              export S5_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S5_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S5_HOST }}')"
               echo "节点映射:"
-              echo "  S1=\${S1_NODE} S2=\${S2_NODE} S3=\${S3_NODE} S4(A1)=\${S4_NODE} S5(A2)=\${S5_NODE}"
+              echo "  S1=\${S1_NODE} S2=\${S2_NODE} S3=\${S3_NODE} S4=\${S4_NODE} S5=\${S5_NODE}"
             fi
 
             chmod +x /opt/ecom/infra/k3s/cluster-setup/04-install-operators.sh

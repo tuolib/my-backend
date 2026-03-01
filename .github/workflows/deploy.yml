@@ -1,6 +1,10 @@
+# CI/CD — 微服务构建 & Swarm 自动部署
+#
+# push to main / workflow_dispatch → 类型检查 → 构建 5 个镜像 → SSH 部署到 Swarm → 健康检查
+# PR to main                       → 类型检查 → 构建（不推送、不部署）
+
 name: Build & Deploy
 
-# ─── 触发条件 ─────────────────────────────────────────────────────────────────
 on:
   push:
     branches: [main]
@@ -8,16 +12,8 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      deploy_branch:
-        description: "Branch to deploy (empty = branch selected in Run workflow)"
-        required: false
-        default: ""
-      deploy_mode:
-        description: "Deploy mode (auto / single / multi)"
-        required: false
-        default: "auto"
       image_tag:
-        description: "Image tag to deploy (leave blank = build from current commit)"
+        description: "Custom image tag (leave blank = SHA)"
         required: false
         default: ""
 
@@ -31,41 +27,21 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ho-api
-  STACK_NAME: ${{ vars.STACK_NAME || 'ho' }}
-  # workflow_dispatch: 支持手动输入分支；未输入则使用 Run workflow 选择的分支
-  DEPLOY_BRANCH: ${{ inputs.deploy_branch || github.ref_name }}
-  SWARM_DOMAIN: ${{ vars.SWARM_DOMAIN || 'api.find345.site' }}
-  # Keep push-triggered deploys adaptive to current cluster size.
-  # Manual runs can still override via workflow_dispatch input.
-  DEPLOY_MODE: ${{ inputs.deploy_mode || 'auto' }}
-  API_REPLICAS_SINGLE: ${{ vars.API_REPLICAS_SINGLE || '2' }}
-  API_REPLICAS_MULTI: ${{ vars.API_REPLICAS_MULTI || '10' }}
-  DB_POOL_MAX: ${{ vars.DB_POOL_MAX || '5' }}
-  DB_STRICT_READ_READINESS: ${{ vars.DB_STRICT_READ_READINESS || 'false' }}
-  LOG_LEVEL: ${{ vars.LOG_LEVEL || 'info' }}
-  PGBOUNCER_MAX_CLIENT_CONN: ${{ vars.PGBOUNCER_MAX_CLIENT_CONN || '5000' }}
-  PGBOUNCER_DEFAULT_POOL_SIZE: ${{ vars.PGBOUNCER_DEFAULT_POOL_SIZE || '500' }}
-  PGBOUNCER_RESERVE_POOL_SIZE: ${{ vars.PGBOUNCER_RESERVE_POOL_SIZE || '100' }}
-  POSTGRES_DB: ${{ vars.POSTGRES_DB || 'mydb' }}
-  POSTGRES_USER: ${{ vars.POSTGRES_USER || 'user' }}
-  RUN_MIGRATION: ${{ vars.RUN_MIGRATION || 'true' }}
+  STACK_NAME: ecom
+  SWARM_DOMAIN: api.find345.site
 
-# ─── Job 1: 类型检查 + 构建镜像 ───────────────────────────────────────────────
+# ─── Jobs ────────────────────────────────────────────────────────────────────────
+
 jobs:
-  build:
-    name: Build image
+  # ─── Job ① 类型检查 ──────────────────────────────────────────────────────────
+  check:
+    name: Type check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      image_repository: ${{ steps.vars.outputs.image_repository }}
-      image_tag: ${{ steps.vars.outputs.image_tag }}
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ env.DEPLOY_BRANCH }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -78,26 +54,45 @@ jobs:
       - name: Type check
         run: bunx tsc --noEmit
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+  # ─── Job ② 并行构建 5 个微服务镜像 ──────────────────────────────────────────
+  build-images:
+    name: Build ${{ matrix.service.name }}
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
-      # 计算镜像坐标：owner 转小写，tag 取 commit SHA 前 12 位
+    strategy:
+      fail-fast: true
+      matrix:
+        service:
+          - name: api-gateway
+            dockerfile: apps/api-gateway/Dockerfile
+          - name: user-service
+            dockerfile: services/user-service/Dockerfile
+          - name: product-service
+            dockerfile: services/product-service/Dockerfile
+          - name: cart-service
+            dockerfile: services/cart-service/Dockerfile
+          - name: order-service
+            dockerfile: services/order-service/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Compute image coordinates
         id: vars
         run: |
           OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
-          REPO="${OWNER_LC}/${IMAGE_NAME}"
-          # workflow_dispatch 可传入已有 tag，否则用 SHA
+          REPO="ghcr.io/${OWNER_LC}/ecom-${{ matrix.service.name }}"
           CUSTOM_TAG="${{ inputs.image_tag }}"
-          if [[ -n "${CUSTOM_TAG}" ]]; then
-            TAG="${CUSTOM_TAG}"
-          else
-            TAG="${GITHUB_SHA::12}"
-          fi
-          echo "image_repository=ghcr.io/${REPO}" >> "$GITHUB_OUTPUT"
-          echo "image_tag=${TAG}"                  >> "$GITHUB_OUTPUT"
+          TAG="${CUSTOM_TAG:-${GITHUB_SHA::12}}"
+          echo "image=${REPO}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      # 只在 main push / workflow_dispatch 时才推送镜像
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -106,119 +101,162 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ matrix.service.dockerfile }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ${{ steps.vars.outputs.image_repository }}:${{ steps.vars.outputs.image_tag }}
-            ${{ steps.vars.outputs.image_repository }}:latest
-          # 利用 GitHub Actions Cache 加速重复构建
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+            ${{ steps.vars.outputs.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
 
       - name: Build summary
         run: |
-          echo "### Build Result" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Deploy branch**: \`${DEPLOY_BRANCH}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Image**: \`${{ steps.vars.outputs.image_repository }}:${{ steps.vars.outputs.image_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ${{ matrix.service.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image**: \`${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Pushed**: \`${{ github.event_name != 'pull_request' }}\`" >> "$GITHUB_STEP_SUMMARY"
 
-# ─── Job 2: 部署到 Swarm（仅 main push / workflow_dispatch） ─────────────────
+  # ─── Job ③ SSH 部署到 Swarm Manager ─────────────────────────────────────────
   deploy:
     name: Deploy to Swarm
-    needs: build
+    needs: build-images
     if: github.event_name != 'pull_request'
-    # 在 Swarm manager 节点上运行的 self-hosted runner
-    runs-on: [self-hosted, linux, swarm-manager]
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: production
-      url: https://${{ vars.SWARM_DOMAIN || 'api.find345.site' }}
+      url: https://api.find345.site
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Compute image tag
+        id: vars
+        run: |
+          OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          CUSTOM_TAG="${{ inputs.image_tag }}"
+          TAG="${CUSTOM_TAG:-${GITHUB_SHA::12}}"
+          echo "registry=ghcr.io/${OWNER_LC}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
         with:
-          ref: ${{ env.DEPLOY_BRANCH }}
-          fetch-depth: 1
-          clean: true
+          host: ${{ secrets.SWARM_HOST }}
+          username: ${{ secrets.SWARM_USER }}
+          key: ${{ secrets.SWARM_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
 
-      - name: Ensure HOME for git global config
-        run: echo "HOME=${HOME:-/root}" >> "$GITHUB_ENV"
+            REGISTRY="${{ steps.vars.outputs.registry }}"
+            TAG="${{ steps.vars.outputs.tag }}"
+            STACK="${{ env.STACK_NAME }}"
 
-      - name: Pull latest code
+            # 登录 GHCR（用于 --with-registry-auth 转发凭证到 Worker 节点）
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            # 逐个服务滚动更新，顺序执行限制爆炸半径
+            SERVICES="api-gateway user-service product-service cart-service order-service"
+
+            for SVC in ${SERVICES}; do
+              IMAGE="${REGISTRY}/ecom-${SVC}:${TAG}"
+              echo "══════════════════════════════════════════"
+              echo "Updating ${STACK}_${SVC} → ${IMAGE}"
+              echo "══════════════════════════════════════════"
+
+              docker service update \
+                --with-registry-auth \
+                --image "${IMAGE}" \
+                "${STACK}_${SVC}"
+
+              # 等待服务收敛（最多 180 秒）
+              echo "Waiting for ${STACK}_${SVC} to converge..."
+              TIMEOUT=180
+              ELAPSED=0
+              while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
+                STATE=$(docker service inspect --format '{{.UpdateStatus.State}}' "${STACK}_${SVC}" 2>/dev/null || echo "unknown")
+                case "${STATE}" in
+                  completed)
+                    echo "✓ ${SVC} update completed"
+                    break
+                    ;;
+                  rollback_completed)
+                    echo "✗ ${SVC} rolled back! Aborting pipeline."
+                    exit 1
+                    ;;
+                  paused)
+                    echo "✗ ${SVC} update paused! Aborting pipeline."
+                    exit 1
+                    ;;
+                  *)
+                    sleep 5
+                    ELAPSED=$((ELAPSED + 5))
+                    ;;
+                esac
+              done
+
+              if [ ${ELAPSED} -ge ${TIMEOUT} ]; then
+                echo "✗ ${SVC} did not converge within ${TIMEOUT}s"
+                exit 1
+              fi
+            done
+
+            echo ""
+            echo "All services updated successfully."
+            docker service ls --filter "name=${STACK}_"
+
+  # ─── Job ④ 外部健康检查 ─────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke test
+    needs: deploy
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Health check
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch origin "${DEPLOY_BRANCH}" --prune
-          git checkout -B "${DEPLOY_BRANCH}" "origin/${DEPLOY_BRANCH}"
-          git pull --ff-only origin "${DEPLOY_BRANCH}"
-          echo "Deploy branch: ${DEPLOY_BRANCH}"
-          echo "Deploy commit: $(git rev-parse --short HEAD)"
-
-      - name: Verify Swarm manager
-        run: |
-          command -v docker || { echo "::error::docker not found"; exit 1; }
-          [[ "$(docker info --format '{{.Swarm.LocalNodeState}}')" == "active" ]] \
-            || { echo "::error::Swarm not active"; exit 1; }
-          docker node ls >/dev/null || { echo "::error::Not a swarm manager"; exit 1; }
-
-      - name: Log in to GHCR on manager
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" \
-            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-      - name: Render .env.swarm
-        run: |
-          cat > swarm/.env.swarm <<EOF2
-          STACK_NAME=${STACK_NAME}
-          SWARM_DOMAIN=${SWARM_DOMAIN}
-          DEPLOY_MODE=${DEPLOY_MODE}
-          IMAGE_REPOSITORY=${{ needs.build.outputs.image_repository }}
-          IMAGE_TAG=${{ needs.build.outputs.image_tag }}
-          API_REPLICAS_SINGLE=${API_REPLICAS_SINGLE}
-          API_REPLICAS_MULTI=${API_REPLICAS_MULTI}
-          DB_POOL_MAX=${DB_POOL_MAX}
-          DB_STRICT_READ_READINESS=${DB_STRICT_READ_READINESS}
-          LOG_LEVEL=${LOG_LEVEL}
-          POSTGRES_DB=${POSTGRES_DB}
-          POSTGRES_USER=${POSTGRES_USER}
-          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_REPLICATION_PASSWORD=${{ secrets.POSTGRES_REPLICATION_PASSWORD }}
-          PGBOUNCER_MAX_CLIENT_CONN=${PGBOUNCER_MAX_CLIENT_CONN}
-          PGBOUNCER_DEFAULT_POOL_SIZE=${PGBOUNCER_DEFAULT_POOL_SIZE}
-          PGBOUNCER_RESERVE_POOL_SIZE=${PGBOUNCER_RESERVE_POOL_SIZE}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          RUN_MIGRATION=${RUN_MIGRATION}
-          EOF2
-
-      - name: Deploy stack
-        run: bash scripts/swarm/deploy-stack.sh
-
-      - name: Public smoke test
-        run: |
-          URL="https://${SWARM_DOMAIN}/healthz"
+          URL="https://${{ env.SWARM_DOMAIN }}/api/v1/gateway/health"
           echo "Smoke testing: ${URL}"
-          for i in $(seq 1 30); do
-            if curl -fsS --max-time 5 "${URL}" >/tmp/smoke.out 2>&1; then
-              echo "✓ Smoke test passed"
+
+          for i in $(seq 1 20); do
+            HTTP_CODE=$(curl -s -o /tmp/health.json -w '%{http_code}' \
+              --max-time 10 \
+              -X POST "${URL}" 2>/dev/null || echo "000")
+
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "✓ Health check passed (attempt ${i}/20)"
+              cat /tmp/health.json
               exit 0
             fi
-            echo "  attempt ${i}/30 failed, retrying in 5s..."
-            sleep 5
+
+            echo "  attempt ${i}/20 — HTTP ${HTTP_CODE}, retrying in 10s..."
+            sleep 10
           done
-          echo "::error::Smoke test failed: ${URL}"
-          cat /tmp/smoke.out || true
+
+          echo "::error::Health check failed after 20 attempts"
+          cat /tmp/health.json 2>/dev/null || true
           exit 1
 
       - name: Deploy summary
         if: always()
         run: |
-          echo "### Deploy Result" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Branch**: \`${DEPLOY_BRANCH}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Stack**: \`${STACK_NAME}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Image tag**: \`${{ needs.build.outputs.image_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Domain**: \`https://${SWARM_DOMAIN}\`" >> "$GITHUB_STEP_SUMMARY"
-          NODE_COUNT=$(docker node ls -q | wc -l | tr -d ' ' || echo "?")
-          echo "- **Swarm nodes**: \`${NODE_COUNT}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | \`${GITHUB_SHA::12}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Branch** | \`${GITHUB_REF_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Domain** | [https://${{ env.SWARM_DOMAIN }}](https://${{ env.SWARM_DOMAIN }}) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Trigger** | \`${GITHUB_EVENT_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Actor** | \`${GITHUB_ACTOR}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Services" >> "$GITHUB_STEP_SUMMARY"
+          OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          CUSTOM_TAG="${{ inputs.image_tag }}"
+          TAG="${CUSTOM_TAG:-${GITHUB_SHA::12}}"
+          for SVC in api-gateway user-service product-service cart-service order-service; do
+            echo "- \`ghcr.io/${OWNER_LC}/ecom-${SVC}:${TAG}\`" >> "$GITHUB_STEP_SUMMARY"
+          done

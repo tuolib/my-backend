@@ -1,0 +1,42 @@
+{
+  "name": "ho-ecommerce",
+  "version": "1.0.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:up": "docker compose up -d postgres redis",
+    "dev:stop": "docker compose stop",
+    "dev:down": "docker compose down",
+    "dev:clean": "docker compose down -v",
+    "dev:logs": "docker compose logs -f",
+    "dev:ps": "docker compose ps",
+    "db:migrate": "bun run --filter @repo/database migrate",
+    "db:generate": "bun run --filter @repo/database generate",
+    "db:studio": "bun run --filter @repo/database studio",
+    "db:psql": "docker exec -it $(docker ps -q -f name=my-backend-db) psql -U postgres -d ecommerce",
+    "db:reset": "docker compose down -v && docker compose up -d && sleep 3 && bun run db:migrate",
+    "dev": "bun run dev:up && sleep 2 && bun run db:migrate && bun run --filter '*' dev --parallel",
+    "lint": "prettier check packages/",
+    "format": "prettier format --write packages/"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.38.0",
+    "hono": "^4.7.0",
+    "ioredis": "^5.4.2",
+    "pg": "^8.19.0",
+    "pino": "^9.6.0",
+    "postgres": "^3.4.5",
+    "prettier": "^3.8.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/ioredis": "^5.0.0",
+    "drizzle-kit": "^0.30.0",
+    "typescript": "^5.7.0"
+  }
+}

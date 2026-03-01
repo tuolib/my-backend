@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.github
+.idea
+.claude
+.env
+*.test.ts
+__tests__
+.DS_Store
+docs/
+guide/

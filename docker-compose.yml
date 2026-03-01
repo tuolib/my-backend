@@ -1,0 +1,214 @@
+services:
+  # ══════ 基础设施 ══════
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ecom-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ecommerce
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ecom-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./infra/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: ecom-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ══════ 应用服务 ══════
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    container_name: ecom-user
+    environment:
+      USER_SERVICE_PORT: 3001
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ecommerce
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret}
+      NODE_ENV: ${NODE_ENV:-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3001/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  product-service:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    container_name: ecom-product
+    environment:
+      PRODUCT_SERVICE_PORT: 3002
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ecommerce
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret}
+      NODE_ENV: ${NODE_ENV:-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3002/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  cart-service:
+    build:
+      context: .
+      dockerfile: services/cart-service/Dockerfile
+    container_name: ecom-cart
+    environment:
+      CART_SERVICE_PORT: 3003
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ecommerce
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}
+      PRODUCT_SERVICE_URL: http://product-service:3002
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret}
+      NODE_ENV: ${NODE_ENV:-production}
+    depends_on:
+      redis:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3003/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    container_name: ecom-order
+    environment:
+      ORDER_SERVICE_PORT: 3004
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ecommerce
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}
+      PRODUCT_SERVICE_URL: http://product-service:3002
+      CART_SERVICE_URL: http://cart-service:3003
+      USER_SERVICE_URL: http://user-service:3001
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret}
+      NODE_ENV: ${NODE_ENV:-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3004/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    container_name: ecom-gateway
+    environment:
+      API_GATEWAY_PORT: 3000
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ecommerce
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret}
+      NODE_ENV: ${NODE_ENV:-production}
+      USER_SERVICE_URL: http://user-service:3001
+      PRODUCT_SERVICE_URL: http://product-service:3002
+      CART_SERVICE_URL: http://cart-service:3003
+      ORDER_SERVICE_URL: http://order-service:3004
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

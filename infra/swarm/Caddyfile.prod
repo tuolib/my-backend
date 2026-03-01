@@ -1,0 +1,38 @@
+# 生产环境 Caddy 配置
+# 域名: api.find345.site（自动 HTTPS — Let's Encrypt）
+
+api.find345.site {
+	# 反向代理到 API Gateway（Swarm VIP 自动负载均衡）
+	reverse_proxy api-gateway:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+
+		# 传输优化
+		flush_interval -1
+		transport http {
+			keepalive 30s
+			keepalive_idle_conns 20
+		}
+	}
+
+	# 安全 Headers
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-XSS-Protection "1; mode=block"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		-Server
+	}
+
+	# 压缩
+	encode gzip zstd
+
+	# 访问日志
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+}

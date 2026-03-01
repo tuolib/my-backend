@@ -1,0 +1,14 @@
+{
+  "name": "@repo/user-service",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../../.env run --watch src/index.ts"
+  },
+  "dependencies": {
+    "@repo/database": "workspace:*",
+    "@repo/shared": "workspace:*",
+    "hono": "^4.12.3",
+    "zod": "^4.3.6"
+  }
+}

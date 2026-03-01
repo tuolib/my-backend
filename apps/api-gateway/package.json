@@ -1,0 +1,18 @@
+{
+  "name": "api-gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../../.env run --watch src/index.ts",
+    "test": "bun --env-file=../../.env test"
+  },
+  "dependencies": {
+    "@repo/database": "workspace:*",
+    "@repo/shared": "workspace:*",
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}

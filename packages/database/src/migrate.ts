@@ -68,7 +68,7 @@ export async function migrate(databaseUrl?: string) {
       const content = await readFile(join(MIGRATIONS_DIR, file), 'utf-8');
       await sql.begin(async (tx) => {
         await tx.unsafe(content);
-        await tx`INSERT INTO _migrations (name) VALUES (${file})`;
+        await tx.unsafe('INSERT INTO _migrations (name) VALUES ($1)', [file]);
       });
 
       console.log(`[migrate] applied: ${file}`);

@@ -43,7 +43,7 @@ describe('Health Check', () => {
 
     if (json.status === 'healthy') {
       expect(res.status).toBe(200);
-      expect(Object.values(json.checks).every((v: string) => v === 'ok')).toBe(true);
+      expect(Object.values(json.checks).every((v) => v === 'ok')).toBe(true);
     } else {
       // 部分服务可能未运行，返回 503
       expect(res.status).toBe(503);

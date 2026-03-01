@@ -137,8 +137,8 @@ describe('Stock Concurrent Safety', () => {
     // 交替发送 reserve 和 release
     const allPromises: Promise<Response>[] = [];
     for (let i = 0; i < 50; i++) {
-      allPromises.push(reservePromises[i]);
-      allPromises.push(releasePromises[i]);
+      allPromises.push(Promise.resolve(reservePromises[i]));
+      allPromises.push(Promise.resolve(releasePromises[i]));
     }
 
     const results = await Promise.allSettled(allPromises);

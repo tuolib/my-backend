@@ -5,10 +5,16 @@
  */
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../types/context';
-import type { ZodSchema } from 'zod';
 import { ValidationError } from '../errors/http-errors';
 
-export function validate(schema: ZodSchema): MiddlewareHandler<AppEnv> {
+/** Structural type compatible with both Zod v3 and v4 */
+interface ParseableSchema {
+  safeParse(data: unknown):
+    | { success: true; data: unknown; error?: undefined }
+    | { success: false; error: { flatten(): unknown }; data?: undefined };
+}
+
+export function validate(schema: ParseableSchema): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const body = await c.req.json();
     const result = schema.safeParse(body);

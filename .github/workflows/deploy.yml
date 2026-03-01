@@ -178,6 +178,25 @@ jobs:
               echo "Stack not found — running initial deployment"
               echo "══════════════════════════════════════════"
 
+              # 移除旧的 monolith stack（如果存在），释放端口
+              OLD_STACK=$(docker stack ls --format '{{.Name}}' | grep -v "^${STACK}$" | head -1 || true)
+              if [ -n "${OLD_STACK}" ]; then
+                echo "Removing old stack: ${OLD_STACK}"
+                docker stack rm "${OLD_STACK}"
+                echo "Waiting for old stack to drain..."
+                DRAIN_TIMEOUT=60
+                DRAIN_ELAPSED=0
+                while [ ${DRAIN_ELAPSED} -lt ${DRAIN_TIMEOUT} ]; do
+                  REMAINING=$(docker service ls --filter "name=${OLD_STACK}_" -q 2>/dev/null | wc -l)
+                  if [ "${REMAINING}" -eq 0 ]; then
+                    echo "✓ Old stack removed"
+                    break
+                  fi
+                  sleep 5
+                  DRAIN_ELAPSED=$((DRAIN_ELAPSED + 5))
+                done
+              fi
+
               cd /opt/ecom/infra/swarm
               REGISTRY="${REGISTRY}" TAG="${TAG}" \
                 docker stack deploy \

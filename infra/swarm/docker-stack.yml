@@ -117,7 +117,7 @@ services:
     hostname: patroni-1
     environment:
       PATRONI_NAME: patroni-1
-      PGDATA: /var/lib/postgresql/data
+      PGDATA: /var/lib/postgresql/data/pgdata
     secrets:
       - postgres_password
       - replication_password
@@ -156,7 +156,7 @@ services:
     hostname: patroni-2
     environment:
       PATRONI_NAME: patroni-2
-      PGDATA: /var/lib/postgresql/data
+      PGDATA: /var/lib/postgresql/data/pgdata
     secrets:
       - postgres_password
       - replication_password

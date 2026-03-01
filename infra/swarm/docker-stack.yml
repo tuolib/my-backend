@@ -34,12 +34,6 @@ services:
       - etcd1_data:/etcd-data
     networks:
       - app_net
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
     deploy:
       replicas: 1
       placement:
@@ -70,12 +64,6 @@ services:
       - etcd2_data:/etcd-data
     networks:
       - app_net
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
     deploy:
       replicas: 1
       placement:
@@ -106,12 +94,6 @@ services:
       - etcd3_data:/etcd-data
     networks:
       - app_net
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
     deploy:
       replicas: 1
       placement:

@@ -1,0 +1,423 @@
+# K8s 集群一键初始化（仅手动触发，一次性使用）
+#
+# 自动 SSH 到 5 台服务器，按顺序执行:
+#   01-prerequisites (全部) → 02-init-control-plane (S1) → 03-join (S2/S3)
+#   → 04-join-workers (S4/S5) → 05-install-cni (S1) → 06-install-operators (S1)
+
+name: K8s Cluster Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: "执行到哪一步（用于断点续跑）"
+        required: true
+        type: choice
+        default: "all"
+        options:
+          - all
+          - 01-prerequisites
+          - 02-init-control-plane
+          - 03-join-control-plane
+          - 04-join-workers
+          - 05-install-cni
+          - 06-install-operators
+
+concurrency:
+  group: k8s-cluster-setup
+  cancel-in-progress: false
+
+# ─── 所有配置集中在这里，通过 GitHub Secrets / Variables 传入 ─────────────────
+# 需要配置的 GitHub Secrets:
+#   K8S_SSH_KEY           — SSH 私钥（所有节点通用）
+#   K8S_VIP_ADDRESS       — kube-vip 虚拟 IP
+#
+# 需要配置的 GitHub Variables:
+#   K8S_SSH_USER          — SSH 用户名（默认 root）
+#   K8S_S1_HOST           — S1 IP
+#   K8S_S2_HOST           — S2 IP
+#   K8S_S3_HOST           — S3 IP
+#   K8S_S4_HOST           — S4 IP
+#   K8S_S5_HOST           — S5 IP
+#   K8S_VIP_INTERFACE     — VIP 网卡名（默认 eth0）
+
+jobs:
+  # ─── Step 01: 所有节点安装基础环境 ─────────────────────────────────────────
+  prerequisites:
+    name: "01 Prerequisites (${{ matrix.host }})"
+    if: inputs.step == 'all' || inputs.step == '01-prerequisites'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: true
+      max-parallel: 5
+      matrix:
+        host:
+          - S1
+          - S2
+          - S3
+          - S4
+          - S5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k8s/cluster-setup
+
+      - name: Resolve host IP
+        id: host
+        run: |
+          case "${{ matrix.host }}" in
+            S1) echo "ip=${{ vars.K8S_S1_HOST }}" >> "$GITHUB_OUTPUT" ;;
+            S2) echo "ip=${{ vars.K8S_S2_HOST }}" >> "$GITHUB_OUTPUT" ;;
+            S3) echo "ip=${{ vars.K8S_S3_HOST }}" >> "$GITHUB_OUTPUT" ;;
+            S4) echo "ip=${{ vars.K8S_S4_HOST }}" >> "$GITHUB_OUTPUT" ;;
+            S5) echo "ip=${{ vars.K8S_S5_HOST }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Copy script to ${{ matrix.host }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ steps.host.outputs.ip }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          source: "infra/k8s/cluster-setup/01-prerequisites.sh"
+          target: /opt/ecom
+
+      - name: Run 01-prerequisites.sh on ${{ matrix.host }}
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ steps.host.outputs.ip }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            chmod +x /opt/ecom/infra/k8s/cluster-setup/01-prerequisites.sh
+            /opt/ecom/infra/k8s/cluster-setup/01-prerequisites.sh
+
+  # ─── Step 02: S1 初始化 Control Plane ──────────────────────────────────────
+  init-control-plane:
+    name: "02 Init Control Plane (S1)"
+    needs: prerequisites
+    if: always() && (inputs.step == 'all' || inputs.step == '02-init-control-plane') && (needs.prerequisites.result == 'success' || inputs.step == '02-init-control-plane')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      join_token: ${{ steps.init.outputs.join_token }}
+      discovery_hash: ${{ steps.init.outputs.discovery_hash }}
+      certificate_key: ${{ steps.init.outputs.certificate_key }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k8s/cluster-setup
+
+      - name: Copy scripts to S1
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.K8S_S1_HOST }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          source: "infra/k8s/cluster-setup/"
+          target: /opt/ecom
+
+      - name: Run 02-init-control-plane.sh and capture join info
+        id: init
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.K8S_S1_HOST }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+
+            export KUBE_VIP_ADDRESS="${{ secrets.K8S_VIP_ADDRESS }}"
+            export KUBE_VIP_INTERFACE="${{ vars.K8S_VIP_INTERFACE || 'eth0' }}"
+            export S1_IP="${{ vars.K8S_S1_HOST }}"
+            export S2_IP="${{ vars.K8S_S2_HOST }}"
+            export S3_IP="${{ vars.K8S_S3_HOST }}"
+
+            chmod +x /opt/ecom/infra/k8s/cluster-setup/02-init-control-plane.sh
+            /opt/ecom/infra/k8s/cluster-setup/02-init-control-plane.sh
+
+            # 生成 join 信息供后续 job 使用
+            echo "=== Generating join info ==="
+            JOIN_CMD=$(kubeadm token create --print-join-command)
+            TOKEN=$(echo "${JOIN_CMD}" | grep -oP '(?<=--token )\S+')
+            HASH=$(echo "${JOIN_CMD}" | grep -oP '(?<=--discovery-token-ca-cert-hash )\S+')
+            CERT_KEY=$(kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1)
+
+            # 输出到 GitHub Actions
+            echo "JOIN_TOKEN=${TOKEN}"
+            echo "DISCOVERY_HASH=${HASH}"
+            echo "CERTIFICATE_KEY=${CERT_KEY}"
+
+      - name: Extract join info
+        id: extract
+        run: |
+          # 从 SSH 输出中提取 join 信息
+          echo "注意: 由于 appleboy/ssh-action 不支持直接设置 outputs，"
+          echo "请在 S1 上手动获取 join 信息，或使用下面的备用方案"
+
+      - name: Get join info from S1
+        id: join-info
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.K8S_S1_HOST }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          script: |
+            JOIN_CMD=$(kubeadm token create --print-join-command)
+            TOKEN=$(echo "${JOIN_CMD}" | grep -oP '(?<=--token )\S+')
+            HASH=$(echo "${JOIN_CMD}" | grep -oP '(?<=--discovery-token-ca-cert-hash )\S+')
+            CERT_KEY=$(kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1)
+
+            # 写入文件供 SCP 拉取
+            cat > /tmp/k8s-join-info.txt <<EOF
+            JOIN_TOKEN=${TOKEN}
+            DISCOVERY_HASH=${HASH}
+            CERTIFICATE_KEY=${CERT_KEY}
+            EOF
+
+      - name: Download join info
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.K8S_SSH_KEY }}" > ~/.ssh/id_key
+          chmod 600 ~/.ssh/id_key
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_key \
+            "${{ vars.K8S_SSH_USER || 'root' }}@${{ vars.K8S_S1_HOST }}:/tmp/k8s-join-info.txt" \
+            /tmp/k8s-join-info.txt
+          # 读取并设置 outputs
+          source /tmp/k8s-join-info.txt
+          echo "join_token=${JOIN_TOKEN}" >> "$GITHUB_OUTPUT"
+          echo "discovery_hash=${DISCOVERY_HASH}" >> "$GITHUB_OUTPUT"
+          echo "certificate_key=${CERTIFICATE_KEY}" >> "$GITHUB_OUTPUT"
+          rm -f ~/.ssh/id_key
+
+  # ─── Step 03: S2/S3 加入 Control Plane ─────────────────────────────────────
+  join-control-plane:
+    name: "03 Join Control Plane (${{ matrix.host }})"
+    needs: init-control-plane
+    if: always() && (inputs.step == 'all' || inputs.step == '03-join-control-plane') && (needs.init-control-plane.result == 'success' || inputs.step == '03-join-control-plane')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [S2, S3]
+
+    steps:
+      - name: Resolve host IP
+        id: host
+        run: |
+          case "${{ matrix.host }}" in
+            S2) echo "ip=${{ vars.K8S_S2_HOST }}" >> "$GITHUB_OUTPUT" ;;
+            S3) echo "ip=${{ vars.K8S_S3_HOST }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k8s/cluster-setup
+
+      - name: Copy script to ${{ matrix.host }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ steps.host.outputs.ip }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          source: "infra/k8s/cluster-setup/03-join-control-plane.sh"
+          target: /opt/ecom
+
+      - name: Run 03-join-control-plane.sh on ${{ matrix.host }}
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ steps.host.outputs.ip }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+
+            export KUBE_VIP_ADDRESS="${{ secrets.K8S_VIP_ADDRESS }}"
+            export KUBE_VIP_INTERFACE="${{ vars.K8S_VIP_INTERFACE || 'eth0' }}"
+            export JOIN_TOKEN="${{ needs.init-control-plane.outputs.join_token }}"
+            export DISCOVERY_HASH="${{ needs.init-control-plane.outputs.discovery_hash }}"
+            export CERTIFICATE_KEY="${{ needs.init-control-plane.outputs.certificate_key }}"
+
+            chmod +x /opt/ecom/infra/k8s/cluster-setup/03-join-control-plane.sh
+            /opt/ecom/infra/k8s/cluster-setup/03-join-control-plane.sh
+
+  # ─── Step 04: S4/S5 加入 Worker ────────────────────────────────────────────
+  join-workers:
+    name: "04 Join Worker (${{ matrix.host }})"
+    needs: [init-control-plane, join-control-plane]
+    if: always() && (inputs.step == 'all' || inputs.step == '04-join-workers') && (needs.join-control-plane.result == 'success' || inputs.step == '04-join-workers')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [S4, S5]
+
+    steps:
+      - name: Resolve host IP
+        id: host
+        run: |
+          case "${{ matrix.host }}" in
+            S4) echo "ip=${{ vars.K8S_S4_HOST }}" >> "$GITHUB_OUTPUT" ;;
+            S5) echo "ip=${{ vars.K8S_S5_HOST }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k8s/cluster-setup
+
+      - name: Copy script to ${{ matrix.host }}
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ steps.host.outputs.ip }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          source: "infra/k8s/cluster-setup/04-join-workers.sh"
+          target: /opt/ecom
+
+      - name: Run 04-join-workers.sh on ${{ matrix.host }}
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ steps.host.outputs.ip }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+
+            export KUBE_VIP_ADDRESS="${{ secrets.K8S_VIP_ADDRESS }}"
+            export JOIN_TOKEN="${{ needs.init-control-plane.outputs.join_token }}"
+            export DISCOVERY_HASH="${{ needs.init-control-plane.outputs.discovery_hash }}"
+
+            chmod +x /opt/ecom/infra/k8s/cluster-setup/04-join-workers.sh
+            /opt/ecom/infra/k8s/cluster-setup/04-join-workers.sh
+
+  # ─── Step 05: 安装 CNI ─────────────────────────────────────────────────────
+  install-cni:
+    name: "05 Install CNI (S1)"
+    needs: [join-control-plane, join-workers]
+    if: always() && (inputs.step == 'all' || inputs.step == '05-install-cni') && (needs.join-workers.result == 'success' || inputs.step == '05-install-cni')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k8s/cluster-setup
+
+      - name: Copy script to S1
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.K8S_S1_HOST }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          source: "infra/k8s/cluster-setup/05-install-cni.sh"
+          target: /opt/ecom
+
+      - name: Run 05-install-cni.sh on S1
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.K8S_S1_HOST }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            chmod +x /opt/ecom/infra/k8s/cluster-setup/05-install-cni.sh
+            /opt/ecom/infra/k8s/cluster-setup/05-install-cni.sh
+
+  # ─── Step 06: 安装 Operators ───────────────────────────────────────────────
+  install-operators:
+    name: "06 Install Operators (S1)"
+    needs: install-cni
+    if: always() && (inputs.step == 'all' || inputs.step == '06-install-operators') && (needs.install-cni.result == 'success' || inputs.step == '06-install-operators')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k8s/cluster-setup
+
+      - name: Copy script to S1
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.K8S_S1_HOST }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          source: "infra/k8s/cluster-setup/06-install-operators.sh"
+          target: /opt/ecom
+
+      - name: Run 06-install-operators.sh on S1
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.K8S_S1_HOST }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+
+            # 节点名默认使用 hostname
+            export S1_NODE="$(ssh -o StrictHostKeyChecking=no ${{ vars.K8S_S1_HOST }} hostname 2>/dev/null || echo '${{ vars.K8S_S1_HOST }}')"
+            export S2_NODE="$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K8S_S2_HOST }}' | awk '{print $1}' || echo '${{ vars.K8S_S2_HOST }}')"
+            export S3_NODE="$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K8S_S3_HOST }}' | awk '{print $1}' || echo '${{ vars.K8S_S3_HOST }}')"
+            export S4_NODE="$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K8S_S4_HOST }}' | awk '{print $1}' || echo '${{ vars.K8S_S4_HOST }}')"
+            export S5_NODE="$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K8S_S5_HOST }}' | awk '{print $1}' || echo '${{ vars.K8S_S5_HOST }}')"
+
+            echo "节点映射:"
+            echo "  S1=${S1_NODE} S2=${S2_NODE} S3=${S3_NODE} S4=${S4_NODE} S5=${S5_NODE}"
+
+            chmod +x /opt/ecom/infra/k8s/cluster-setup/06-install-operators.sh
+            /opt/ecom/infra/k8s/cluster-setup/06-install-operators.sh
+
+  # ─── 最终验证 ──────────────────────────────────────────────────────────────
+  verify:
+    name: "Verify Cluster"
+    needs: install-operators
+    if: always() && (needs.install-operators.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify cluster status
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.K8S_S1_HOST }}
+          username: ${{ vars.K8S_SSH_USER || 'root' }}
+          key: ${{ secrets.K8S_SSH_KEY }}
+          script: |
+            echo "══════════ Nodes ══════════"
+            kubectl get nodes -o wide
+
+            echo ""
+            echo "══════════ System Pods ══════════"
+            kubectl get pods -A
+
+            echo ""
+            echo "══════════ StorageClass ══════════"
+            kubectl get storageclass
+
+            echo ""
+            echo "══════════ Cluster Ready ══════════"
+            READY=$(kubectl get nodes --no-headers | grep -c " Ready")
+            TOTAL=$(kubectl get nodes --no-headers | wc -l)
+            echo "${READY}/${TOTAL} nodes ready"
+            if [ "${READY}" -eq "${TOTAL}" ]; then
+              echo "✓ 集群初始化成功！可以开始部署应用了。"
+            else
+              echo "✗ 部分节点未就绪，请检查。"
+              exit 1
+            fi

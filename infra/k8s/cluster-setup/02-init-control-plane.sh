@@ -7,6 +7,8 @@ set -euo pipefail
 KUBE_VIP_ADDRESS="${KUBE_VIP_ADDRESS:?请设置 KUBE_VIP_ADDRESS 环境变量}"
 KUBE_VIP_INTERFACE="${KUBE_VIP_INTERFACE:-eth0}"
 S1_IP="${S1_IP:?请设置 S1_IP 环境变量}"
+S2_IP="${S2_IP:-}"
+S3_IP="${S3_IP:-}"
 # ==================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,6 +43,8 @@ TEMP_CONFIG="/tmp/kubeadm-config-rendered.yaml"
 sed \
   -e "s|KUBE_VIP_ADDRESS|${KUBE_VIP_ADDRESS}|g" \
   -e "s|S1_IP|${S1_IP}|g" \
+  -e "s|S2_IP|${S2_IP}|g" \
+  -e "s|S3_IP|${S3_IP}|g" \
   "${CONFIG_FILE}" > "${TEMP_CONFIG}"
 
 kubeadm init \

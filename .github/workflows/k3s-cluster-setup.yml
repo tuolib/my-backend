@@ -139,6 +139,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         host: [S2, S3]
 
@@ -220,6 +221,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         host: [S4, S5]
 
@@ -319,6 +321,9 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 15
           command: |
+            ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
+              "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" \
+              'mkdir -p /opt/ecom/infra/k3s/cluster-setup'
             scp ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
               infra/k3s/cluster-setup/04-install-operators.sh \
               "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}:/opt/ecom/infra/k3s/cluster-setup/"

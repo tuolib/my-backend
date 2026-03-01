@@ -7,6 +7,8 @@
 
 ## 目录
 
+**单节点（1 台 VPS）：**
+
 1. [前置准备](#1-前置准备)
 2. [VPS 基础配置](#2-vps-基础配置)
 3. [GitHub 配置 Secrets 和 Variables](#3-github-配置-secrets-和-variables)
@@ -14,7 +16,19 @@
 5. [运行 Build & Deploy Workflow](#5-运行-build--deploy-workflow)
 6. [验证部署结果](#6-验证部署结果)
 7. [常见问题排查](#7-常见问题排查)
-8. [多节点部署（multi 模式）](#8-多节点部署multi-模式)
+
+**多节点（3-5 台 VPS）：**
+
+8. [多节点部署 — 完整新手教程](#8-多节点部署multi-模式-完整新手教程)
+   - [8.1 理解多节点](#81-理解多节点和单节点有什么不同)
+   - [8.2 节点角色规划](#82-节点角色规划)
+   - [8.3 准备所有 VPS](#83-第一步准备所有-vps)
+   - [8.4 GitHub 配置](#84-第二步github-配置-secrets-和-variables)
+   - [8.5 运行集群初始化](#85-第三步运行-k3s-集群初始化选-multi-模式)
+   - [8.6 运行部署](#86-第四步运行-build--deploy选-k3s-multi-平台)
+   - [8.7 验证多节点分布](#87-第五步验证多节点分布)
+   - [8.8 多节点常见问题](#88-多节点常见问题)
+   - [8.9 手动部署](#89-手动部署不用-github-actions)
 
 ---
 
@@ -78,29 +92,18 @@ chmod 600 ~/.ssh/authorized_keys
 在**每台 VPS** 上执行：
 
 ```bash
-# 如果用 ufw（所有节点都需要）
-ufw allow 22/tcp     # SSH
-ufw allow 80/tcp     # HTTP（Let's Encrypt 验证用）
-ufw allow 443/tcp    # HTTPS
-ufw allow 6443/tcp   # K3s API（多节点必须，单节点可选）
+# 单节点（一行搞定）
+ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 6443/tcp
 
-# 多节点额外端口（节点间通信）
-ufw allow 8472/udp   # Flannel VXLAN（多节点必须）
-ufw allow 10250/tcp  # kubelet metrics（多节点必须）
-ufw allow 2379:2380/tcp  # etcd（仅 server 节点间）
+# 多节点（一行搞定，包含节点间通信端口）
+ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 6443/tcp && ufw allow 8472/udp && ufw allow 10250/tcp && ufw allow 2379:2380/tcp
 ```
 
-> **单节点**只需前 4 个端口。**多节点**全部都要。
-
-### 2.3 创建工作目录
-
-在**每台 VPS** 上执行：
-
-```bash
-mkdir -p /opt/ecom/infra/k3s/cluster-setup
-```
+> **单节点**用第一行。**多节点**用第二行（每台 VPS 都执行）。
 
 完成后**退出 VPS**，回到本地电脑继续操作。
+
+> **注意**：不需要手动创建工作目录。GitHub Actions 在 SCP 脚本之前会自动执行 `mkdir -p /opt/ecom/infra/k3s/cluster-setup`。
 
 ---
 
@@ -479,134 +482,607 @@ kubectl delete namespace ecom
 
 ---
 
-## 8. 多节点部署（multi 模式）
+## 8. 多节点部署（multi 模式）— 完整新手教程
 
 > 如果你只有 1 台 VPS，跳过这一节。以下面向有 3-5 台 VPS 的场景。
+>
+> **前提**：你已经看完了上面 1-7 节单节点的内容，了解了基本操作流程。
 
-### 8.1 单节点 vs 多节点对比
+---
+
+### 8.1 理解多节点：和单节点有什么不同？
 
 | 维度 | 单节点 (single) | 多节点 (multi) |
 |------|----------------|---------------|
+| VPS 数量 | 1 台 | 3-5 台 |
 | values 文件 | `values-k3s.yaml` | `values-k3s-multi.yaml` |
-| PG 实例 | 1（仅主库） | 2（主 + 备） |
-| Redis 节点 | 1 | 3（主 + 2 副本） |
-| 服务副本 | 各 1 个 | 各 2 个 |
-| nodeSelector | 全部 `{}`（不限制） | 按角色分布（见下方） |
-| Nginx Ingress | 任意节点运行 | 仅 `role=ingress` 节点 |
-| etcd | 单节点内嵌 | `--cluster-init` 分布式 etcd |
+| PG 数据库 | 1 个实例（仅主库） | 2 个实例（主 + 热备，数据自动同步） |
+| Redis | 1 个节点 | 3 个节点（主 + 2 副本） |
+| 每个微服务副本 | 1 个 | 2 个（挂一个不影响服务） |
+| Pod 分配 | 全部挤在一台机器 | 按角色分散到不同机器 |
+| Nginx Ingress | 任意位置运行 | 仅在 ingress 专用节点运行 |
+| 高可用 | 无（机器挂了全挂） | 有（etcd 分布式，任一节点挂了集群仍可用） |
+
+**一句话总结**：多节点 = 更安全 + 更稳定 + 不同服务跑在不同机器上。
+
+---
 
 ### 8.2 节点角色规划
 
-多节点模式下，`04-install-operators.sh` 会自动给节点打标签：
+多节点模式下，每台 VPS 会被分配一个**角色**，不同的 Pod 只会调度到对应角色的机器上：
 
 ```
-S1 (server)  → role=data      ← PG 主库 + Redis
-S2 (server)  → role=data      ← PG 备库 + Redis
-S3 (server)  → role=ingress   ← Nginx Ingress Controller
-A1 (agent)   → role=app       ← 微服务 Pod
-A2 (agent)   → role=app       ← 微服务 Pod
+┌──────────────────────────────────────────────────────┐
+│ 5 节点完整方案                                        │
+│                                                      │
+│ S1 (server)  → role=data     ← PG 主库 + Redis 主    │
+│ S2 (server)  → role=data     ← PG 备库 + Redis 副本  │
+│ S3 (server)  → role=ingress  ← Nginx Ingress（流量入口）│
+│ S4 (agent)   → role=app      ← 微服务 Pod            │
+│ S5 (agent)   → role=app      ← 微服务 Pod            │
+└──────────────────────────────────────────────────────┘
 ```
 
-> 不一定需要 5 台。最少 **3 台**（S1 + S2 + S3）也能跑，A1/A2 不配置会自动跳过。
+> **server** = 参与集群管理决策的节点（类似"领导"）
+> **agent** = 只运行工作负载的节点（类似"员工"）
 
-### 8.3 多节点操作步骤
+#### 我只有 3 台 VPS，可以吗？
 
-#### 步骤一：所有节点做基础配置
-
-在**每台 VPS** 上重复 [第 2 节](#2-vps-基础配置) 的操作：
-- 添加同一个 SSH 公钥
-- 开放防火墙端口（包括多节点额外端口）
-- 创建 `/opt/ecom/...` 目录
-
-#### 步骤二：GitHub 添加多节点 Variables
-
-在 [第 3.3 节](#33-添加-variables) 基础上，额外添加节点 IP：
+可以！只配置 S1 + S2 + S3，跳过 S4/S5：
 
 ```
-Variables（示例 5 节点）：
-  K3S_S1_HOST = 203.0.113.10   ← 已有
-  K3S_S2_HOST = 203.0.113.11   ← 新增
-  K3S_S3_HOST = 203.0.113.12   ← 新增
-  K3S_S4_HOST = 203.0.113.13   ← 新增
-  K3S_S5_HOST = 203.0.113.14   ← 新增
+┌──────────────────────────────────────────────────────┐
+│ 3 节点精简方案                                        │
+│                                                      │
+│ S1 (server)  → role=data     ← PG + Redis + 微服务   │
+│ S2 (server)  → role=data     ← PG 备 + Redis 副本    │
+│ S3 (server)  → role=ingress  ← Nginx Ingress         │
+└──────────────────────────────────────────────────────┘
 ```
 
-#### 步骤三：运行集群初始化（选 multi 模式）
+> 3 节点方案中，微服务 Pod 会调度到 S1/S2（和数据库混合运行）。这完全没问题，只是没有 5 节点方案那样完全隔离。
+
+#### 我有 4 台 VPS 呢？
+
+配置 S1 + S2 + S3 + S4，跳过 S5：
 
 ```
-Actions → K3s Cluster Setup → Run workflow
-  集群模式: multi          ← 重要！不是 single
-  执行到哪一步: all
+S1 → role=data, S2 → role=data, S3 → role=ingress, S4 → role=app
 ```
 
-执行流程：
+> **规则**：不配置的节点 Variable 留空即可，Workflow 会自动跳过，不会报错。
 
-```
-01 Install Server (S1)              ← 安装 k3s + 启用 etcd
-02 Join Server (S2) + (S3)          ← 追加 2 个 control-plane（并行）
-03 Join Agent (A1) + (A2)           ← 追加 2 个 worker（并行）
-04 Install Operators (S1)           ← 打节点标签 + 安装 Operator
-Verify Cluster                      ← 验证 5/5 节点 Ready
-```
+---
 
-#### 步骤四：运行部署（选 k3s-multi 平台）
+### 8.3 第一步：准备所有 VPS
 
-```
-Actions → Build & Deploy → Run workflow
-  目标平台: k3s-multi      ← 重要！不是 k3s-single
-  Custom image tag: （留空）
-```
+假设你有 5 台 VPS，IP 分别是：
 
-这会使用 `values-k3s-multi.yaml`，自动将 Pod 按 nodeSelector 分配到正确节点。
+| 节点 | IP（示例） | 角色 |
+|------|-----------|------|
+| S1 | `203.0.113.10` | server + data |
+| S2 | `203.0.113.11` | server + data |
+| S3 | `203.0.113.12` | server + ingress |
+| S4 | `203.0.113.13` | agent + app |
+| S5 | `203.0.113.14` | agent + app |
 
-#### 步骤五：验证多节点分布
+> 把上面的 IP 替换成你自己的实际 IP。
 
-SSH 到任意 server 节点：
+#### 8.3.1 生成 SSH 密钥（只需一次）
+
+如果你在单节点步骤中已经生成过，直接复用那个密钥，**跳过这步**。
+
+如果还没有，在你的**本地电脑**执行：
 
 ```bash
+ssh-keygen -t ed25519 -f ~/.ssh/k3s_deploy -C "github-actions-k3s"
+# 直接按回车（不要设密码）
+```
+
+#### 8.3.2 逐台配置每个 VPS
+
+你需要在**每一台** VPS 上做同样的操作。下面以 S1 为例，S2-S5 都重复同样的步骤。
+
+**配置 S1（`203.0.113.10`）：**
+
+```bash
+# 1. 从本地 SSH 登录到 S1
+ssh root@203.0.113.10
+
+# 2. 添加公钥（只需做一次，让 GitHub Actions 能免密登录）
+mkdir -p ~/.ssh
+echo "这里粘贴你的公钥内容" >> ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+
+# 3. 开放防火墙端口（一行搞定）
+ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 6443/tcp && ufw allow 8472/udp && ufw allow 10250/tcp && ufw allow 2379:2380/tcp
+
+# 4. 退出这台 VPS（不需要手动创建目录，Workflow 会自动创建）
+exit
+```
+
+**配置 S2（`203.0.113.11`）：**
+
+```bash
+ssh root@203.0.113.11
+# 重复上面第 2-5 步（完全一样的命令）
+```
+
+**配置 S3（`203.0.113.12`）：**
+
+```bash
+ssh root@203.0.113.12
+# 重复上面第 2-5 步
+```
+
+**配置 S4（`203.0.113.13`）：**
+
+```bash
+ssh root@203.0.113.13
+# 重复上面第 2-5 步
+# 注意：agent 节点不需要 2379:2380/tcp（etcd），但加上也无妨
+```
+
+**配置 S5（`203.0.113.14`）：**
+
+```bash
+ssh root@203.0.113.14
+# 重复上面第 2-5 步
+```
+
+#### 8.3.3 验证所有节点都能 SSH 登录
+
+在**本地电脑**逐一测试（全部应能免密登录）：
+
+```bash
+ssh -i ~/.ssh/k3s_deploy root@203.0.113.10  # S1
+ssh -i ~/.ssh/k3s_deploy root@203.0.113.11  # S2
+ssh -i ~/.ssh/k3s_deploy root@203.0.113.12  # S3
+ssh -i ~/.ssh/k3s_deploy root@203.0.113.13  # S4
+ssh -i ~/.ssh/k3s_deploy root@203.0.113.14  # S5
+```
+
+> 如果任何一台连不上，回去检查公钥是否正确添加、防火墙是否放行了 22 端口。
+
+---
+
+### 8.4 第二步：GitHub 配置 Secrets 和 Variables
+
+打开浏览器：`你的仓库 → Settings → Secrets and variables → Actions`
+
+#### 8.4.1 添加 Secrets（如果单节点时已添加，检查是否齐全即可）
+
+多节点和单节点需要的 Secrets **完全一样**，不需要额外添加。回顾一下清单：
+
+| Name | Value |
+|------|-------|
+| `K3S_SSH_KEY` | SSH 私钥内容（`cat ~/.ssh/k3s_deploy`） |
+| `K3S_SSH_HOST` | S1 的 IP（如 `203.0.113.10`）— 部署 Workflow 用 |
+| `K3S_SSH_USER` | `root` |
+| `K3S_POSTGRES_PASSWORD` | 自定义，至少 8 位 |
+| `K3S_REPLICATION_PASSWORD` | 自定义，至少 8 位 |
+| `K3S_JWT_ACCESS_SECRET` | 自定义，至少 16 位 |
+| `K3S_JWT_REFRESH_SECRET` | 自定义，至少 16 位 |
+| `K3S_INTERNAL_SECRET` | 自定义，至少 8 位 |
+| `GHCR_PAT` | GitHub Personal Access Token |
+
+> **K3S_SSH_HOST** 填 S1 的 IP 就行。部署时 Helm 命令只需要在一台 server 节点上执行。
+
+#### 8.4.2 添加 Variables（重点！多节点需要额外添加）
+
+点击 **"Variables"** 标签 → **"New repository variable"**，逐个添加：
+
+**5 节点方案：**
+
+| Name | Value | 说明 |
+|------|-------|------|
+| `K3S_S1_HOST` | `203.0.113.10` | 第 1 台 server（首个 control-plane） |
+| `K3S_S2_HOST` | `203.0.113.11` | 第 2 台 server（追加 control-plane） |
+| `K3S_S3_HOST` | `203.0.113.12` | 第 3 台 server（追加 control-plane） |
+| `K3S_S4_HOST` | `203.0.113.13` | 第 1 台 agent（worker 节点） |
+| `K3S_S5_HOST` | `203.0.113.14` | 第 2 台 agent（worker 节点） |
+
+**3 节点方案**：只添加 `K3S_S1_HOST`、`K3S_S2_HOST`、`K3S_S3_HOST`。
+
+**4 节点方案**：添加 `K3S_S1_HOST` 到 `K3S_S4_HOST`。
+
+> 没有添加的 Variable，Workflow 会自动跳过那些节点，不会报错。
+
+#### 8.4.3 多节点完整检查清单
+
+对照检查，确保每一项都已配置：
+
+```
+═══ Secrets（共 9 个，多节点和单节点一样）═══
+ ☐ K3S_SSH_KEY               ← SSH 私钥
+ ☐ K3S_SSH_HOST              ← S1 的 IP
+ ☐ K3S_SSH_USER              ← root
+ ☐ K3S_POSTGRES_PASSWORD     ← PG 密码
+ ☐ K3S_REPLICATION_PASSWORD  ← PG 复制密码
+ ☐ K3S_JWT_ACCESS_SECRET     ← JWT Access
+ ☐ K3S_JWT_REFRESH_SECRET    ← JWT Refresh
+ ☐ K3S_INTERNAL_SECRET       ← 内部通信密钥
+ ☐ GHCR_PAT                  ← GitHub Token
+
+═══ Variables（根据你的节点数量）═══
+ ☐ K3S_S1_HOST  = S1 的 IP   ← 必须
+ ☐ K3S_S2_HOST  = S2 的 IP   ← 必须（至少 3 节点）
+ ☐ K3S_S3_HOST  = S3 的 IP   ← 必须（至少 3 节点）
+ ☐ K3S_S4_HOST  = S4 的 IP   ← 可选（4 或 5 节点）
+ ☐ K3S_S5_HOST  = S5 的 IP   ← 可选（仅 5 节点）
+```
+
+---
+
+### 8.5 第三步：运行 K3s 集群初始化（选 multi 模式）
+
+这一步 Workflow 会自动 SSH 到每台 VPS，依次安装 k3s 并组建集群。
+
+#### 8.5.1 打开 Actions 页面
+
+```
+你的仓库 → Actions（顶部标签）→ 左侧列表点击 "K3s Cluster Setup"
+```
+
+#### 8.5.2 运行 Workflow
+
+1. 点击右侧 **"Run workflow"** 按钮
+2. 弹出配置框，设置如下：
+
+```
+┌─────────────────────────────────────────┐
+│  Use workflow from: Branch: main        │
+│                                         │
+│  集群模式 (single/multi):               │
+│  ┌─────────────────────────┐            │
+│  │ multi                   │ ← 选 multi │
+│  └─────────────────────────┘            │
+│                                         │
+│  执行到哪一步:                           │
+│  ┌─────────────────────────┐            │
+│  │ all                     │ ← 选 all   │
+│  └─────────────────────────┘            │
+│                                         │
+│  [Run workflow]                         │
+└─────────────────────────────────────────┘
+```
+
+3. 点击绿色 **"Run workflow"** 按钮
+
+#### 8.5.3 执行过程（约 10-15 分钟）
+
+点击刚创建的运行记录，可以看到 5 个 Job 依次执行：
+
+```
+Job 1: 01 Install Server (S1)          🟢 安装 k3s 到 S1，启用 --cluster-init（分布式 etcd）
+                                            这是第一个节点，其他节点会加入它
+                 ↓
+Job 2: 02 Join Server                   🟢 S2 和 S3 同时加入集群（并行执行）
+       ├── S2 join                          S2 作为第 2 个 server 加入
+       └── S3 join                          S3 作为第 3 个 server 加入
+                 ↓
+Job 3: 03 Join Agent                    🟢 S4 和 S5 同时加入集群（并行执行）
+       ├── S4 join                          S4 作为 agent（worker）加入
+       └── S5 join                          S5 作为 agent（worker）加入
+                 ↓
+Job 4: 04 Install Operators (S1)        🟢 在 S1 上执行：
+                                            - 安装 Helm（如果没有）
+                                            - 给节点打角色标签（role=data/ingress/app）
+                                            - 安装 CloudNativePG Operator
+                                            - 安装 Redis Operator
+                                            - 安装 Nginx Ingress Controller
+                                            - 安装 cert-manager
+                 ↓
+Job 5: Verify Cluster                   🟢 检查所有节点是否 Ready
+```
+
+> **S2/S3 没配置怎么办**？Workflow 会自动跳过没有配置 Variable 的节点，不会报错。
+>
+> **某个 Job 失败了**？点进去看日志。修复问题后，可以重新运行 Workflow，选择 `执行到哪一步` 为失败的那一步（如 `02-join-server`），不用从头来。
+
+#### 8.5.4 确认集群初始化成功
+
+**"Verify Cluster"** Job 应显示类似输出（5 节点示例）：
+
+```
+══════════ Nodes ══════════
+NAME    STATUS   ROLES                       AGE   VERSION
+s1      Ready    control-plane,etcd,master   10m   v1.29.2+k3s1
+s2      Ready    control-plane,etcd,master   8m    v1.29.2+k3s1
+s3      Ready    control-plane,etcd,master   8m    v1.29.2+k3s1
+s4      Ready    <none>                      6m    v1.29.2+k3s1
+s5      Ready    <none>                      6m    v1.29.2+k3s1
+
+══════════ Node Labels ══════════
+s1: role=data
+s2: role=data
+s3: role=ingress
+s4: role=app
+s5: role=app
+
+══════════ Operators ══════════
+cnpg-system        cnpg-controller-manager       Running
+redis-operator-system  redis-operator             Running
+ingress-nginx      ingress-nginx-controller       Running
+cert-manager       cert-manager                   Running
+
+══════════ Cluster Ready ══════════
+5/5 nodes ready
+✓ k3s 集群初始化成功！
+```
+
+> **3 节点方案**会显示 `3/3 nodes ready`，S4/S5 不会出现。
+
+---
+
+### 8.6 第四步：运行 Build & Deploy（选 k3s-multi 平台）
+
+集群就绪后，部署应用。
+
+#### 8.6.1 打开 Actions 页面
+
+```
+你的仓库 → Actions → 左侧列表点击 "Build & Deploy"
+```
+
+#### 8.6.2 运行 Workflow
+
+1. 点击右侧 **"Run workflow"** 按钮
+2. 设置如下：
+
+```
+┌─────────────────────────────────────────┐
+│  Use workflow from: Branch: main        │
+│                                         │
+│  目标平台:                               │
+│  ┌─────────────────────────┐            │
+│  │ k3s-multi               │ ← 选这个！ │
+│  └─────────────────────────┘            │
+│                                         │
+│  Custom image tag:                      │
+│  ┌─────────────────────────┐            │
+│  │                         │ ← 留空     │
+│  └─────────────────────────┘            │
+│                                         │
+│  [Run workflow]                         │
+└─────────────────────────────────────────┘
+```
+
+> **千万不要选 `k3s-single`！** 选错了会使用单节点的 values 文件，所有 Pod 都挤在一台机器上、没有副本冗余。
+
+#### 8.6.3 等待执行完成（约 10-15 分钟）
+
+```
+Job 1: Type check                ← TypeScript 类型检查
+Job 2: Build (5 个服务并行)       ← 构建 Docker 镜像，推送到 GHCR
+Job 3: Deploy to k3s-multi       ← SSH 到 S1，Helm 部署（使用 values-k3s-multi.yaml）
+Job 4: Smoke test                ← 健康检查 https://api.find345.site/health
+```
+
+#### 8.6.4 确认部署成功
+
+**"Deploy to k3s-multi"** Job 应显示：
+
+```
+══════════════════════════════════════════
+Deploying ecom to k3s-multi (tag: a1b2c3d4e5f6)
+══════════════════════════════════════════
+
+══════════ Pod Status ══════════
+NAME                                  READY   STATUS    NODE   AGE
+ecom-api-gateway-xxx-aaa              1/1     Running   s4     30s
+ecom-api-gateway-xxx-bbb              1/1     Running   s5     30s
+ecom-user-service-xxx-aaa             1/1     Running   s4     30s
+ecom-user-service-xxx-bbb             1/1     Running   s5     30s
+ecom-product-service-xxx-aaa          1/1     Running   s4     30s
+ecom-product-service-xxx-bbb          1/1     Running   s5     30s
+ecom-cart-service-xxx-aaa             1/1     Running   s4     30s
+ecom-cart-service-xxx-bbb             1/1     Running   s5     30s
+ecom-order-service-xxx-aaa            1/1     Running   s4     30s
+ecom-order-service-xxx-bbb            1/1     Running   s5     30s
+ecom-pg-1                             1/1     Running   s1     60s
+ecom-pg-2                             1/1     Running   s2     50s
+ecom-redis-replication-0              1/1     Running   s1     45s
+ecom-redis-replication-1              1/1     Running   s2     40s
+ecom-redis-replication-2              1/1     Running   s1     35s
+```
+
+注意看 **NODE** 列 — Pod 应该分布在不同节点上：
+- PG Pod → 在 s1、s2（data 节点）
+- Redis Pod → 在 s1、s2（data 节点）
+- 微服务 Pod → 在 s4、s5（app 节点）
+- 每个微服务有 2 个副本，分布在不同的 app 节点
+
+---
+
+### 8.7 第五步：验证多节点分布
+
+SSH 到 S1（任意 server 节点都行）：
+
+```bash
+ssh root@203.0.113.10
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+```
 
-# 查看节点标签
-kubectl get nodes --show-labels
+#### 8.7.1 查看所有节点和角色标签
 
-# 确认 PG Pod 在 data 节点上
+```bash
+kubectl get nodes --show-labels | grep role
+```
+
+期望输出：
+```
+s1    Ready   control-plane,etcd,master   role=data
+s2    Ready   control-plane,etcd,master   role=data
+s3    Ready   control-plane,etcd,master   role=ingress
+s4    Ready   <none>                      role=app
+s5    Ready   <none>                      role=app
+```
+
+#### 8.7.2 确认 PG 数据库在 data 节点上
+
+```bash
 kubectl get pods -n ecom -l cnpg.io/cluster=ecom-pg -o wide
+```
 
-# 确认服务 Pod 在 app 节点上
+期望输出（NODE 列应为 s1 和 s2）：
+```
+NAME       READY   STATUS    NODE   AGE
+ecom-pg-1  1/1     Running   s1     5m
+ecom-pg-2  1/1     Running   s2     4m
+```
+
+#### 8.7.3 确认微服务在 app 节点上
+
+```bash
 kubectl get pods -n ecom -l app=ecom-api-gateway -o wide
+```
 
-# 确认 Ingress 在 ingress 节点上
+期望输出（NODE 列应为 s4 和 s5）：
+```
+NAME                             READY   STATUS    NODE   AGE
+ecom-api-gateway-xxx-aaa         1/1     Running   s4     5m
+ecom-api-gateway-xxx-bbb         1/1     Running   s5     5m
+```
+
+#### 8.7.4 确认 Ingress 在 ingress 节点上
+
+```bash
 kubectl get pods -n ingress-nginx -o wide
 ```
 
-### 8.4 3 节点精简方案
-
-如果只有 3 台 VPS，不配置 `K3S_S4_HOST` 和 `K3S_S5_HOST` 即可：
-
+期望输出（NODE 列应为 s3）：
 ```
-S1 → role=data      ← PG + Redis + 微服务（混合调度）
-S2 → role=data      ← PG 备 + Redis 副本
-S3 → role=ingress   ← Nginx Ingress
+NAME                                      READY   STATUS    NODE   AGE
+ingress-nginx-controller-xxx              1/1     Running   s3     10m
 ```
 
-> 注意：3 节点方案中微服务会调度到 S1/S2（data 节点上），因为没有 `role=app` 节点。
-> 如需精确控制，可以给 S1 追加标签：`kubectl label node <S1> role=app --overwrite`
-
-### 8.5 手动部署脚本（多节点）
-
-如果不使用 GitHub Actions，也可以在 server 节点上手动部署：
+#### 8.7.5 查看整体状态
 
 ```bash
-cd /path/to/my-backend/infra/k3s
+# 所有 Pod 一览
+kubectl get pods -n ecom -o wide
 
-# 设置多节点模式
+# Helm release 状态
+helm list -n ecom
+
+# 证书状态
+kubectl get certificate -n ecom
+```
+
+---
+
+### 8.8 多节点常见问题
+
+#### Q: S2/S3 Join Server 失败 — "connection refused"
+
+**原因**：S1 上的 6443 端口未开放，或 S2/S3 无法访问 S1 的内网/公网 IP。
+
+**解决**：
+```bash
+# 在 S1 上检查 6443 是否监听
+ss -tlnp | grep 6443
+
+# 在 S2 上测试连通性
+curl -k https://203.0.113.10:6443
+# 应返回 JSON（即使是 401 也说明端口通了）
+
+# 如果不通，检查防火墙
+ufw status
+```
+
+#### Q: S4/S5 Join Agent 失败 — "token not valid"
+
+**原因**：node-token 可能过期或传输不完整。
+
+**解决**：
+```bash
+# 在 S1 上查看正确的 token
+cat /var/lib/rancher/k3s/server/node-token
+```
+
+> 通常重新运行 Workflow（选 `03-join-agent` 步骤）即可自动修复。
+
+#### Q: Pod 一直 Pending — "0/5 nodes are available"
+
+**原因**：Pod 的 nodeSelector 要求 `role=app`，但没有节点有这个标签。
+
+**解决**：
+```bash
+# 检查节点标签
+kubectl get nodes --show-labels | grep role
+
+# 如果标签缺失，手动打标签
+kubectl label node s1 role=data
+kubectl label node s2 role=data
+kubectl label node s3 role=ingress
+kubectl label node s4 role=app
+kubectl label node s5 role=app
+```
+
+> 通常是 `04-install-operators.sh` 没有正确执行。重新运行 Workflow 选 `04-install-operators` 步骤即可。
+
+#### Q: 3 节点方案微服务 Pod 全在 Pending
+
+**原因**：3 节点没有 `role=app` 的节点，但 `values-k3s-multi.yaml` 里微服务要求 `nodeSelector: role=app`。
+
+**解决**：给 S1 或 S2 追加 app 标签：
+
+```bash
+# 让 S1 同时承担 data 和 app 角色
+kubectl label node s1 role=app --overwrite
+
+# 或者更好的做法：移除 nodeSelector 约束
+# 重新运行部署，选 k3s-single 平台（它的 nodeSelector 全是 {}）
+```
+
+> **推荐**：3 节点方案建议使用 `k3s-single` 平台而非 `k3s-multi`，因为节点太少没必要强制隔离。
+
+#### Q: 域名 DNS 应该指向哪台 VPS？
+
+多节点模式下，域名应该指向 **S3**（role=ingress 的那台），因为 Nginx Ingress Controller 运行在 S3 上。
+
+```
+api.find345.site → 203.0.113.12（S3 的 IP）
+```
+
+> 如果你有负载均衡器（如 Cloudflare），可以把所有 server 节点 IP 都加上。
+
+#### Q: 如何从单节点升级到多节点？
+
+1. 准备额外的 VPS，完成 [8.3 节](#83-第一步准备所有-vps) 的基础配置
+2. GitHub 添加新的 Variables（`K3S_S2_HOST` 等）
+3. 运行 K3s Cluster Setup Workflow（选 `multi` 模式），**不需要卸载已有的单节点**
+4. 运行 Build & Deploy（选 `k3s-multi` 平台）
+
+> 注意：从 single 升级到 multi 需要重新初始化集群（因为 single 模式没有启用 etcd 集群）。建议先在 S1 上卸载 k3s（`/usr/local/bin/k3s-uninstall.sh`），然后用 multi 模式全部重装。
+
+---
+
+### 8.9 手动部署（不用 GitHub Actions）
+
+如果你不想用 GitHub Actions，也可以在 S1 上手动操作：
+
+```bash
+# 1. 把项目代码传到 S1
+scp -r /path/to/my-backend root@203.0.113.10:/opt/ecom/
+
+# 2. SSH 到 S1
+ssh root@203.0.113.10
+cd /opt/ecom/infra/k3s
+
+# 3. 设置多节点模式
 export K3S_MODE=multi
-export REGISTRY=ghcr.io/你的用户名
+export REGISTRY=ghcr.io/你的github用户名
 export TAG=latest
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-./deploy.sh setup    # 交互式配置 secrets
-./deploy.sh build    # 构建镜像
+# 4. 依次执行
+./deploy.sh setup    # 交互式输入密码和 Secret
+./deploy.sh build    # 构建并推送镜像（需要 docker login ghcr.io）
 ./deploy.sh deploy   # Helm 部署（自动使用 values-k3s-multi.yaml）
+./deploy.sh status   # 查看部署状态
 ```
 
 ---

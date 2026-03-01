@@ -146,7 +146,6 @@ jobs:
           host: ${{ secrets.SWARM_HOST }}
           username: ${{ secrets.SWARM_USER }}
           key: ${{ secrets.SWARM_SSH_KEY }}
-          script_stop: true
           script: |
             set -euo pipefail
 

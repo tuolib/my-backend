@@ -1,0 +1,57 @@
+# order-service/deployment.yaml — 订单与支付服务 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ecom.fullname" . }}-order-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "ecom.labels" . | nindent 4 }}
+    app.kubernetes.io/name: order-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.orderService.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order-service
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "ecom.labels" . | nindent 8 }}
+        app.kubernetes.io/name: order-service
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        {{- toYaml .Values.orderService.nodeSelector | nindent 8 }}
+      containers:
+        - name: order-service
+          image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.orderService.image "tag" .Values.global.imageTag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.orderService.port }}
+              protocol: TCP
+          env:
+            - name: SERVICE_PORT
+              value: {{ .Values.orderService.port | quote }}
+            {{- include "ecom.commonEnv" . | nindent 12 }}
+            - name: PRODUCT_SERVICE_URL
+              value: "http://{{ include "ecom.fullname" . }}-product-service:{{ .Values.productService.port }}"
+            - name: CART_SERVICE_URL
+              value: "http://{{ include "ecom.fullname" . }}-cart-service:{{ .Values.cartService.port }}"
+            - name: USER_SERVICE_URL
+              value: "http://{{ include "ecom.fullname" . }}-user-service:{{ .Values.userService.port }}"
+          resources:
+            requests:
+              cpu: {{ .Values.orderService.resources.requests.cpu | quote }}
+              memory: {{ .Values.orderService.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.orderService.resources.limits.cpu | quote }}
+              memory: {{ .Values.orderService.resources.limits.memory | quote }}
+          {{- include "ecom.probes" (dict "port" .Values.orderService.port) | nindent 10 }}

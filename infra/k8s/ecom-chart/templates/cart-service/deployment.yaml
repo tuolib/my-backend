@@ -1,0 +1,53 @@
+# cart-service/deployment.yaml — 购物车服务 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ecom.fullname" . }}-cart-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "ecom.labels" . | nindent 4 }}
+    app.kubernetes.io/name: cart-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.cartService.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cart-service
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "ecom.labels" . | nindent 8 }}
+        app.kubernetes.io/name: cart-service
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        {{- toYaml .Values.cartService.nodeSelector | nindent 8 }}
+      containers:
+        - name: cart-service
+          image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.cartService.image "tag" .Values.global.imageTag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.cartService.port }}
+              protocol: TCP
+          env:
+            - name: SERVICE_PORT
+              value: {{ .Values.cartService.port | quote }}
+            {{- include "ecom.commonEnv" . | nindent 12 }}
+            - name: PRODUCT_SERVICE_URL
+              value: "http://{{ include "ecom.fullname" . }}-product-service:{{ .Values.productService.port }}"
+          resources:
+            requests:
+              cpu: {{ .Values.cartService.resources.requests.cpu | quote }}
+              memory: {{ .Values.cartService.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.cartService.resources.limits.cpu | quote }}
+              memory: {{ .Values.cartService.resources.limits.memory | quote }}
+          {{- include "ecom.probes" (dict "port" .Values.cartService.port) | nindent 10 }}

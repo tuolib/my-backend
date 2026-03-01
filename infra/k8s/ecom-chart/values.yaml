@@ -1,0 +1,170 @@
+# values.yaml — 生产环境默认值
+# 部署时通过 --set 或 -f values-override.yaml 覆盖敏感值
+
+# ============ 全局配置 ============
+global:
+  namespace: ecom
+  registry: "registry.example.com/ecom"
+  imageTag: "latest"
+  imagePullPolicy: IfNotPresent
+
+# ============ Secrets（部署时必须通过 --set 传入） ============
+secrets:
+  postgresPassword: "CHANGE_ME"
+  replicationPassword: "CHANGE_ME"
+  jwtAccessSecret: "CHANGE_ME"
+  jwtRefreshSecret: "CHANGE_ME"
+  internalSecret: "CHANGE_ME"
+
+# ============ PostgreSQL (CloudNativePG) ============
+postgresql:
+  instances: 2
+  image: "ghcr.io/cloudnative-pg/postgresql:16.2"
+  database: ecommerce
+  schemas:
+    - user_service
+    - product_service
+    - order_service
+  storage:
+    size: 10Gi
+    storageClass: local-path
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  parameters:
+    max_connections: "200"
+    shared_buffers: "256MB"
+    effective_cache_size: "512MB"
+    work_mem: "4MB"
+    maintenance_work_mem: "64MB"
+    wal_buffers: "16MB"
+    max_wal_size: "2GB"
+    random_page_cost: "1.1"
+    effective_io_concurrency: "200"
+    log_min_duration_statement: "200"
+    hot_standby: "on"
+  nodeSelector:
+    role: data
+
+# ============ Redis (OT-Container-Kit Operator) ============
+redis:
+  clusterSize: 3
+  image: "redis:7-alpine"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  storage:
+    size: 2Gi
+    storageClass: local-path
+  config:
+    maxmemory: "256mb"
+    maxmemoryPolicy: "allkeys-lru"
+  nodeSelector:
+    role: data
+
+# ============ Ingress ============
+ingress:
+  enabled: true
+  host: api.find345.site
+  tls:
+    enabled: true
+    issuer: letsencrypt-prod
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+
+# ============ cert-manager ============
+certManager:
+  email: "admin@find345.site"
+  issuer: letsencrypt-prod
+  server: "https://acme-v2.api.letsencrypt.org/directory"
+
+# ============ 微服务通用配置 ============
+services:
+  nodeEnv: production
+  logLevel: info
+  corsOrigins: "https://find345.site,https://www.find345.site"
+
+# ============ API Gateway ============
+apiGateway:
+  replicas: 2
+  port: 3000
+  image: "ecom-api-gateway"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  nodeSelector:
+    role: app
+
+# ============ User Service ============
+userService:
+  replicas: 2
+  port: 3001
+  image: "ecom-user-service"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  nodeSelector:
+    role: app
+
+# ============ Product Service ============
+productService:
+  replicas: 2
+  port: 3002
+  image: "ecom-product-service"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  nodeSelector:
+    role: app
+
+# ============ Cart Service ============
+cartService:
+  replicas: 2
+  port: 3003
+  image: "ecom-cart-service"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  nodeSelector:
+    role: app
+
+# ============ Order Service ============
+orderService:
+  replicas: 2
+  port: 3004
+  image: "ecom-order-service"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  nodeSelector:
+    role: app

@@ -1,0 +1,32 @@
+========================================
+  ecom 电商平台部署成功！
+========================================
+
+1. 检查 Pod 状态:
+   kubectl get pods -n {{ .Values.global.namespace }}
+
+2. 检查 CloudNativePG 集群:
+   kubectl get cluster -n {{ .Values.global.namespace }}
+
+3. 检查 Redis:
+   kubectl get redisreplication -n {{ .Values.global.namespace }}
+
+4. 检查 Ingress:
+   kubectl get ingress -n {{ .Values.global.namespace }}
+
+{{- if .Values.ingress.tls.enabled }}
+5. 检查 TLS 证书:
+   kubectl get certificate -n {{ .Values.global.namespace }}
+
+6. 访问:
+   https://{{ .Values.ingress.host }}/health
+{{- else }}
+5. 访问:
+   http://{{ .Values.ingress.host }}/health
+{{- end }}
+
+7. 运行数据库迁移:
+   helm upgrade {{ .Release.Name }} . --set dbMigrate.enabled=true
+
+8. 查看日志:
+   kubectl logs -f -l app.kubernetes.io/part-of=ecom -n {{ .Values.global.namespace }}

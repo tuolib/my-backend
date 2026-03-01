@@ -1,0 +1,80 @@
+# cluster.yaml — CloudNativePG Cluster CR
+# 替代: etcd × 3 + Patroni × 2 + HAProxy × 2
+# CloudNativePG 自带 Leader 选举、自动故障转移、读写分离 Service
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "ecom.fullname" . }}-pg
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "ecom.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgresql.instances }}
+  imageName: {{ .Values.postgresql.image }}
+
+  # 超级用户凭据
+  superuserSecret:
+    name: {{ include "ecom.pgSecretName" . }}
+
+  # 启用超级用户访问（兼容现有应用连接方式）
+  enableSuperuserAccess: true
+
+  # 持久化存储
+  storage:
+    size: {{ .Values.postgresql.storage.size }}
+    storageClass: {{ .Values.postgresql.storage.storageClass }}
+
+  # PostgreSQL 参数（从 patroni.yml 迁移）
+  postgresql:
+    parameters:
+      max_connections: {{ .Values.postgresql.parameters.max_connections | quote }}
+      shared_buffers: {{ .Values.postgresql.parameters.shared_buffers | quote }}
+      effective_cache_size: {{ .Values.postgresql.parameters.effective_cache_size | quote }}
+      work_mem: {{ .Values.postgresql.parameters.work_mem | quote }}
+      maintenance_work_mem: {{ .Values.postgresql.parameters.maintenance_work_mem | quote }}
+      wal_buffers: {{ .Values.postgresql.parameters.wal_buffers | quote }}
+      max_wal_size: {{ .Values.postgresql.parameters.max_wal_size | quote }}
+      random_page_cost: {{ .Values.postgresql.parameters.random_page_cost | quote }}
+      effective_io_concurrency: {{ .Values.postgresql.parameters.effective_io_concurrency | quote }}
+      log_min_duration_statement: {{ .Values.postgresql.parameters.log_min_duration_statement | quote }}
+      hot_standby: {{ .Values.postgresql.parameters.hot_standby | quote }}
+      # WAL 复制参数
+      wal_level: "replica"
+      max_wal_senders: "5"
+      max_replication_slots: "5"
+      # 时区
+      timezone: "UTC"
+      log_timezone: "UTC"
+    pg_hba:
+      - "host all all 0.0.0.0/0 scram-sha-256"
+      - "host replication all 0.0.0.0/0 scram-sha-256"
+
+  # 初始化：创建数据库和 schema（从 post-init.sh 迁移）
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgresql.database }}
+      owner: postgres
+      postInitSQL:
+        {{- range .Values.postgresql.schemas }}
+        - "CREATE SCHEMA IF NOT EXISTS {{ . }};"
+        {{- end }}
+
+  # 资源限制
+  resources:
+    requests:
+      cpu: {{ .Values.postgresql.resources.requests.cpu | quote }}
+      memory: {{ .Values.postgresql.resources.requests.memory | quote }}
+    limits:
+      cpu: {{ .Values.postgresql.resources.limits.cpu | quote }}
+      memory: {{ .Values.postgresql.resources.limits.memory | quote }}
+
+  # 节点亲和性：仅调度到 data 节点（S1/S2）
+  affinity:
+    nodeSelector:
+      {{- toYaml .Values.postgresql.nodeSelector | nindent 6 }}
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+
+  # 监控（可选，后续集成 Prometheus）
+  monitoring:
+    enablePodMonitor: false

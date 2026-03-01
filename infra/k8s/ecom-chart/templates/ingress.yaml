@@ -1,0 +1,49 @@
+# ingress.yaml — Nginx Ingress 规则
+# 替代: Caddy 反向代理 (Caddyfile.prod)
+# Nginx Ingress Controller 以 DaemonSet + hostNetwork 模式运行在 S3
+# 直接绑定 S3 的 80/443 端口，DNS 无需修改
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ecom.fullname" . }}-ingress
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "ecom.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.tls.enabled }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.issuer | quote }}
+    {{- end }}
+    # 安全 Headers（等价于 Caddy 的 header 配置）
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+    {{- if .Values.ingress.tls.enabled }}
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+    {{- end }}
+    # 代理参数
+    {{- range $key, $value := .Values.ingress.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  ingressClassName: nginx
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host }}
+      secretName: {{ include "ecom.fullname" . }}-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ecom.fullname" . }}-api-gateway
+                port:
+                  number: {{ .Values.apiGateway.port }}
+{{- end }}

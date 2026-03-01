@@ -1,0 +1,20 @@
+# cart-service/service.yaml — 购物车服务 ClusterIP Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ecom.fullname" . }}-cart-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "ecom.labels" . | nindent 4 }}
+    app.kubernetes.io/name: cart-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.cartService.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: cart-service
+    app.kubernetes.io/instance: {{ .Release.Name }}

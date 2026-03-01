@@ -1,0 +1,51 @@
+# product-service/deployment.yaml — 商品与库存服务 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ecom.fullname" . }}-product-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "ecom.labels" . | nindent 4 }}
+    app.kubernetes.io/name: product-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.productService.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: product-service
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "ecom.labels" . | nindent 8 }}
+        app.kubernetes.io/name: product-service
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        {{- toYaml .Values.productService.nodeSelector | nindent 8 }}
+      containers:
+        - name: product-service
+          image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.productService.image "tag" .Values.global.imageTag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.productService.port }}
+              protocol: TCP
+          env:
+            - name: SERVICE_PORT
+              value: {{ .Values.productService.port | quote }}
+            {{- include "ecom.commonEnv" . | nindent 12 }}
+          resources:
+            requests:
+              cpu: {{ .Values.productService.resources.requests.cpu | quote }}
+              memory: {{ .Values.productService.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.productService.resources.limits.cpu | quote }}
+              memory: {{ .Values.productService.resources.limits.memory | quote }}
+          {{- include "ecom.probes" (dict "port" .Values.productService.port) | nindent 10 }}

@@ -1,0 +1,87 @@
+# values-dev.yaml — 开发环境覆盖值
+# 用法: helm install ecom . -f values-dev.yaml
+
+global:
+  registry: "localhost:5000"
+  imageTag: "dev"
+  imagePullPolicy: Always
+
+postgresql:
+  instances: 1
+  storage:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+redis:
+  clusterSize: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  storage:
+    size: 1Gi
+
+ingress:
+  enabled: true
+  host: api.ecom.local
+  tls:
+    enabled: false
+
+apiGateway:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+
+userService:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+
+productService:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+
+cartService:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+
+orderService:
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"

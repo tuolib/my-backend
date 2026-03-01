@@ -1,0 +1,39 @@
+# db-migrate-job.yaml — Helm hook 数据库迁移 Job
+# 在 helm install/upgrade 时自动运行 Drizzle ORM 迁移
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ecom.fullname" . }}-db-migrate
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "ecom.labels" . | nindent 4 }}
+  annotations:
+    # Helm hook: 在 install/upgrade 之前运行
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    # 成功后保留 Job 供查看日志，下次 hook 运行时删除旧的
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-migrate
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        {{- toYaml .Values.apiGateway.nodeSelector | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.apiGateway.image "tag" .Values.global.imageTag) }}
+          command: ["bun", "run", "packages/database/src/migrate.ts"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ecom.secretName" . }}
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: {{ include "ecom.databaseUrl" . }}

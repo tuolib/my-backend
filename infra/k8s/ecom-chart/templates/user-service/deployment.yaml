@@ -1,0 +1,51 @@
+# user-service/deployment.yaml — 用户认证服务 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ecom.fullname" . }}-user-service
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "ecom.labels" . | nindent 4 }}
+    app.kubernetes.io/name: user-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.userService.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: user-service
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "ecom.labels" . | nindent 8 }}
+        app.kubernetes.io/name: user-service
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        {{- toYaml .Values.userService.nodeSelector | nindent 8 }}
+      containers:
+        - name: user-service
+          image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.userService.image "tag" .Values.global.imageTag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.userService.port }}
+              protocol: TCP
+          env:
+            - name: SERVICE_PORT
+              value: {{ .Values.userService.port | quote }}
+            {{- include "ecom.commonEnv" . | nindent 12 }}
+          resources:
+            requests:
+              cpu: {{ .Values.userService.resources.requests.cpu | quote }}
+              memory: {{ .Values.userService.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.userService.resources.limits.cpu | quote }}
+              memory: {{ .Values.userService.resources.limits.memory | quote }}
+          {{- include "ecom.probes" (dict "port" .Values.userService.port) | nindent 10 }}

@@ -1,10 +1,10 @@
 # CI/CD — 微服务构建 & 多平台自动部署
 #
 # 支持 4 种部署平台:
-#   swarm      — Docker Swarm（docker service update 滚动更新）
-#   k8s        — Kubernetes（Helm 部署）
-#   k3s-single — K3s 单节点（Helm 部署）
-#   k3s-multi  — K3s 多节点 HA（Helm 部署）
+#   swarm      — Docker Swarm（SSH + docker service update 滚动更新）
+#   k8s        — Kubernetes（kubeconfig 直连 + Helm 部署）
+#   k3s-single — K3s 单节点（kubeconfig 直连 + Helm 部署）
+#   k3s-multi  — K3s 多节点 HA（kubeconfig 直连 + Helm 部署）
 #
 # push to main    → 类型检查 → 构建 5 个镜像 → 部署到 Swarm（默认）→ 健康检查
 # PR to main      → 类型检查 → 构建（不推送、不部署）
@@ -284,7 +284,7 @@ jobs:
               docker service ls --filter "name=${STACK}_"
             fi
 
-  # ─── Job ③b SSH 到 K8s/K3s 节点，Helm 部署 ──────────────────────────────────
+  # ─── Job ③b Kubeconfig 直连 K8s/K3s API Server，Helm 部署 ──────────────────
   deploy-k8s:
     name: Deploy to ${{ inputs.platform }}
     needs: build-images
@@ -307,20 +307,14 @@ jobs:
           echo "registry=ghcr.io/${OWNER_LC}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-          # 根据平台选择 SSH 目标和 values 文件
+          # 根据平台选择 values 文件
           PLATFORM="${{ env.PLATFORM }}"
           if [[ "${PLATFORM}" == "k3s-multi" ]]; then
-            echo "values_flag=-f /opt/ecom/infra/k8s/ecom-chart/values-k3s-multi.yaml" >> "$GITHUB_OUTPUT"
-            echo "kubeconfig_export=export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> "$GITHUB_OUTPUT"
-            echo "is_k3s=true" >> "$GITHUB_OUTPUT"
+            echo "values_flag=-f infra/k8s/ecom-chart/values-k3s-multi.yaml" >> "$GITHUB_OUTPUT"
           elif [[ "${PLATFORM}" == "k3s-single" ]]; then
-            echo "values_flag=-f /opt/ecom/infra/k8s/ecom-chart/values-k3s.yaml" >> "$GITHUB_OUTPUT"
-            echo "kubeconfig_export=export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> "$GITHUB_OUTPUT"
-            echo "is_k3s=true" >> "$GITHUB_OUTPUT"
+            echo "values_flag=-f infra/k8s/ecom-chart/values-k3s.yaml" >> "$GITHUB_OUTPUT"
           else
             echo "values_flag=" >> "$GITHUB_OUTPUT"
-            echo "kubeconfig_export=" >> "$GITHUB_OUTPUT"
-            echo "is_k3s=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout (Helm Chart only)
@@ -328,90 +322,99 @@ jobs:
         with:
           sparse-checkout: infra/k8s
 
-      - name: Copy Helm Chart to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_HOST || secrets.K8S_SSH_HOST }}
-          username: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_USER || secrets.K8S_SSH_USER }}
-          key: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_KEY || secrets.K8S_SSH_KEY }}
-          source: "infra/k8s/ecom-chart/"
-          target: /opt/ecom
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
 
-      - name: Helm deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_HOST || secrets.K8S_SSH_HOST }}
-          username: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_USER || secrets.K8S_SSH_USER }}
-          key: ${{ startsWith(env.PLATFORM, 'k3s') && secrets.K3S_SSH_KEY || secrets.K8S_SSH_KEY }}
-          script: |
-            set -euo pipefail
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
 
-            # k3s 需要指定 KUBECONFIG
-            ${{ steps.vars.outputs.kubeconfig_export }}
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "${HOME}/.kube"
+          PLATFORM="${{ env.PLATFORM }}"
+          if [[ "${PLATFORM}" == k3s* ]]; then
+            echo '${{ secrets.K3S_KUBECONFIG }}' > "${HOME}/.kube/config"
+          else
+            echo '${{ secrets.K8S_KUBECONFIG }}' > "${HOME}/.kube/config"
+          fi
+          chmod 600 "${HOME}/.kube/config"
 
-            REGISTRY="${{ steps.vars.outputs.registry }}"
-            TAG="${{ steps.vars.outputs.tag }}"
-            NAMESPACE="ecom"
-            RELEASE="ecom"
-            CHART="/opt/ecom/infra/k8s/ecom-chart"
-            PLATFORM="${{ env.PLATFORM }}"
+      - name: Verify cluster connectivity
+        run: kubectl cluster-info
 
-            echo "══════════════════════════════════════════"
-            echo "Deploying ${RELEASE} to ${PLATFORM} (tag: ${TAG})"
-            echo "══════════════════════════════════════════"
+      - name: Create namespace
+        run: kubectl create namespace ecom --dry-run=client -o yaml | kubectl apply -f -
 
-            # 确保 namespace 存在
-            kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+      - name: Create GHCR pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-pull-secret \
+            --namespace=ecom \
+            --docker-server=ghcr.io \
+            --docker-username="${{ github.actor }}" \
+            --docker-password="${{ secrets.GHCR_PAT }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
-            # 创建/更新 GHCR 拉镜像凭证（私有仓库需要）
-            kubectl create secret docker-registry ghcr-pull-secret \
-              --namespace="${NAMESPACE}" \
-              --docker-server=ghcr.io \
-              --docker-username="${{ github.actor }}" \
-              --docker-password="${{ secrets.GHCR_PAT }}" \
-              --dry-run=client -o yaml | kubectl apply -f -
+      - name: Helm deploy
+        run: |
+          set -euo pipefail
 
-            # 根据平台选择 secrets（K8S_ 或 K3S_ 前缀）
-            if [[ "${PLATFORM}" == k3s* ]]; then
-              PG_PASS="${{ secrets.K3S_POSTGRES_PASSWORD }}"
-              REPL_PASS="${{ secrets.K3S_REPLICATION_PASSWORD }}"
-              JWT_ACCESS="${{ secrets.K3S_JWT_ACCESS_SECRET }}"
-              JWT_REFRESH="${{ secrets.K3S_JWT_REFRESH_SECRET }}"
-              INTERNAL="${{ secrets.K3S_INTERNAL_SECRET }}"
-            else
-              PG_PASS="${{ secrets.K8S_POSTGRES_PASSWORD }}"
-              REPL_PASS="${{ secrets.K8S_REPLICATION_PASSWORD }}"
-              JWT_ACCESS="${{ secrets.K8S_JWT_ACCESS_SECRET }}"
-              JWT_REFRESH="${{ secrets.K8S_JWT_REFRESH_SECRET }}"
-              INTERNAL="${{ secrets.K8S_INTERNAL_SECRET }}"
-            fi
+          REGISTRY="${{ steps.vars.outputs.registry }}"
+          TAG="${{ steps.vars.outputs.tag }}"
+          NAMESPACE="ecom"
+          RELEASE="ecom"
+          CHART="infra/k8s/ecom-chart"
+          PLATFORM="${{ env.PLATFORM }}"
 
-            # Helm 部署/升级
-            helm upgrade --install "${RELEASE}" "${CHART}" \
-              --namespace "${NAMESPACE}" \
-              ${{ steps.vars.outputs.values_flag }} \
-              --set "global.registry=${REGISTRY}" \
-              --set "global.imageTag=${TAG}" \
-              --set "global.imagePullSecrets[0]=ghcr-pull-secret" \
-              --set "secrets.postgresPassword=${PG_PASS}" \
-              --set "secrets.replicationPassword=${REPL_PASS}" \
-              --set "secrets.jwtAccessSecret=${JWT_ACCESS}" \
-              --set "secrets.jwtRefreshSecret=${JWT_REFRESH}" \
-              --set "secrets.internalSecret=${INTERNAL}" \
-              --wait \
-              --timeout 300s
+          echo "══════════════════════════════════════════"
+          echo "Deploying ${RELEASE} to ${PLATFORM} (tag: ${TAG})"
+          echo "══════════════════════════════════════════"
 
-            echo ""
-            echo "══════════ Pod Status ══════════"
-            kubectl get pods -n "${NAMESPACE}" -o wide
+          # 根据平台选择 secrets（K8S_ 或 K3S_ 前缀）
+          if [[ "${PLATFORM}" == k3s* ]]; then
+            PG_PASS="${{ secrets.K3S_POSTGRES_PASSWORD }}"
+            REPL_PASS="${{ secrets.K3S_REPLICATION_PASSWORD }}"
+            JWT_ACCESS="${{ secrets.K3S_JWT_ACCESS_SECRET }}"
+            JWT_REFRESH="${{ secrets.K3S_JWT_REFRESH_SECRET }}"
+            INTERNAL="${{ secrets.K3S_INTERNAL_SECRET }}"
+          else
+            PG_PASS="${{ secrets.K8S_POSTGRES_PASSWORD }}"
+            REPL_PASS="${{ secrets.K8S_REPLICATION_PASSWORD }}"
+            JWT_ACCESS="${{ secrets.K8S_JWT_ACCESS_SECRET }}"
+            JWT_REFRESH="${{ secrets.K8S_JWT_REFRESH_SECRET }}"
+            INTERNAL="${{ secrets.K8S_INTERNAL_SECRET }}"
+          fi
 
-            echo ""
-            echo "══════════ Services ══════════"
-            kubectl get svc -n "${NAMESPACE}"
+          helm upgrade --install "${RELEASE}" "${CHART}" \
+            --namespace "${NAMESPACE}" \
+            ${{ steps.vars.outputs.values_flag }} \
+            --set "global.registry=${REGISTRY}" \
+            --set "global.imageTag=${TAG}" \
+            --set "global.imagePullSecrets[0]=ghcr-pull-secret" \
+            --set "secrets.postgresPassword=${PG_PASS}" \
+            --set "secrets.replicationPassword=${REPL_PASS}" \
+            --set "secrets.jwtAccessSecret=${JWT_ACCESS}" \
+            --set "secrets.jwtRefreshSecret=${JWT_REFRESH}" \
+            --set "secrets.internalSecret=${INTERNAL}" \
+            --wait \
+            --timeout 300s
 
-            echo ""
-            echo "══════════ Helm Release ══════════"
-            helm list -n "${NAMESPACE}"
+      - name: Verify deployment
+        if: always()
+        run: |
+          echo "══════════ Pod Status ══════════"
+          kubectl get pods -n ecom -o wide
+
+          echo ""
+          echo "══════════ Services ══════════"
+          kubectl get svc -n ecom
+
+          echo ""
+          echo "══════════ Helm Release ══════════"
+          helm list -n ecom
+
+      - name: Cleanup kubeconfig
+        if: always()
+        run: rm -f "${HOME}/.kube/config"
 
   # ─── Job ④ 外部健康检查 ─────────────────────────────────────────────────────
   smoke-test:

@@ -1,9 +1,14 @@
-# CI/CD — 微服务构建 & K8s/K3s 自动部署
+# CI/CD — 微服务构建 & 多平台自动部署
 #
-# push to main / workflow_dispatch → 类型检查 → 构建 5 个镜像 → SSH 部署到 K8s/K3s → 健康检查
-# PR to main                       → 类型检查 → 构建（不推送、不部署）
+# 支持 4 种部署平台:
+#   swarm      — Docker Swarm（docker service update 滚动更新）
+#   k8s        — Kubernetes（Helm 部署）
+#   k3s-single — K3s 单节点（Helm 部署）
+#   k3s-multi  — K3s 多节点 HA（Helm 部署）
 #
-# platform 选择: push/PR 默认 k8s, workflow_dispatch 可选 k8s 或 k3s
+# push to main    → 类型检查 → 构建 5 个镜像 → 部署到 Swarm（默认）→ 健康检查
+# PR to main      → 类型检查 → 构建（不推送、不部署）
+# workflow_dispatch → 选择平台 → 类型检查 → 构建 → 部署 → 健康检查
 
 name: Build & Deploy
 
@@ -18,8 +23,9 @@ on:
         description: "目标平台"
         required: true
         type: choice
-        default: "k8s"
+        default: "swarm"
         options:
+          - swarm
           - k8s
           - k3s-single
           - k3s-multi
@@ -30,7 +36,7 @@ on:
 
 # 同分支只保留最后一次运行（按平台隔离）
 concurrency:
-  group: deploy-${{ inputs.platform || 'k8s' }}-${{ github.ref }}
+  group: deploy-${{ inputs.platform || 'swarm' }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -38,7 +44,7 @@ permissions:
   packages: write
 
 env:
-  PLATFORM: ${{ inputs.platform || 'k8s' }}
+  PLATFORM: ${{ inputs.platform || 'swarm' }}
   DOMAIN: api.find345.site
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────────
@@ -130,11 +136,161 @@ jobs:
           echo "- **Image**: \`${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Pushed**: \`${{ github.event_name != 'pull_request' }}\`" >> "$GITHUB_STEP_SUMMARY"
 
-  # ─── Job ③ SSH 到 K8s/K3s 节点，Helm 部署 ──────────────────────────────────
-  deploy:
-    name: Deploy to ${{ inputs.platform || 'k8s' }}
+  # ─── Job ③a SSH 部署到 Docker Swarm ─────────────────────────────────────────
+  deploy-swarm:
+    name: Deploy to Swarm
     needs: build-images
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name != 'pull_request' &&
+      (inputs.platform == 'swarm' || inputs.platform == '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://api.find345.site
+
+    steps:
+      - name: Compute image tag
+        id: vars
+        run: |
+          OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          CUSTOM_TAG="${{ inputs.image_tag }}"
+          TAG="${CUSTOM_TAG:-${GITHUB_SHA::12}}"
+          echo "registry=ghcr.io/${OWNER_LC}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout (for stack file)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra
+
+      - name: Copy stack configs to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SWARM_HOST }}
+          username: ${{ secrets.SWARM_USER }}
+          key: ${{ secrets.SWARM_SSH_KEY }}
+          source: "infra/"
+          target: /opt/ecom
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SWARM_HOST }}
+          username: ${{ secrets.SWARM_USER }}
+          key: ${{ secrets.SWARM_SSH_KEY }}
+          script: |
+            set -euo pipefail
+
+            REGISTRY="${{ steps.vars.outputs.registry }}"
+            TAG="${{ steps.vars.outputs.tag }}"
+            STACK="ecom"
+
+            # 登录 GHCR（用于 --with-registry-auth 转发凭证到 Worker 节点）
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            SERVICES="api-gateway user-service product-service cart-service order-service"
+
+            # 判断是首次部署还是滚动更新
+            if ! docker service inspect "${STACK}_api-gateway" >/dev/null 2>&1; then
+              echo "══════════════════════════════════════════"
+              echo "Stack not found — running initial deployment"
+              echo "══════════════════════════════════════════"
+
+              # 移除旧的 stack（如果存在），释放端口
+              OLD_STACK=$(docker stack ls --format '{{.Name}}' | grep -v "^${STACK}$" | head -1 || true)
+              if [ -n "${OLD_STACK}" ]; then
+                echo "Removing old stack: ${OLD_STACK}"
+                docker stack rm "${OLD_STACK}"
+                echo "Waiting for old stack to drain..."
+                DRAIN_TIMEOUT=60
+                DRAIN_ELAPSED=0
+                while [ ${DRAIN_ELAPSED} -lt ${DRAIN_TIMEOUT} ]; do
+                  REMAINING=$(docker service ls --filter "name=${OLD_STACK}_" -q 2>/dev/null | wc -l)
+                  if [ "${REMAINING}" -eq 0 ]; then
+                    echo "Old stack removed"
+                    break
+                  fi
+                  sleep 5
+                  DRAIN_ELAPSED=$((DRAIN_ELAPSED + 5))
+                done
+              fi
+
+              cd /opt/ecom/infra/swarm
+              REGISTRY="${REGISTRY}" TAG="${TAG}" \
+                docker stack deploy \
+                  --compose-file docker-stack.yml \
+                  --with-registry-auth \
+                  "${STACK}"
+
+              echo "Waiting for services to start..."
+              sleep 30
+
+              echo ""
+              echo "══════════ Service status ══════════"
+              docker service ls --filter "name=${STACK}_"
+
+              echo ""
+              echo "Initial deployment complete."
+            else
+              echo "Stack exists — rolling update"
+
+              # 逐个服务滚动更新，顺序执行限制爆炸半径
+              for SVC in ${SERVICES}; do
+                IMAGE="${REGISTRY}/ecom-${SVC}:${TAG}"
+                echo "══════════════════════════════════════════"
+                echo "Updating ${STACK}_${SVC} → ${IMAGE}"
+                echo "══════════════════════════════════════════"
+
+                docker service update \
+                  --with-registry-auth \
+                  --image "${IMAGE}" \
+                  "${STACK}_${SVC}"
+
+                # 等待服务收敛（最多 180 秒）
+                echo "Waiting for ${STACK}_${SVC} to converge..."
+                TIMEOUT=180
+                ELAPSED=0
+                while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
+                  STATE=$(docker service inspect --format '{{.UpdateStatus.State}}' "${STACK}_${SVC}" 2>/dev/null || echo "unknown")
+                  case "${STATE}" in
+                    completed)
+                      echo "${SVC} update completed"
+                      break
+                      ;;
+                    rollback_completed)
+                      echo "${SVC} rolled back! Aborting pipeline."
+                      exit 1
+                      ;;
+                    paused)
+                      echo "${SVC} update paused! Aborting pipeline."
+                      exit 1
+                      ;;
+                    *)
+                      sleep 5
+                      ELAPSED=$((ELAPSED + 5))
+                      ;;
+                  esac
+                done
+
+                if [ ${ELAPSED} -ge ${TIMEOUT} ]; then
+                  echo "${SVC} did not converge within ${TIMEOUT}s"
+                  exit 1
+                fi
+              done
+
+              echo ""
+              echo "All services updated successfully."
+              docker service ls --filter "name=${STACK}_"
+            fi
+
+  # ─── Job ③b SSH 到 K8s/K3s 节点，Helm 部署 ──────────────────────────────────
+  deploy-k8s:
+    name: Deploy to ${{ inputs.platform }}
+    needs: build-images
+    if: >-
+      github.event_name != 'pull_request' &&
+      startsWith(inputs.platform, 'k')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -260,8 +416,11 @@ jobs:
   # ─── Job ④ 外部健康检查 ─────────────────────────────────────────────────────
   smoke-test:
     name: Smoke test
-    needs: deploy
-    if: github.event_name != 'pull_request'
+    needs: [deploy-swarm, deploy-k8s]
+    if: >-
+      always() &&
+      github.event_name != 'pull_request' &&
+      (needs.deploy-swarm.result == 'success' || needs.deploy-k8s.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -277,7 +436,7 @@ jobs:
               -X POST "${URL}" 2>/dev/null) || HTTP_CODE="000"
 
             if [ "${HTTP_CODE}" = "200" ]; then
-              echo "✓ Health check passed (attempt ${i}/20)"
+              echo "Health check passed (attempt ${i}/20)"
               cat /tmp/health.json
               exit 0
             fi
@@ -294,11 +453,13 @@ jobs:
         if: always()
         run: |
           PLATFORM="${{ env.PLATFORM }}"
-          if [[ "${PLATFORM}" == k3s* ]]; then
-            PLATFORM_LABEL="K3s ${PLATFORM#k3s-} (Helm)"
-          else
-            PLATFORM_LABEL="Kubernetes (Helm)"
-          fi
+          case "${PLATFORM}" in
+            swarm)      PLATFORM_LABEL="Docker Swarm" ;;
+            k3s-single) PLATFORM_LABEL="K3s single (Helm)" ;;
+            k3s-multi)  PLATFORM_LABEL="K3s multi (Helm)" ;;
+            k8s)        PLATFORM_LABEL="Kubernetes (Helm)" ;;
+            *)          PLATFORM_LABEL="${PLATFORM}" ;;
+          esac
 
           echo "## ${PLATFORM_LABEL} Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"

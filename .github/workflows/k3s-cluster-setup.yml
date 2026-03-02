@@ -383,7 +383,8 @@ jobs:
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 15
-          max_attempts: 1
+          max_attempts: 3
+          retry_wait_seconds: 30
           command: |
             ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
               "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" bash -s <<REMOTE_SCRIPT

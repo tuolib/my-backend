@@ -5,6 +5,7 @@
 # 环境变量:
 #   K3S_MODE       — single 或 multi（默认 single）
 #   NODE_IP        — 当前节点公网/内网 IP（必须）
+#   NODE_NAME      — 节点名称（可选，默认 hostname；VPS 同名时必须指定唯一值）
 #   K3S_VIP        — VPC 内网 VIP 地址（可选，如 10.0.0.100，用于 kube-vip）
 #   K3S_EXTRA_SANS — 额外的 TLS SAN，逗号分隔（可选，如域名）
 #   K3S_VERSION    — 指定 k3s 版本（可选，如 v1.29.2+k3s1）
@@ -12,6 +13,7 @@ set -euo pipefail
 
 K3S_MODE="${K3S_MODE:-single}"
 NODE_IP="${NODE_IP:?请设置 NODE_IP（当前节点 IP）}"
+NODE_NAME="${NODE_NAME:-$(hostname)}"
 K3S_VIP="${K3S_VIP:-}"
 K3S_EXTRA_SANS="${K3S_EXTRA_SANS:-}"
 K3S_VERSION="${K3S_VERSION:-}"
@@ -19,6 +21,7 @@ K3S_VERSION="${K3S_VERSION:-}"
 echo "=========================================="
 echo " k3s Server 安装 (mode=${K3S_MODE})"
 echo " NODE_IP=${NODE_IP}"
+echo " NODE_NAME=${NODE_NAME}"
 [[ -n "${K3S_VIP}" ]] && echo " VIP=${K3S_VIP}"
 echo "=========================================="
 
@@ -27,6 +30,7 @@ K3S_FLAGS=(
   "--disable" "traefik"
   "--disable" "servicelb"
   "--write-kubeconfig-mode" "644"
+  "--node-name" "${NODE_NAME}"
   "--node-ip" "${NODE_IP}"
   "--tls-san" "${NODE_IP}"
 )

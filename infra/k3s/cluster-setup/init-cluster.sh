@@ -200,6 +200,7 @@ step_01() {
 
   export K3S_MODE="${MODE}"
   export NODE_IP="${S1_IP}"
+  export NODE_NAME="s1"
   export K3S_EXTRA_SANS="${EXTRA_SANS}"
   export K3S_VERSION="${K3S_VERSION}"
 
@@ -246,12 +247,17 @@ step_02() {
       "/opt/ecom/infra/k3s/cluster-setup/02-join-server.sh"
 
     # 远程执行
-    log_info "在 ${name} 上执行 02-join-server.sh ..."
+    # 节点名：s2, s3（小写，与数组索引对应）
+    local node_name
+    node_name="$(echo "${name}" | tr '[:upper:]' '[:lower:]')"
+
+    log_info "在 ${name} 上执行 02-join-server.sh (node-name=${node_name}) ..."
     ssh ${SSH_OPTS} "${SSH_USER}@${host}" bash -s <<REMOTE_SCRIPT
 set -euo pipefail
 export K3S_URL="https://${S1_IP}:6443"
 export K3S_TOKEN="${NODE_TOKEN}"
 export NODE_IP="${host}"
+export NODE_NAME="${node_name}"
 export K3S_VERSION="${K3S_VERSION}"
 chmod +x /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
 /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
@@ -297,12 +303,17 @@ step_03() {
       "/opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh"
 
     # 远程执行
-    log_info "在 ${name} 上执行 03-join-agent.sh ..."
+    # 节点名：s4, s5（小写，与数组索引对应）
+    local node_name
+    node_name="$(echo "${name}" | tr '[:upper:]' '[:lower:]')"
+
+    log_info "在 ${name} 上执行 03-join-agent.sh (node-name=${node_name}) ..."
     ssh ${SSH_OPTS} "${SSH_USER}@${host}" bash -s <<REMOTE_SCRIPT
 set -euo pipefail
 export K3S_URL="https://${S1_IP}:6443"
 export K3S_TOKEN="${NODE_TOKEN}"
 export NODE_IP="${host}"
+export NODE_NAME="${node_name}"
 export K3S_VERSION="${K3S_VERSION}"
 chmod +x /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
 /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
@@ -323,14 +334,14 @@ step_04() {
   export K3S_MODE="${MODE}"
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-  # 多节点模式：解析节点名
+  # 多节点模式：节点名已通过 --node-name 固定为 s1-s5
   if [[ "${MODE}" == "multi" ]]; then
-    export S1_NODE="$(hostname)"
-    export S2_NODE="$(kubectl get nodes -o wide --no-headers | grep "${S2_IP}" | awk '{print $1}' || echo "${S2_IP}")"
-    export S3_NODE="$(kubectl get nodes -o wide --no-headers | grep "${S3_IP}" | awk '{print $1}' || echo "${S3_IP}")"
-    export S4_NODE="$(kubectl get nodes -o wide --no-headers | grep "${S4_IP}" | awk '{print $1}' || echo "${S4_IP}")"
-    export S5_NODE="$(kubectl get nodes -o wide --no-headers | grep "${S5_IP}" | awk '{print $1}' || echo "${S5_IP}")"
-    log_info "节点映射: S1=${S1_NODE} S2=${S2_NODE} S3=${S3_NODE} S4=${S4_NODE} S5=${S5_NODE}"
+    export S1_NODE="s1"
+    export S2_NODE="s2"
+    export S3_NODE="s3"
+    export S4_NODE="s4"
+    export S5_NODE="s5"
+    log_info "节点映射: S1=s1 S2=s2 S3=s3 S4=s4 S5=s5"
   fi
 
   chmod +x "${SCRIPT_DIR}/04-install-operators.sh"

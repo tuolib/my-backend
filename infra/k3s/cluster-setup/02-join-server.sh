@@ -6,18 +6,21 @@
 #   K3S_URL     — 首个 server 的 API 地址，如 https://10.0.0.1:6443（必须）
 #   K3S_TOKEN   — 首个 server 的 node-token（必须）
 #   NODE_IP     — 当前节点 IP（必须）
+#   NODE_NAME   — 节点名称（可选，默认 hostname；VPS 同名时必须指定唯一值）
 #   K3S_VERSION — 指定 k3s 版本（可选）
 set -euo pipefail
 
 K3S_URL="${K3S_URL:?请设置 K3S_URL（首个 server 的 API 地址）}"
 K3S_TOKEN="${K3S_TOKEN:?请设置 K3S_TOKEN（node-token）}"
 NODE_IP="${NODE_IP:?请设置 NODE_IP（当前节点 IP）}"
+NODE_NAME="${NODE_NAME:-$(hostname)}"
 K3S_VERSION="${K3S_VERSION:-}"
 
 echo "=========================================="
 echo " k3s Server Join（追加 control-plane）"
 echo " K3S_URL=${K3S_URL}"
 echo " NODE_IP=${NODE_IP}"
+echo " NODE_NAME=${NODE_NAME}"
 echo "=========================================="
 
 # ============ [0/3] 清理旧安装 ============
@@ -85,6 +88,7 @@ echo "=== [2/3] 加入集群 ==="
 INSTALL_ENV="K3S_URL=${K3S_URL} K3S_TOKEN=${K3S_TOKEN}"
 K3S_FLAGS=(
   "--write-kubeconfig-mode" "644"
+  "--node-name" "${NODE_NAME}"
   "--node-ip" "${NODE_IP}"
   "--tls-san" "${NODE_IP}"
 )

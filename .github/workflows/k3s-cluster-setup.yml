@@ -104,6 +104,7 @@ jobs:
           set -euo pipefail
           export K3S_MODE="${{ inputs.mode }}"
           export NODE_IP="${{ vars.K3S_S1_HOST }}"
+          export NODE_NAME="s1"
           export K3S_VIP="${{ vars.K3S_VIP || '' }}"
           export K3S_EXTRA_SANS="${{ vars.K3S_EXTRA_SANS || '' }}"
           export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
@@ -215,6 +216,7 @@ jobs:
           export K3S_URL="https://${{ vars.K3S_S1_HOST }}:6443"
           export K3S_TOKEN="${{ needs.install-server.outputs.node_token }}"
           export NODE_IP="${{ steps.host.outputs.ip }}"
+          export NODE_NAME="$(echo '${{ matrix.host }}' | tr '[:upper:]' '[:lower:]')"
           export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
           chmod +x /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
           /opt/ecom/infra/k3s/cluster-setup/02-join-server.sh
@@ -312,6 +314,7 @@ jobs:
           export K3S_URL="https://${{ vars.K3S_S1_HOST }}:6443"
           export K3S_TOKEN="${{ needs.install-server.outputs.node_token }}"
           export NODE_IP="${{ steps.host.outputs.ip }}"
+          export NODE_NAME="$(echo '${{ matrix.host }}' | tr '[:upper:]' '[:lower:]')"
           export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
           chmod +x /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
           /opt/ecom/infra/k3s/cluster-setup/03-join-agent.sh
@@ -390,15 +393,14 @@ jobs:
             export K3S_VIP_INTERFACE="${{ vars.K3S_VIP_INTERFACE || 'eth1' }}"
             export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-            # 多节点模式：解析节点名
+            # 多节点模式：节点名已通过 --node-name 固定为 s1-s5
             if [[ "${K3S_MODE}" == "multi" ]]; then
-              export S1_NODE="\$(hostname)"
-              export S2_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S2_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S2_HOST }}')"
-              export S3_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S3_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S3_HOST }}')"
-              export S4_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S4_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S4_HOST }}')"
-              export S5_NODE="\$(kubectl get nodes -o wide --no-headers | grep '${{ vars.K3S_S5_HOST }}' | awk '{print \$1}' || echo '${{ vars.K3S_S5_HOST }}')"
-              echo "节点映射:"
-              echo "  S1=\${S1_NODE} S2=\${S2_NODE} S3=\${S3_NODE} S4=\${S4_NODE} S5=\${S5_NODE}"
+              export S1_NODE="s1"
+              export S2_NODE="s2"
+              export S3_NODE="s3"
+              export S4_NODE="s4"
+              export S5_NODE="s5"
+              echo "节点映射: S1=s1 S2=s2 S3=s3 S4=s4 S5=s5"
             fi
 
             chmod +x /opt/ecom/infra/k3s/cluster-setup/04-install-operators.sh

@@ -389,20 +389,7 @@ jobs:
             ssh ${{ env.SSH_OPTS }} -i ~/.ssh/k3s_key \
               "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" bash -s <<REMOTE_SCRIPT
             set -euo pipefail
-            export K3S_MODE="${{ inputs.mode }}"
-            export K3S_VIP="${{ vars.K3S_VIP || '' }}"
-            export K3S_VIP_INTERFACE="${{ vars.K3S_VIP_INTERFACE || 'eth1' }}"
             export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-
-            # 多节点模式：节点名已通过 --node-name 固定为 s1-s5
-            if [[ "${K3S_MODE}" == "multi" ]]; then
-              export S1_NODE="s1"
-              export S2_NODE="s2"
-              export S3_NODE="s3"
-              export S4_NODE="s4"
-              export S5_NODE="s5"
-              echo "节点映射: S1=s1 S2=s2 S3=s3 S4=s4 S5=s5"
-            fi
 
             chmod +x /opt/ecom/infra/k3s/cluster-setup/04-install-operators.sh
             /opt/ecom/infra/k3s/cluster-setup/04-install-operators.sh

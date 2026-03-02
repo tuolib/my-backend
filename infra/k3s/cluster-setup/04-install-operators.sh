@@ -8,17 +8,66 @@
 #   - 检查/安装 Helm（k3s 不自带）
 #   - 单节点模式不设 role 标签
 #
-# 环境变量:
-#   K3S_MODE — single 或 multi（默认 single）
-#   K3S_VIP  — VPC 内网 VIP 地址（可选，如 10.0.0.100，用于 kube-vip）
-#   K3S_VIP_INTERFACE — VPC 网卡名（可选，如 eth1，kube-vip 需要）
-#   多节点模式需要: S1_NODE, S2_NODE, S3_NODE, S4_NODE, S5_NODE
+# 所有参数均可自动检测，也可通过环境变量覆盖:
+#   K3S_MODE — 自动按节点数判断 single/multi
+#   K3S_VIP  — 自动从 k3s --tls-san 中提取非节点 IP
+#   K3S_VIP_INTERFACE — 自动取默认路由网卡
+#   S1_NODE~S5_NODE — 节点名（默认 s1~s5）
 set -euo pipefail
 
-K3S_MODE="${K3S_MODE:-single}"
-K3S_VIP="${K3S_VIP:-}"
-K3S_VIP_INTERFACE="${K3S_VIP_INTERFACE:-eth1}"
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+
+# ============ kubectl 探测 ============
+if command -v kubectl &>/dev/null; then
+  KUBECTL="kubectl"
+elif command -v k3s &>/dev/null; then
+  KUBECTL="k3s kubectl"
+else
+  echo "错误: 未找到 kubectl 或 k3s" >&2
+  exit 1
+fi
+
+if ! ${KUBECTL} get nodes &>/dev/null; then
+  echo "错误: 无法连接到 k3s 集群 (KUBECONFIG=${KUBECONFIG})" >&2
+  exit 1
+fi
+
+# ============ 自动检测参数 ============
+
+# K3S_MODE: 按节点数自动判断
+if [[ -z "${K3S_MODE:-}" ]]; then
+  NODE_COUNT=$(${KUBECTL} get nodes --no-headers | wc -l)
+  if [[ ${NODE_COUNT} -gt 1 ]]; then
+    K3S_MODE="multi"
+  else
+    K3S_MODE="single"
+  fi
+  echo "自动检测: K3S_MODE=${K3S_MODE} (${NODE_COUNT} 个节点)"
+fi
+
+# K3S_VIP: 从 k3s service 的 --tls-san 中找出非节点 IP（即 VIP）
+if [[ -z "${K3S_VIP:-}" ]]; then
+  NODE_IPS=$(${KUBECTL} get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}')
+  ALL_SANS=$(grep -oP '(?<=--tls-san )\S+' /etc/systemd/system/k3s.service 2>/dev/null || true)
+  for SAN in ${ALL_SANS}; do
+    # 只匹配 IP 格式，排除节点自身 IP
+    if [[ "${SAN}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! echo " ${NODE_IPS} " | grep -q " ${SAN} "; then
+      K3S_VIP="${SAN}"
+      echo "自动检测: K3S_VIP=${K3S_VIP} (from k3s --tls-san)"
+      break
+    fi
+  done
+  K3S_VIP="${K3S_VIP:-}"
+fi
+
+# K3S_VIP_INTERFACE: 取默认路由网卡
+if [[ -z "${K3S_VIP_INTERFACE:-}" ]] && [[ -n "${K3S_VIP}" ]]; then
+  K3S_VIP_INTERFACE=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+  K3S_VIP_INTERFACE="${K3S_VIP_INTERFACE:-eth1}"
+  echo "自动检测: K3S_VIP_INTERFACE=${K3S_VIP_INTERFACE}"
+else
+  K3S_VIP_INTERFACE="${K3S_VIP_INTERFACE:-eth1}"
+fi
 
 # ============ Operator 版本（与 k8s 保持一致） ============
 CNPG_VERSION="1.22.1"
@@ -34,23 +83,6 @@ echo "=========================================="
 
 # ============ [1/7] 检查集群连通性 ============
 echo "=== [1/7] 检查集群连通性 ==="
-
-# 优先用 kubectl，降级到 k3s kubectl
-if command -v kubectl &>/dev/null; then
-  KUBECTL="kubectl"
-elif command -v k3s &>/dev/null; then
-  KUBECTL="k3s kubectl"
-else
-  echo "错误: 未找到 kubectl 或 k3s" >&2
-  exit 1
-fi
-
-if ! ${KUBECTL} get nodes &>/dev/null; then
-  echo "错误: 无法连接到 k3s 集群" >&2
-  echo "  KUBECONFIG=${KUBECONFIG}"
-  exit 1
-fi
-
 echo "集群连通正常"
 ${KUBECTL} get nodes -o wide
 
@@ -69,11 +101,14 @@ echo "Helm 就绪"
 echo "=== [3/7] 节点标签 ==="
 
 if [[ "${K3S_MODE}" == "multi" ]]; then
-  S1_NODE="${S1_NODE:?多节点模式请设置 S1_NODE}"
-  S2_NODE="${S2_NODE:?多节点模式请设置 S2_NODE}"
-  S3_NODE="${S3_NODE:?多节点模式请设置 S3_NODE}"
-  S4_NODE="${S4_NODE:?多节点模式请设置 S4_NODE}"
-  S5_NODE="${S5_NODE:?多节点模式请设置 S5_NODE}"
+  # 自动从集群获取节点名（安装时通过 --node-name 固定为 s1-s5）
+  S1_NODE="${S1_NODE:-s1}"
+  S2_NODE="${S2_NODE:-s2}"
+  S3_NODE="${S3_NODE:-s3}"
+  S4_NODE="${S4_NODE:-s4}"
+  S5_NODE="${S5_NODE:-s5}"
+
+  echo "节点映射: S1=${S1_NODE} S2=${S2_NODE} S3=${S3_NODE} S4=${S4_NODE} S5=${S5_NODE}"
 
   # S1/S2: 数据层
   for NODE in "${S1_NODE}" "${S2_NODE}"; do
@@ -226,12 +261,12 @@ ${KUBECTL} wait --for=condition=Available --timeout=120s \
   echo "  ${KUBECTL} get pods -n cnpg-system"
 }
 
-# Redis Operator CRDs
+# Redis Operator CRDs（使用 --server-side 避免注解大小限制）
 echo "安装 Redis Operator CRDs..."
-${KUBECTL} apply -f "https://raw.githubusercontent.com/OT-CONTAINER-KIT/redis-operator/v${REDIS_OPERATOR_VERSION}/config/crd/bases/redis.redis.opstreelabs.in_redis.yaml"
-${KUBECTL} apply -f "https://raw.githubusercontent.com/OT-CONTAINER-KIT/redis-operator/v${REDIS_OPERATOR_VERSION}/config/crd/bases/redis.redis.opstreelabs.in_redisclusters.yaml"
-${KUBECTL} apply -f "https://raw.githubusercontent.com/OT-CONTAINER-KIT/redis-operator/v${REDIS_OPERATOR_VERSION}/config/crd/bases/redis.redis.opstreelabs.in_redisreplications.yaml"
-${KUBECTL} apply -f "https://raw.githubusercontent.com/OT-CONTAINER-KIT/redis-operator/v${REDIS_OPERATOR_VERSION}/config/crd/bases/redis.redis.opstreelabs.in_redissentinels.yaml"
+${KUBECTL} apply --server-side -f "https://raw.githubusercontent.com/OT-CONTAINER-KIT/redis-operator/v${REDIS_OPERATOR_VERSION}/config/crd/bases/redis.redis.opstreelabs.in_redis.yaml"
+${KUBECTL} apply --server-side -f "https://raw.githubusercontent.com/OT-CONTAINER-KIT/redis-operator/v${REDIS_OPERATOR_VERSION}/config/crd/bases/redis.redis.opstreelabs.in_redisclusters.yaml"
+${KUBECTL} apply --server-side -f "https://raw.githubusercontent.com/OT-CONTAINER-KIT/redis-operator/v${REDIS_OPERATOR_VERSION}/config/crd/bases/redis.redis.opstreelabs.in_redisreplications.yaml"
+${KUBECTL} apply --server-side -f "https://raw.githubusercontent.com/OT-CONTAINER-KIT/redis-operator/v${REDIS_OPERATOR_VERSION}/config/crd/bases/redis.redis.opstreelabs.in_redissentinels.yaml"
 
 # Redis Operator (Helm)
 echo "安装 Redis Operator..."

@@ -6,17 +6,11 @@
 #   k3s-single — K3s 单节点（kubeconfig 直连 + Helm 部署）
 #   k3s-multi  — K3s 多节点 HA（kubeconfig 直连 + Helm 部署）
 #
-# push to main    → 类型检查 → 构建 5 个镜像 → 部署到 Swarm（默认）→ 健康检查
-# PR to main      → 类型检查 → 构建（不推送、不部署）
-# workflow_dispatch → 选择平台 → 类型检查 → 构建 → 部署 → 健康检查
+# 仅手动触发（workflow_dispatch）→ 选择平台 → 类型检查 → 构建 → 部署 → 健康检查
 
 name: Build & Deploy
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       platform:

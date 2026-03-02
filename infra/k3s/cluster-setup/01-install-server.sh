@@ -25,7 +25,26 @@ echo " NODE_NAME=${NODE_NAME}"
 [[ -n "${K3S_VIP}" ]] && echo " VIP=${K3S_VIP}"
 echo "=========================================="
 
-# ============ 基础参数 ============
+# ============ [0/4] 清理旧安装 ============
+echo "=== [0/4] 清理旧安装（如有） ==="
+
+if [ -x /usr/local/bin/k3s-uninstall.sh ]; then
+  echo "发现旧 k3s 安装，正在卸载..."
+  /usr/local/bin/k3s-uninstall.sh || true
+  echo "旧安装已清理"
+elif systemctl is-active --quiet k3s 2>/dev/null; then
+  echo "发现 k3s 服务正在运行，先停止..."
+  systemctl stop k3s || true
+  systemctl disable k3s || true
+fi
+
+# 清理残留数据目录（防止 etcd 状态冲突）
+if [ -d /var/lib/rancher/k3s ]; then
+  echo "清理残留数据目录 /var/lib/rancher/k3s ..."
+  rm -rf /var/lib/rancher/k3s
+fi
+
+# ============ [1/4] 基础参数 ============
 K3S_FLAGS=(
   "--disable" "traefik"
   "--disable" "servicelb"
@@ -55,8 +74,8 @@ if [[ "${K3S_MODE}" == "multi" ]]; then
   echo "多节点 HA 模式：启用内嵌 etcd"
 fi
 
-# ============ 安装 k3s ============
-echo "=== [1/3] 安装 k3s server ==="
+# ============ [2/4] 安装 k3s ============
+echo "=== [2/4] 安装 k3s server ==="
 
 INSTALL_CMD="curl -sfL https://get.k3s.io | sh -s - server ${K3S_FLAGS[*]}"
 
@@ -66,24 +85,72 @@ if [[ -n "${K3S_VERSION}" ]]; then
 fi
 
 eval "${INSTALL_CMD}"
+INSTALL_EXIT=$?
 
-# ============ 等待节点就绪 ============
-echo "=== [2/3] 等待节点就绪 ==="
+if [ $INSTALL_EXIT -ne 0 ]; then
+  echo ""
+  echo "=========================================="
+  echo " ✗ k3s 安装失败 (exit code: ${INSTALL_EXIT})"
+  echo "=========================================="
+  echo ""
+  echo "--- k3s 服务日志（最近 50 行）---"
+  journalctl -u k3s.service --no-pager -n 50 2>/dev/null || echo "(无法读取日志)"
+  echo ""
+  echo "--- systemd 服务状态 ---"
+  systemctl status k3s.service --no-pager 2>/dev/null || true
+  exit $INSTALL_EXIT
+fi
+
+# 确保服务已启动（installer 可能因 "no change detected" 跳过启动）
+if ! systemctl is-active --quiet k3s; then
+  echo "k3s 服务未运行，手动启动..."
+  systemctl start k3s
+  sleep 3
+  if ! systemctl is-active --quiet k3s; then
+    echo ""
+    echo "=========================================="
+    echo " ✗ k3s 服务启动失败"
+    echo "=========================================="
+    echo ""
+    echo "--- k3s 服务日志（最近 50 行）---"
+    journalctl -u k3s.service --no-pager -n 50 2>/dev/null || echo "(无法读取日志)"
+    echo ""
+    echo "--- systemd 服务状态 ---"
+    systemctl status k3s.service --no-pager 2>/dev/null || true
+    exit 1
+  fi
+fi
+
+# ============ [3/4] 等待节点就绪 ============
+echo "=== [3/4] 等待节点就绪 ==="
 
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 for i in $(seq 1 60); do
-  if kubectl get nodes 2>/dev/null | grep -q " Ready"; then
+  if kubectl get nodes 2>/dev/null | grep "${NODE_NAME}" | grep -q " Ready"; then
     echo "节点已就绪"
     kubectl get nodes -o wide
     break
+  fi
+  if [ "$i" -eq 60 ]; then
+    echo "⚠ 节点等待超时（5 分钟），打印诊断信息："
+    echo ""
+    echo "--- kubectl get nodes ---"
+    kubectl get nodes -o wide 2>/dev/null || echo "(kubectl 不可用)"
+    echo ""
+    echo "--- k3s 服务日志（最近 30 行）---"
+    journalctl -u k3s.service --no-pager -n 30 2>/dev/null || true
+    echo ""
+    echo "--- systemd 服务状态 ---"
+    systemctl status k3s.service --no-pager 2>/dev/null || true
+    exit 1
   fi
   echo "  等待节点就绪... (${i}/60)"
   sleep 5
 done
 
-# ============ 输出 token 信息 ============
-echo "=== [3/3] 集群信息 ==="
+# ============ [4/4] 输出 token 信息 ============
+echo "=== [4/4] 集群信息 ==="
 
 NODE_TOKEN_PATH="/var/lib/rancher/k3s/server/node-token"
 if [[ -f "${NODE_TOKEN_PATH}" ]]; then

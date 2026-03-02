@@ -51,6 +51,8 @@ concurrency:
 #   K3S_S3_HOST               — S3 IP（server，multi 可选）
 #   K3S_S4_HOST               — S4 IP（agent，multi 可选）
 #   K3S_S5_HOST               — S5 IP（agent，multi 可选）
+#   K3S_VIP                   — VPC 内网 VIP 地址（可选，如 10.0.0.100）
+#   K3S_VIP_INTERFACE          — VPC 网卡名（可选，默认 eth1）
 #   K3S_EXTRA_SANS            — 额外 TLS SAN（可选，如域名）
 #   K3S_VERSION               — 指定 k3s 版本（可选）
 
@@ -102,6 +104,7 @@ jobs:
           set -euo pipefail
           export K3S_MODE="${{ inputs.mode }}"
           export NODE_IP="${{ vars.K3S_S1_HOST }}"
+          export K3S_VIP="${{ vars.K3S_VIP || '' }}"
           export K3S_EXTRA_SANS="${{ vars.K3S_EXTRA_SANS || '' }}"
           export K3S_VERSION="${{ vars.K3S_VERSION || '' }}"
           chmod +x /opt/ecom/infra/k3s/cluster-setup/01-install-server.sh
@@ -383,6 +386,8 @@ jobs:
               "${{ env.SSH_USER }}@${{ vars.K3S_S1_HOST }}" bash -s <<REMOTE_SCRIPT
             set -euo pipefail
             export K3S_MODE="${{ inputs.mode }}"
+            export K3S_VIP="${{ vars.K3S_VIP || '' }}"
+            export K3S_VIP_INTERFACE="${{ vars.K3S_VIP_INTERFACE || 'eth1' }}"
             export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
             # 多节点模式：解析节点名

@@ -10,10 +10,14 @@
 #
 # 环境变量:
 #   K3S_MODE — single 或 multi（默认 single）
+#   K3S_VIP  — VPC 内网 VIP 地址（可选，如 10.0.0.100，用于 kube-vip）
+#   K3S_VIP_INTERFACE — VPC 网卡名（可选，如 eth1，kube-vip 需要）
 #   多节点模式需要: S1_NODE, S2_NODE, S3_NODE, S4_NODE, S5_NODE
 set -euo pipefail
 
 K3S_MODE="${K3S_MODE:-single}"
+K3S_VIP="${K3S_VIP:-}"
+K3S_VIP_INTERFACE="${K3S_VIP_INTERFACE:-eth1}"
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 # ============ Operator 版本（与 k8s 保持一致） ============
@@ -21,13 +25,15 @@ CNPG_VERSION="1.22.1"
 REDIS_OPERATOR_VERSION="0.18.0"
 INGRESS_NGINX_VERSION="4.9.1"
 CERT_MANAGER_VERSION="v1.14.3"
+KUBE_VIP_VERSION="v0.8.7"
 
 echo "=========================================="
 echo " k3s Operator 安装 (mode=${K3S_MODE})"
+[[ -n "${K3S_VIP}" ]] && echo " VIP=${K3S_VIP} (interface=${K3S_VIP_INTERFACE})"
 echo "=========================================="
 
-# ============ [1/6] 检查集群连通性 ============
-echo "=== [1/6] 检查集群连通性 ==="
+# ============ [1/7] 检查集群连通性 ============
+echo "=== [1/7] 检查集群连通性 ==="
 
 # 优先用 kubectl，降级到 k3s kubectl
 if command -v kubectl &>/dev/null; then
@@ -48,8 +54,8 @@ fi
 echo "集群连通正常"
 ${KUBECTL} get nodes -o wide
 
-# ============ [2/6] 检查/安装 Helm ============
-echo "=== [2/6] 检查/安装 Helm ==="
+# ============ [2/7] 检查/安装 Helm ============
+echo "=== [2/7] 检查/安装 Helm ==="
 
 if ! command -v helm &>/dev/null; then
   echo "Helm 未安装，正在安装..."
@@ -59,8 +65,8 @@ fi
 helm version --short
 echo "Helm 就绪"
 
-# ============ [3/6] 节点标签（仅多节点模式） ============
-echo "=== [3/6] 节点标签 ==="
+# ============ [3/7] 节点标签（仅多节点模式） ============
+echo "=== [3/7] 节点标签 ==="
 
 if [[ "${K3S_MODE}" == "multi" ]]; then
   S1_NODE="${S1_NODE:?多节点模式请设置 S1_NODE}"
@@ -88,8 +94,107 @@ else
   echo "单节点模式：跳过节点标签设置（所有 Pod 调度到同一节点）"
 fi
 
-# ============ [4/6] 验证 local-path-provisioner（k3s 内置） ============
-echo "=== [4/6] 验证 StorageClass ==="
+# ============ [4/7] 安装 kube-vip（VPC VIP 高可用） ============
+echo "=== [4/7] 安装 kube-vip ==="
+
+if [[ -n "${K3S_VIP}" ]]; then
+  echo "安装 kube-vip ${KUBE_VIP_VERSION}（VIP=${K3S_VIP}, interface=${K3S_VIP_INTERFACE}）..."
+
+  # 安装 RBAC
+  ${KUBECTL} apply -f https://kube-vip.io/manifests/rbac.yaml
+
+  # 创建 kube-vip DaemonSet（仅运行在 control-plane 节点）
+  cat <<KVEOF | ${KUBECTL} apply -f -
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-vip-ds
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: kube-vip-ds
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kube-vip-ds
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kube-vip-ds
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/master
+                operator: Exists
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: Exists
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
+        operator: Exists
+      containers:
+      - name: kube-vip
+        image: ghcr.io/kube-vip/kube-vip:${KUBE_VIP_VERSION}
+        args:
+        - manager
+        env:
+        - name: vip_arp
+          value: "true"
+        - name: port
+          value: "6443"
+        - name: vip_interface
+          value: "${K3S_VIP_INTERFACE}"
+        - name: vip_address
+          value: "${K3S_VIP}"
+        - name: cp_enable
+          value: "true"
+        - name: cp_namespace
+          value: kube-system
+        - name: svc_enable
+          value: "true"
+        - name: svc_leasename
+          value: plndr-svcs-lock
+        - name: vip_leaderelection
+          value: "true"
+        - name: vip_leasename
+          value: plndr-cp-lock
+        - name: vip_leaseduration
+          value: "5"
+        - name: vip_renewdeadline
+          value: "3"
+        - name: vip_retryperiod
+          value: "1"
+        - name: address
+          value: "${K3S_VIP}"
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+      hostNetwork: true
+      serviceAccountName: kube-vip
+KVEOF
+
+  echo "等待 kube-vip 就绪..."
+  ${KUBECTL} wait --for=condition=Ready --timeout=60s \
+    pod -l app.kubernetes.io/name=kube-vip-ds -n kube-system || {
+    echo "警告: kube-vip 尚未就绪，请手动检查:"
+    echo "  ${KUBECTL} get pods -n kube-system -l app.kubernetes.io/name=kube-vip-ds"
+    echo "  ${KUBECTL} describe pods -n kube-system -l app.kubernetes.io/name=kube-vip-ds"
+  }
+
+  echo "kube-vip 已安装（VIP=${K3S_VIP}）"
+else
+  echo "未设置 K3S_VIP，跳过 kube-vip 安装"
+  echo "  如需 VIP 高可用，请设置环境变量 K3S_VIP 和 K3S_VIP_INTERFACE"
+fi
+
+# ============ [5/7] 验证 local-path-provisioner（k3s 内置） ============
+echo "=== [5/7] 验证 StorageClass ==="
 
 if ${KUBECTL} get storageclass local-path &>/dev/null; then
   echo "local-path StorageClass 已存在（k3s 内置）"
@@ -106,8 +211,8 @@ ${KUBECTL} patch storageclass local-path \
 echo "StorageClass 就绪"
 ${KUBECTL} get storageclass
 
-# ============ [5/6] 安装 CloudNativePG + Redis Operator ============
-echo "=== [5/6] 安装 CloudNativePG + Redis Operator ==="
+# ============ [6/7] 安装 CloudNativePG + Redis Operator ============
+echo "=== [6/7] 安装 CloudNativePG + Redis Operator ==="
 
 # CloudNativePG
 echo "安装 CloudNativePG Operator v${CNPG_VERSION}..."
@@ -139,8 +244,8 @@ helm upgrade --install redis-operator ot-helm/redis-operator \
 
 echo "CloudNativePG + Redis Operator 已安装"
 
-# ============ [6/6] 安装 Nginx Ingress Controller + cert-manager ============
-echo "=== [6/6] 安装 Nginx Ingress Controller + cert-manager ==="
+# ============ [7/7] 安装 Nginx Ingress Controller + cert-manager ============
+echo "=== [7/7] 安装 Nginx Ingress Controller + cert-manager ==="
 
 # cert-manager
 echo "安装 cert-manager ${CERT_MANAGER_VERSION}..."

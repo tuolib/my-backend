@@ -13,7 +13,13 @@ set -euo pipefail
 
 K3S_MODE="${K3S_MODE:-single}"
 NODE_IP="${NODE_IP:?请设置 NODE_IP（当前节点 IP）}"
-NODE_NAME="${NODE_NAME:-$(hostname)}"
+# 自动生成唯一节点名：如果未指定 NODE_NAME，用 IP 末两段生成
+if [[ -n "${NODE_NAME:-}" ]]; then
+  : # 用户已指定，保持不变
+else
+  IP_SUFFIX=$(echo "${NODE_IP}" | awk -F. '{print $(NF-1)"-"$NF}')
+  NODE_NAME="server-${IP_SUFFIX}"
+fi
 K3S_VIP="${K3S_VIP:-}"
 K3S_EXTRA_SANS="${K3S_EXTRA_SANS:-}"
 K3S_VERSION="${K3S_VERSION:-}"

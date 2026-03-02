@@ -13,7 +13,13 @@ set -euo pipefail
 K3S_URL="${K3S_URL:?请设置 K3S_URL（首个 server 的 API 地址）}"
 K3S_TOKEN="${K3S_TOKEN:?请设置 K3S_TOKEN（node-token）}"
 NODE_IP="${NODE_IP:?请设置 NODE_IP（当前节点 IP）}"
-NODE_NAME="${NODE_NAME:-$(hostname)}"
+# 自动生成唯一节点名：如果未指定 NODE_NAME，用 IP 末两段生成
+if [[ -n "${NODE_NAME:-}" ]]; then
+  : # 用户已指定，保持不变
+else
+  IP_SUFFIX=$(echo "${NODE_IP}" | awk -F. '{print $(NF-1)"-"$NF}')
+  NODE_NAME="server-${IP_SUFFIX}"
+fi
 K3S_VERSION="${K3S_VERSION:-}"
 
 echo "=========================================="
@@ -140,7 +146,7 @@ echo "=== [3/3] 验证节点 ==="
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 for i in $(seq 1 60); do
-  if kubectl get nodes 2>/dev/null | grep "$(hostname)" | grep -q " Ready"; then
+  if kubectl get nodes 2>/dev/null | grep "${NODE_NAME}" | grep -q " Ready"; then
     echo "当前节点已加入并就绪"
     kubectl get nodes -o wide
     break

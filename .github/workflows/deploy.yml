@@ -363,6 +363,16 @@ jobs:
           echo "Deploying ${RELEASE} to ${PLATFORM} (tag: ${TAG})"
           echo "══════════════════════════════════════════"
 
+          # 清理卡住的 pending 状态 release（上次部署失败残留）
+          STATUS=$(helm status "${RELEASE}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.info.status // empty' || true)
+          if [[ "${STATUS}" == "pending-install" ]]; then
+            echo "检测到 pending-install 状态，删除残留 release..."
+            helm uninstall "${RELEASE}" -n "${NAMESPACE}" --no-hooks || true
+          elif [[ "${STATUS}" == "pending-upgrade" || "${STATUS}" == "pending-rollback" ]]; then
+            echo "检测到 ${STATUS} 状态，回滚到上一个稳定版本..."
+            helm rollback "${RELEASE}" 0 -n "${NAMESPACE}" --no-hooks || true
+          fi
+
           # 根据平台选择 secrets（K8S_ 或 K3S_ 前缀）
           if [[ "${PLATFORM}" == k3s* ]]; then
             PG_PASS="${{ secrets.K3S_POSTGRES_PASSWORD }}"

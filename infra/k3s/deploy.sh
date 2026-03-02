@@ -210,6 +210,16 @@ cmd_deploy() {
     HELM_ARGS+=(--set "services.corsOrigins=${CORS_ORIGINS}")
   fi
 
+  # 清理卡住的 pending 状态 release（上次部署失败残留）
+  STATUS=$(helm status "${RELEASE_NAME}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.info.status // empty' || true)
+  if [[ "${STATUS}" == "pending-install" ]]; then
+    log_warn "检测到 pending-install 状态，删除残留 release..."
+    helm uninstall "${RELEASE_NAME}" -n "${NAMESPACE}" --no-hooks || true
+  elif [[ "${STATUS}" == "pending-upgrade" || "${STATUS}" == "pending-rollback" ]]; then
+    log_warn "检测到 ${STATUS} 状态，回滚到上一个稳定版本..."
+    helm rollback "${RELEASE_NAME}" 0 -n "${NAMESPACE}" --no-hooks || true
+  fi
+
   log_info "部署 Helm Chart (release=${RELEASE_NAME}, tag=${TAG}, mode=${K3S_MODE}, values=$(basename "${VALUES_FILE}"))..."
   helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \

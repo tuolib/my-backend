@@ -215,6 +215,8 @@ cmd_deploy() {
   if [[ "${STATUS}" == "pending-install" ]]; then
     log_warn "检测到 pending-install 状态，删除残留 release..."
     helm uninstall "${RELEASE_NAME}" -n "${NAMESPACE}" --no-hooks || true
+    # uninstall 可能连带删除 namespace，重新创建
+    kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
   elif [[ "${STATUS}" == "pending-upgrade" || "${STATUS}" == "pending-rollback" ]]; then
     log_warn "检测到 ${STATUS} 状态，回滚到上一个稳定版本..."
     helm rollback "${RELEASE_NAME}" 0 -n "${NAMESPACE}" --no-hooks || true

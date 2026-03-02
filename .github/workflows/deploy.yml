@@ -368,6 +368,8 @@ jobs:
           if [[ "${STATUS}" == "pending-install" ]]; then
             echo "检测到 pending-install 状态，删除残留 release..."
             helm uninstall "${RELEASE}" -n "${NAMESPACE}" --no-hooks || true
+            # uninstall 可能连带删除 namespace，重新创建
+            kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
           elif [[ "${STATUS}" == "pending-upgrade" || "${STATUS}" == "pending-rollback" ]]; then
             echo "检测到 ${STATUS} 状态，回滚到上一个稳定版本..."
             helm rollback "${RELEASE}" 0 -n "${NAMESPACE}" --no-hooks || true
@@ -390,6 +392,7 @@ jobs:
 
           helm upgrade --install "${RELEASE}" "${CHART}" \
             --namespace "${NAMESPACE}" \
+            --create-namespace \
             ${{ steps.vars.outputs.values_flag }} \
             --set "global.registry=${REGISTRY}" \
             --set "global.imageTag=${TAG}" \

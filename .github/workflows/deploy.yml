@@ -323,13 +323,16 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Write kubeconfig
+        env:
+          K3S_KC: ${{ secrets.K3S_KUBECONFIG }}
+          K8S_KC: ${{ secrets.K8S_KUBECONFIG }}
         run: |
           mkdir -p "${HOME}/.kube"
           PLATFORM="${{ env.PLATFORM }}"
           if [[ "${PLATFORM}" == k3s* ]]; then
-            echo '${{ secrets.K3S_KUBECONFIG }}' > "${HOME}/.kube/config"
+            printf '%s\n' "$K3S_KC" > "${HOME}/.kube/config"
           else
-            echo '${{ secrets.K8S_KUBECONFIG }}' > "${HOME}/.kube/config"
+            printf '%s\n' "$K8S_KC" > "${HOME}/.kube/config"
           fi
           chmod 600 "${HOME}/.kube/config"
 

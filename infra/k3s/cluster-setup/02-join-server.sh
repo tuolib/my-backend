@@ -110,6 +110,26 @@ if [ $INSTALL_EXIT -ne 0 ]; then
   exit $INSTALL_EXIT
 fi
 
+# 确保服务已启动（installer 可能因 "no change detected" 跳过启动）
+if ! systemctl is-active --quiet k3s; then
+  echo "k3s 服务未运行，手动启动..."
+  systemctl start k3s
+  sleep 3
+  if ! systemctl is-active --quiet k3s; then
+    echo ""
+    echo "=========================================="
+    echo " ✗ k3s 服务启动失败"
+    echo "=========================================="
+    echo ""
+    echo "--- k3s 服务日志（最近 50 行）---"
+    journalctl -u k3s.service --no-pager -n 50 2>/dev/null || echo "(无法读取日志)"
+    echo ""
+    echo "--- systemd 服务状态 ---"
+    systemctl status k3s.service --no-pager 2>/dev/null || true
+    exit 1
+  fi
+fi
+
 # ============ [3/3] 验证节点 ============
 echo "=== [3/3] 验证节点 ==="
 

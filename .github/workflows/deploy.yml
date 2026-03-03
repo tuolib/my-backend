@@ -457,6 +457,20 @@ jobs:
             kubectl -n kube-system rollout status deployment/coredns --timeout=180s || true
 
             if [[ "${PLATFORM}" == k3s* ]]; then
+              # 自动修复 CoreDNS：systemd-resolved (127.0.0.53) 在 Pod 网络内不可达
+              CURRENT_FWD=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -o 'forward \. .*' || true)
+              if echo "${CURRENT_FWD}" | grep -q '/etc/resolv.conf'; then
+                echo "Fixing CoreDNS: replacing /etc/resolv.conf with public DNS (8.8.8.8 1.1.1.1)..."
+                COREFILE=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}')
+                NEW_COREFILE=$(echo "${COREFILE}" | sed 's|forward \. /etc/resolv.conf|forward . 8.8.8.8 1.1.1.1|')
+                kubectl get configmap coredns -n kube-system -o json | \
+                  jq --arg cf "${NEW_COREFILE}" '.data.Corefile = $cf' | \
+                  kubectl apply -f -
+                kubectl rollout restart deployment/coredns -n kube-system
+                kubectl -n kube-system rollout status deployment/coredns --timeout=60s || true
+                echo "CoreDNS patched."
+              fi
+
               echo "Probing in-cluster DNS resolution (kubernetes.default + Let's Encrypt)..."
               DNS_POD="dns-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
               kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true

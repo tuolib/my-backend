@@ -228,6 +228,29 @@ else
   echo "  如需 VIP 高可用，请设置环境变量 K3S_VIP 和 K3S_VIP_INTERFACE"
 fi
 
+# ============ [4.5/7] 修复 CoreDNS 外部域名解析 ============
+echo "=== [4.5/7] 修复 CoreDNS 外部域名解析 ==="
+
+# Ubuntu 22.04 使用 systemd-resolved（127.0.0.53），Pod 网络内不可达
+# 将 CoreDNS 上游 DNS 从 /etc/resolv.conf 改为公共 DNS 服务器
+CURRENT_FORWARD=$(${KUBECTL} get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -o 'forward \. .*' || true)
+echo "当前 CoreDNS forward 配置: ${CURRENT_FORWARD:-未找到}"
+
+if echo "${CURRENT_FORWARD}" | grep -q '/etc/resolv.conf'; then
+  echo "检测到 CoreDNS 使用 /etc/resolv.conf（systemd-resolved 不兼容），修改为公共 DNS..."
+  COREFILE=$(${KUBECTL} get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}')
+  NEW_COREFILE=$(echo "${COREFILE}" | sed 's|forward \. /etc/resolv.conf|forward . 8.8.8.8 1.1.1.1|')
+  ${KUBECTL} get configmap coredns -n kube-system -o json | \
+    jq --arg cf "${NEW_COREFILE}" '.data.Corefile = $cf' | \
+    ${KUBECTL} apply -f -
+  # 重启 CoreDNS 使配置生效
+  ${KUBECTL} rollout restart deployment/coredns -n kube-system
+  ${KUBECTL} rollout status deployment/coredns -n kube-system --timeout=60s
+  echo "CoreDNS 已更新为使用公共 DNS (8.8.8.8, 1.1.1.1)"
+else
+  echo "CoreDNS 未使用 /etc/resolv.conf，跳过修复"
+fi
+
 # ============ [5/7] 验证 local-path-provisioner（k3s 内置） ============
 echo "=== [5/7] 验证 StorageClass ==="
 

@@ -426,6 +426,28 @@ jobs:
             kubectl get clusterissuer 2>/dev/null || true
           }
 
+          check_core_dependencies() {
+            echo "Checking core dependencies..."
+            kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
+
+            if kubectl -n redis-operator-system get deployment redis-operator-redis-operator >/dev/null 2>&1; then
+              kubectl -n redis-operator-system rollout status deployment/redis-operator-redis-operator --timeout=180s || true
+            else
+              echo "::warning::redis-operator deployment not found in redis-operator-system"
+            fi
+
+            if [[ "${PLATFORM}" == k3s* ]]; then
+              if kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
+                kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
+              elif kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
+                kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+              else
+                echo "::error::ingress-nginx controller not found"
+                return 1
+              fi
+            fi
+          }
+
           preflight_cluster() {
             echo "Running cluster preflight checks..."
             kubectl get nodes -o wide
@@ -462,6 +484,18 @@ jobs:
             fi
           }
 
+          start_progress_watcher() {
+            (
+              while true; do
+                echo "---- deploy progress $(date -u +'%Y-%m-%dT%H:%M:%SZ') ----"
+                kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, $2, $3}' || true
+                kubectl get deploy -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, "ready=" $2, "up-to-date=" $3, "available=" $4}' || true
+                sleep 20
+              done
+            ) &
+            WATCHER_PID=$!
+          }
+
           # 清理卡住的 pending 状态 release（上次部署失败残留）
           STATUS=$(helm status "${RELEASE}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.info.status // empty' || true)
           if [[ "${STATUS}" == "pending-install" ]]; then
@@ -489,6 +523,7 @@ jobs:
             INTERNAL="${{ secrets.K8S_INTERNAL_SECRET }}"
           fi
 
+          check_core_dependencies
           preflight_cluster
           wait_ingress_admission
           ensure_ingress_webhook_fail_open
@@ -499,6 +534,7 @@ jobs:
             echo "Helm upgrade attempt ${HELM_ATTEMPT}/${HELM_MAX_RETRIES}"
 
             set +e
+            start_progress_watcher
             HELM_OUTPUT=$(
               helm upgrade --install "${RELEASE}" "${CHART}" \
                 --namespace "${NAMESPACE}" \
@@ -518,6 +554,8 @@ jobs:
                 --timeout 600s 2>&1
             )
             HELM_EXIT=$?
+            kill "${WATCHER_PID}" >/dev/null 2>&1 || true
+            wait "${WATCHER_PID}" 2>/dev/null || true
             set -e
 
             echo "${HELM_OUTPUT}"

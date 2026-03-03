@@ -99,6 +99,26 @@ ensure_ingress_webhook_fail_open() {
   kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true >/dev/null || true
 }
 
+check_core_dependencies() {
+  log_info "检查关键依赖就绪状态..."
+  kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
+
+  if kubectl -n redis-operator-system get deployment redis-operator-redis-operator >/dev/null 2>&1; then
+    kubectl -n redis-operator-system rollout status deployment/redis-operator-redis-operator --timeout=180s || true
+  else
+    log_warn "未发现 redis-operator deployment（redis-operator-system）"
+  fi
+
+  if kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
+    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
+  elif kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
+    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+  else
+    log_error "未发现 ingress-nginx controller"
+    return 1
+  fi
+}
+
 preflight_cluster() {
   log_info "执行集群预检（Node/CoreDNS/DNS）..."
   kubectl get nodes -o wide || true
@@ -299,6 +319,9 @@ cmd_deploy() {
     helm rollback "${RELEASE_NAME}" 0 -n "${NAMESPACE}" --no-hooks || true
   fi
 
+  # preflight 里会运行 dns probe pod，先确保 namespace 存在
+  kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  check_core_dependencies
   preflight_cluster
   wait_ingress_admission
   ensure_ingress_webhook_fail_open

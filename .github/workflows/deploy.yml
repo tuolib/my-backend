@@ -543,6 +543,9 @@ jobs:
           wait_ingress_admission
           ensure_ingress_webhook_fail_open
 
+          # Clean up cert-manager in-flight challenges to avoid Ingress field ownership conflicts with Helm
+          kubectl delete challenge -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
+
           # ── 同步 PG 密码：Secret → PostgreSQL（解决初始 bootstrap 密码漂移） ──
           PG_SECRET_NAME="${RELEASE}-pg-superuser"
           PG_RW_HOST="${RELEASE}-pg-rw"

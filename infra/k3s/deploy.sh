@@ -337,6 +337,9 @@ cmd_deploy() {
   wait_ingress_admission
   ensure_ingress_webhook_fail_open
 
+  # 清理 cert-manager in-flight challenges，避免 Ingress 字段所有权冲突导致 Helm upgrade 失败
+  kubectl delete challenge -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
+
   log_info "部署 Helm Chart (release=${RELEASE_NAME}, tag=${TAG}, mode=${K3S_MODE}, values=$(basename "${VALUES_FILE}"))..."
   if ! helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \

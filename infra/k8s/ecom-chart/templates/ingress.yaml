@@ -13,6 +13,7 @@ metadata:
   annotations:
     {{- if .Values.ingress.tls.enabled }}
     cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.issuer | quote }}
+    acme.cert-manager.io/http01-edit-in-place: "true"
     {{- end }}
     # 安全 Headers（等价于 Caddy 的 header 配置）
     nginx.ingress.kubernetes.io/configuration-snippet: |

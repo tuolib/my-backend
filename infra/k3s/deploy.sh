@@ -104,8 +104,8 @@ check_core_dependencies() {
   log_info "检查关键依赖就绪状态..."
   kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
 
-  if kubectl -n redis-operator-system get deployment redis-operator-redis-operator >/dev/null 2>&1; then
-    kubectl -n redis-operator-system rollout status deployment/redis-operator-redis-operator --timeout=180s || true
+  if kubectl -n redis-operator-system get deployment redis-operator >/dev/null 2>&1; then
+    kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=180s || true
   else
     log_warn "未发现 redis-operator deployment（redis-operator-system）"
   fi

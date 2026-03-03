@@ -306,6 +306,7 @@ NGINX_HELM_ARGS=(
   --set controller.service.enabled=false
   --set controller.ingressClassResource.default=true
   --set controller.admissionWebhooks.enabled=false
+  --set controller.allowSnippetAnnotations=true
   --set 'controller.config.use-forwarded-headers=true'
   --set 'controller.config.compute-full-forwarded-for=true'
   --set 'controller.config.use-proxy-protocol=false'

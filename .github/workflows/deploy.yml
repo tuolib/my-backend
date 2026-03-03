@@ -402,26 +402,10 @@ jobs:
               return 0
             fi
 
-            if ! kubectl get validatingwebhookconfiguration ingress-nginx-admission >/dev/null 2>&1; then
-              echo "::warning::validatingwebhookconfiguration/ingress-nginx-admission not found, skip patch"
-              return 0
-            fi
-
-            echo "Patching ingress-nginx validating webhook to fail-open on k3s..."
-            WEBHOOK_INDEX=$(kubectl get validatingwebhookconfiguration ingress-nginx-admission -o json \
-              | jq -r '.webhooks | map(.name == "validate.nginx.ingress.kubernetes.io") | index(true)')
-
-            if [[ -z "${WEBHOOK_INDEX}" || "${WEBHOOK_INDEX}" == "null" ]]; then
-              echo "::warning::validate.nginx.ingress.kubernetes.io webhook not found, skip patch"
-              return 0
-            fi
-
-            kubectl patch validatingwebhookconfiguration ingress-nginx-admission \
-              --type='json' \
-              -p "[{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/failurePolicy\",\"value\":\"Ignore\"},{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/timeoutSeconds\",\"value\":2}]" >/dev/null
-
-            kubectl get validatingwebhookconfiguration ingress-nginx-admission \
-              -o jsonpath='{range .webhooks[*]}{.name}{" failurePolicy="}{.failurePolicy}{" timeoutSeconds="}{.timeoutSeconds}{"\n"}{end}' || true
+            # 在当前 k3s 网络形态下，apiserver -> ingress admission webhook 不可达会导致所有 Ingress 变更超时
+            # 直接删除该 ValidatingWebhookConfiguration，确保 Helm 部署不被卡住
+            echo "Deleting ingress-nginx admission webhook configuration on k3s..."
+            kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true
           }
 
           # 清理卡住的 pending 状态 release（上次部署失败残留）

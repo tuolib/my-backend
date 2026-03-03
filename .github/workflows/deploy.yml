@@ -458,7 +458,7 @@ jobs:
                 --set "secrets.jwtRefreshSecret=${JWT_REFRESH}" \
                 --set "secrets.internalSecret=${INTERNAL}" \
                 --wait \
-                --timeout 300s 2>&1
+                --timeout 600s 2>&1
             )
             HELM_EXIT=$?
             set -e

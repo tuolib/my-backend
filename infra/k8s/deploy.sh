@@ -15,6 +15,7 @@ RELEASE_NAME="ecom"
 REGISTRY="${REGISTRY:?请设置 REGISTRY 环境变量，如 registry.example.com/ecom}"
 TAG="${TAG:-latest}"
 CORS_ORIGINS="${CORS_ORIGINS:-}"
+REDIS_SERVICE_NAME="${REDIS_SERVICE_NAME:-${RELEASE_NAME}-redis}"
 
 # 颜色
 RED='\033[0;31m'
@@ -197,6 +198,7 @@ cmd_deploy() {
     --create-namespace \
     --set "global.registry=${REGISTRY}" \
     --set "global.imageTag=${TAG}" \
+    --set "redis.serviceName=${REDIS_SERVICE_NAME}" \
     "${HELM_ARGS[@]}" \
     --wait \
     --timeout 300s
@@ -369,6 +371,7 @@ usage() {
   echo "  REGISTRY       (必须) 镜像仓库地址，如 registry.example.com/ecom"
   echo "  TAG            (可选) 镜像标签，默认 latest"
   echo "  CORS_ORIGINS   (可选) 允许的跨域来源，逗号分隔"
+  echo "  REDIS_SERVICE_NAME (可选) Redis Service 名称，默认 <release>-redis"
 }
 
 COMMAND="${1:-}"

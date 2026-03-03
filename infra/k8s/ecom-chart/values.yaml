@@ -53,6 +53,8 @@ postgresql:
 # ============ Redis (OT-Container-Kit Operator) ============
 redis:
   clusterSize: 3
+  # Redis Service 名称（留空时默认使用 "<release>-redis"）
+  serviceName: ""
   image: "redis:7-alpine"
   resources:
     requests:

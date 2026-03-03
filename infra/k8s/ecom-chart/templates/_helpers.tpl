@@ -60,7 +60,11 @@ postgresql://postgres:$(POSTGRES_PASSWORD)@{{ include "ecom.pgRwHost" . }}:5432/
 Redis Primary Service 地址
 */}}
 {{- define "ecom.redisPrimaryHost" -}}
-{{ include "ecom.fullname" . }}-redis-primary
+{{- if .Values.redis.serviceName -}}
+{{ .Values.redis.serviceName }}
+{{- else -}}
+{{ include "ecom.fullname" . }}-redis
+{{- end -}}
 {{- end }}
 
 {{/*

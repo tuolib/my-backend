@@ -515,13 +515,18 @@ jobs:
             JWT_ACCESS="${{ secrets.K3S_JWT_ACCESS_SECRET }}"
             JWT_REFRESH="${{ secrets.K3S_JWT_REFRESH_SECRET }}"
             INTERNAL="${{ secrets.K3S_INTERNAL_SECRET }}"
+            REDIS_SERVICE_NAME="${{ vars.K3S_REDIS_SERVICE_NAME }}"
           else
             PG_PASS="${{ secrets.K8S_POSTGRES_PASSWORD }}"
             REPL_PASS="${{ secrets.K8S_REPLICATION_PASSWORD }}"
             JWT_ACCESS="${{ secrets.K8S_JWT_ACCESS_SECRET }}"
             JWT_REFRESH="${{ secrets.K8S_JWT_REFRESH_SECRET }}"
             INTERNAL="${{ secrets.K8S_INTERNAL_SECRET }}"
+            REDIS_SERVICE_NAME="${{ vars.K8S_REDIS_SERVICE_NAME }}"
           fi
+
+          # 未配置 GitHub Actions Variables 时使用 chart 默认服务名
+          REDIS_SERVICE_NAME="${REDIS_SERVICE_NAME:-ecom-redis}"
 
           check_core_dependencies
           preflight_cluster
@@ -543,6 +548,7 @@ jobs:
                 --set "global.registry=${REGISTRY}" \
                 --set "global.imageTag=${TAG}" \
                 --set "global.imagePullSecrets[0]=ghcr-pull-secret" \
+                --set "redis.serviceName=${REDIS_SERVICE_NAME}" \
                 --set "secrets.postgresPassword=${PG_PASS}" \
                 --set "secrets.replicationPassword=${REPL_PASS}" \
                 --set "secrets.jwtAccessSecret=${JWT_ACCESS}" \

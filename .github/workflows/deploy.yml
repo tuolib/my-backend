@@ -408,10 +408,17 @@ jobs:
             fi
 
             echo "Patching ingress-nginx validating webhook to fail-open on k3s..."
-            kubectl get validatingwebhookconfiguration ingress-nginx-admission -o json \
-              | jq '(.webhooks[] | select(.name=="validate.nginx.ingress.kubernetes.io") | .failurePolicy) = "Ignore"
-                    | (.webhooks[] | select(.name=="validate.nginx.ingress.kubernetes.io") | .timeoutSeconds) = 2' \
-              | kubectl apply -f - >/dev/null
+            WEBHOOK_INDEX=$(kubectl get validatingwebhookconfiguration ingress-nginx-admission -o json \
+              | jq -r '.webhooks | map(.name == "validate.nginx.ingress.kubernetes.io") | index(true)')
+
+            if [[ -z "${WEBHOOK_INDEX}" || "${WEBHOOK_INDEX}" == "null" ]]; then
+              echo "::warning::validate.nginx.ingress.kubernetes.io webhook not found, skip patch"
+              return 0
+            fi
+
+            kubectl patch validatingwebhookconfiguration ingress-nginx-admission \
+              --type='json' \
+              -p "[{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/failurePolicy\",\"value\":\"Ignore\"},{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/timeoutSeconds\",\"value\":2}]" >/dev/null
 
             kubectl get validatingwebhookconfiguration ingress-nginx-admission \
               -o jsonpath='{range .webhooks[*]}{.name}{" failurePolicy="}{.failurePolicy}{" timeoutSeconds="}{.timeoutSeconds}{"\n"}{end}' || true

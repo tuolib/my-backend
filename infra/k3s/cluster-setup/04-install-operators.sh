@@ -322,9 +322,13 @@ helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
 
 # 避免 k3s 下 apiserver 到 ingress admission 偶发超时导致 Ingress 创建失败
 if ${KUBECTL} get validatingwebhookconfiguration ingress-nginx-admission >/dev/null 2>&1; then
-  ${KUBECTL} patch validatingwebhookconfiguration ingress-nginx-admission \
-    --type='merge' \
-    -p '{"webhooks":[{"name":"validate.nginx.ingress.kubernetes.io","failurePolicy":"Ignore","timeoutSeconds":2}]}' >/dev/null || true
+  WEBHOOK_INDEX=$(${KUBECTL} get validatingwebhookconfiguration ingress-nginx-admission -o json \
+    | jq -r '.webhooks | map(.name == "validate.nginx.ingress.kubernetes.io") | index(true)')
+  if [[ -n "${WEBHOOK_INDEX}" && "${WEBHOOK_INDEX}" != "null" ]]; then
+    ${KUBECTL} patch validatingwebhookconfiguration ingress-nginx-admission \
+      --type='json' \
+      -p "[{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/failurePolicy\",\"value\":\"Ignore\"},{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/timeoutSeconds\",\"value\":2}]" >/dev/null || true
+  fi
 fi
 
 echo "Nginx Ingress Controller + cert-manager 已安装"

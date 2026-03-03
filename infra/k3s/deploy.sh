@@ -101,10 +101,16 @@ ensure_ingress_webhook_fail_open() {
   fi
 
   log_info "将 ingress validating webhook 调整为 fail-open..."
-  kubectl get validatingwebhookconfiguration ingress-nginx-admission -o json \
-    | jq '(.webhooks[] | select(.name=="validate.nginx.ingress.kubernetes.io") | .failurePolicy) = "Ignore"
-          | (.webhooks[] | select(.name=="validate.nginx.ingress.kubernetes.io") | .timeoutSeconds) = 2' \
-    | kubectl apply -f - >/dev/null || true
+  WEBHOOK_INDEX=$(kubectl get validatingwebhookconfiguration ingress-nginx-admission -o json \
+    | jq -r '.webhooks | map(.name == "validate.nginx.ingress.kubernetes.io") | index(true)')
+  if [[ -z "${WEBHOOK_INDEX}" || "${WEBHOOK_INDEX}" == "null" ]]; then
+    log_warn "未找到 validate.nginx.ingress.kubernetes.io webhook，跳过 patch"
+    return 0
+  fi
+
+  kubectl patch validatingwebhookconfiguration ingress-nginx-admission \
+    --type='json' \
+    -p "[{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/failurePolicy\",\"value\":\"Ignore\"},{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/timeoutSeconds\",\"value\":2}]" >/dev/null || true
 }
 
 # ============ setup — 初始化命名空间、验证 Operator、创建 Secret ============

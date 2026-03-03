@@ -47,7 +47,6 @@ postgresql:
     random_page_cost: "1.1"
     effective_io_concurrency: "200"
     log_min_duration_statement: "200"
-    hot_standby: "on"
   nodeSelector:
     role: data
 

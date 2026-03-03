@@ -37,11 +37,7 @@ spec:
       random_page_cost: {{ .Values.postgresql.parameters.random_page_cost | quote }}
       effective_io_concurrency: {{ .Values.postgresql.parameters.effective_io_concurrency | quote }}
       log_min_duration_statement: {{ .Values.postgresql.parameters.log_min_duration_statement | quote }}
-      hot_standby: {{ .Values.postgresql.parameters.hot_standby | quote }}
-      # WAL 复制参数
-      wal_level: "replica"
-      max_wal_senders: "5"
-      max_replication_slots: "5"
+      # WAL 复制相关参数由 CloudNativePG 管理，不在此手动覆盖
       # 时区
       timezone: "UTC"
       log_timezone: "UTC"

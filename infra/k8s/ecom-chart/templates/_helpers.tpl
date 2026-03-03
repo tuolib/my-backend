@@ -117,7 +117,10 @@ imagePullSecrets:
       name: {{ include "ecom.secretName" . }}
       key: postgres-password
 - name: DATABASE_URL
-  value: {{ include "ecom.databaseUrl" . }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "ecom.secretName" . }}
+      key: database-url
 - name: REDIS_URL
   value: {{ include "ecom.redisUrl" . }}
 - name: JWT_ACCESS_SECRET

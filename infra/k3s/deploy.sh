@@ -95,22 +95,51 @@ wait_ingress_admission() {
 }
 
 ensure_ingress_webhook_fail_open() {
-  if ! kubectl get validatingwebhookconfiguration ingress-nginx-admission >/dev/null 2>&1; then
-    log_warn "未发现 ingress-nginx-admission webhook 配置，跳过 patch"
-    return 0
-  fi
+  log_info "删除 ingress-nginx admission webhook（避免 k3s 下 webhook 访问超时阻塞发布）..."
+  kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true >/dev/null || true
+}
 
-  log_info "将 ingress validating webhook 调整为 fail-open..."
-  WEBHOOK_INDEX=$(kubectl get validatingwebhookconfiguration ingress-nginx-admission -o json \
-    | jq -r '.webhooks | map(.name == "validate.nginx.ingress.kubernetes.io") | index(true)')
-  if [[ -z "${WEBHOOK_INDEX}" || "${WEBHOOK_INDEX}" == "null" ]]; then
-    log_warn "未找到 validate.nginx.ingress.kubernetes.io webhook，跳过 patch"
-    return 0
-  fi
+preflight_cluster() {
+  log_info "执行集群预检（Node/CoreDNS/DNS）..."
+  kubectl get nodes -o wide || true
+  kubectl wait --for=condition=Ready node --all --timeout=180s || true
+  kubectl -n kube-system rollout status deployment/coredns --timeout=180s || true
 
-  kubectl patch validatingwebhookconfiguration ingress-nginx-admission \
-    --type='json' \
-    -p "[{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/failurePolicy\",\"value\":\"Ignore\"},{\"op\":\"add\",\"path\":\"/webhooks/${WEBHOOK_INDEX}/timeoutSeconds\",\"value\":2}]" >/dev/null || true
+  DNS_POD="dns-probe-$(date +%s)"
+  kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
+  kubectl -n "${NAMESPACE}" run "${DNS_POD}" \
+    --image=busybox:1.36 \
+    --restart=Never \
+    --command -- sh -c 'nslookup kubernetes.default.svc.cluster.local && nslookup acme-v2.api.letsencrypt.org' >/dev/null
+
+  for i in $(seq 1 30); do
+    PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+    if [[ "${PHASE}" == "Succeeded" || "${PHASE}" == "Failed" ]]; then
+      break
+    fi
+    sleep 2
+  done
+
+  kubectl -n "${NAMESPACE}" logs "${DNS_POD}" || true
+  PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+  kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
+
+  if [[ "${PHASE}" != "Succeeded" ]]; then
+    log_warn "检测到集群 DNS 外网解析异常，当前发布自动关闭 ingress TLS（仅本次）"
+    HELM_DYNAMIC_ARGS+=(--set "ingress.tls.enabled=false")
+  fi
+}
+
+dump_debug_state() {
+  echo ""
+  echo -e "${BLUE}=== Debug: Pods ===${NC}"
+  kubectl get pods -n "${NAMESPACE}" -o wide || true
+  echo ""
+  echo -e "${BLUE}=== Debug: Deployments ===${NC}"
+  kubectl get deploy -n "${NAMESPACE}" || true
+  echo ""
+  echo -e "${BLUE}=== Debug: Events (tail 50) ===${NC}"
+  kubectl get events -n "${NAMESPACE}" --sort-by=.lastTimestamp | tail -n 50 || true
 }
 
 # ============ setup — 初始化命名空间、验证 Operator、创建 Secret ============
@@ -245,6 +274,7 @@ cmd_deploy() {
 
   SECRETS_FILE="${SCRIPT_DIR}/.secrets.yaml"
   HELM_ARGS=(-f "${VALUES_FILE}")
+  HELM_DYNAMIC_ARGS=()
 
   if [[ -f "${SECRETS_FILE}" ]]; then
     HELM_ARGS+=(-f "${SECRETS_FILE}")
@@ -269,18 +299,25 @@ cmd_deploy() {
     helm rollback "${RELEASE_NAME}" 0 -n "${NAMESPACE}" --no-hooks || true
   fi
 
+  preflight_cluster
   wait_ingress_admission
   ensure_ingress_webhook_fail_open
 
   log_info "部署 Helm Chart (release=${RELEASE_NAME}, tag=${TAG}, mode=${K3S_MODE}, values=$(basename "${VALUES_FILE}"))..."
-  helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
+  if ! helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \
     --create-namespace \
     --set "global.registry=${REGISTRY}" \
     --set "global.imageTag=${TAG}" \
     "${HELM_ARGS[@]}" \
+    "${HELM_DYNAMIC_ARGS[@]}" \
     --wait \
-    --timeout 300s
+    --wait-for-jobs \
+    --timeout 600s; then
+    log_error "Helm 部署失败，输出诊断信息..."
+    dump_debug_state
+    exit 1
+  fi
 
   log_ok "Helm 部署完成"
   echo ""

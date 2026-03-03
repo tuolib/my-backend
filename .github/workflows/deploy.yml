@@ -358,6 +358,7 @@ jobs:
           RELEASE="ecom"
           CHART="infra/k8s/ecom-chart"
           PLATFORM="${{ env.PLATFORM }}"
+          HELM_EXTRA_ARGS=()
 
           echo "══════════════════════════════════════════"
           echo "Deploying ${RELEASE} to ${PLATFORM} (tag: ${TAG})"
@@ -408,6 +409,59 @@ jobs:
             kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true
           }
 
+          dump_debug_state() {
+            echo "══════════ DEBUG: pods ══════════"
+            kubectl get pods -n "${NAMESPACE}" -o wide || true
+            echo ""
+            echo "══════════ DEBUG: deployments ══════════"
+            kubectl get deploy -n "${NAMESPACE}" || true
+            echo ""
+            echo "══════════ DEBUG: events (tail 50) ══════════"
+            kubectl get events -n "${NAMESPACE}" --sort-by=.lastTimestamp | tail -n 50 || true
+            echo ""
+            echo "══════════ DEBUG: cnpg clusters ══════════"
+            kubectl get cluster -n "${NAMESPACE}" 2>/dev/null || true
+            echo ""
+            echo "══════════ DEBUG: cert-manager ══════════"
+            kubectl get clusterissuer 2>/dev/null || true
+          }
+
+          preflight_cluster() {
+            echo "Running cluster preflight checks..."
+            kubectl get nodes -o wide
+
+            # 节点与 CoreDNS 是 k3s 发布的硬前置条件
+            kubectl wait --for=condition=Ready node --all --timeout=180s || true
+            kubectl -n kube-system rollout status deployment/coredns --timeout=180s || true
+
+            if [[ "${PLATFORM}" == k3s* ]]; then
+              echo "Probing in-cluster DNS resolution (kubernetes.default + Let's Encrypt)..."
+              DNS_POD="dns-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
+              kubectl -n "${NAMESPACE}" run "${DNS_POD}" \
+                --image=busybox:1.36 \
+                --restart=Never \
+                --command -- sh -c 'nslookup kubernetes.default.svc.cluster.local && nslookup acme-v2.api.letsencrypt.org'
+
+              for i in $(seq 1 30); do
+                PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+                if [[ "${PHASE}" == "Succeeded" || "${PHASE}" == "Failed" ]]; then
+                  break
+                fi
+                sleep 2
+              done
+
+              kubectl -n "${NAMESPACE}" logs "${DNS_POD}" || true
+              PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+              kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
+
+              if [[ "${PHASE}" != "Succeeded" ]]; then
+                echo "::warning::Cluster DNS cannot resolve external domains. Force disable ingress TLS for this deploy."
+                HELM_EXTRA_ARGS+=(--set "ingress.tls.enabled=false")
+              fi
+            fi
+          }
+
           # 清理卡住的 pending 状态 release（上次部署失败残留）
           STATUS=$(helm status "${RELEASE}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.info.status // empty' || true)
           if [[ "${STATUS}" == "pending-install" ]]; then
@@ -435,6 +489,7 @@ jobs:
             INTERNAL="${{ secrets.K8S_INTERNAL_SECRET }}"
           fi
 
+          preflight_cluster
           wait_ingress_admission
           ensure_ingress_webhook_fail_open
 
@@ -457,7 +512,9 @@ jobs:
                 --set "secrets.jwtAccessSecret=${JWT_ACCESS}" \
                 --set "secrets.jwtRefreshSecret=${JWT_REFRESH}" \
                 --set "secrets.internalSecret=${INTERNAL}" \
+                "${HELM_EXTRA_ARGS[@]}" \
                 --wait \
+                --wait-for-jobs \
                 --timeout 600s 2>&1
             )
             HELM_EXIT=$?
@@ -481,6 +538,7 @@ jobs:
             fi
 
             echo "::error::Helm deploy failed"
+            dump_debug_state
             exit ${HELM_EXIT}
           done
 

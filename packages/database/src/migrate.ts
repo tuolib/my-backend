@@ -36,6 +36,17 @@ async function getAppliedMigrations(sql: postgres.Sql): Promise<Set<string>> {
   return new Set(rows.map((r) => r.name));
 }
 
+/**
+ * 将 Drizzle 生成的 SQL 文件按 "--> statement-breakpoint" 拆分为独立语句
+ * 避免通过 postgres 库一次发送超大多语句字符串导致兼容性问题
+ */
+function splitStatements(content: string): string[] {
+  return content
+    .split('--> statement-breakpoint')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 export async function migrate(databaseUrl?: string) {
   const url = databaseUrl || process.env.DATABASE_URL;
   if (!url) {
@@ -43,7 +54,11 @@ export async function migrate(databaseUrl?: string) {
     process.exit(1);
   }
 
-  const sql = postgres(url, { max: 1 });
+  // 打印连接信息（隐藏密码）用于调试
+  const safeUrl = url.replace(/\/\/([^:]+):([^@]+)@/, '//$1:***@');
+  console.log(`[migrate] connecting to ${safeUrl}`);
+
+  const sql = postgres(url, { max: 1, connect_timeout: 30 });
 
   try {
     // 1. 创建 PG schema
@@ -52,6 +67,7 @@ export async function migrate(databaseUrl?: string) {
     // 2. 确保迁移追踪表存在
     await ensureMigrationsTable(sql);
     const applied = await getAppliedMigrations(sql);
+    console.log(`[migrate] already applied: ${[...applied].join(', ') || '(none)'}`);
 
     // 3. 执行未应用的迁移
     let files: string[];
@@ -62,12 +78,23 @@ export async function migrate(databaseUrl?: string) {
       return;
     }
 
-    for (const file of files) {
-      if (applied.has(file)) continue;
+    console.log(`[migrate] found ${files.length} migration files: ${files.join(', ')}`);
 
+    for (const file of files) {
+      if (applied.has(file)) {
+        console.log(`[migrate] skip (already applied): ${file}`);
+        continue;
+      }
+
+      console.log(`[migrate] applying: ${file}`);
       const content = await readFile(join(MIGRATIONS_DIR, file), 'utf-8');
+      const statements = splitStatements(content);
+      console.log(`[migrate]   ${statements.length} statements to execute`);
+
       await sql.begin(async (tx) => {
-        await tx.unsafe(content);
+        for (let i = 0; i < statements.length; i++) {
+          await tx.unsafe(statements[i]);
+        }
         await tx.unsafe('INSERT INTO _migrations (name) VALUES ($1)', [file]);
       });
 

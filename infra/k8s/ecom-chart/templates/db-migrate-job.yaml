@@ -14,8 +14,8 @@ metadata:
     # 成功后保留 Job 供查看日志，下次 hook 运行时删除旧的
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
-  backoffLimit: 6
-  activeDeadlineSeconds: 300
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
   template:
     metadata:
       labels:

@@ -100,6 +100,50 @@ ensure_ingress_webhook_fail_open() {
   kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true >/dev/null || true
 }
 
+# 解决 VPS 无 hairpin NAT 问题：集群内 DNS 解析 ingress 域名到节点内网 IP
+# cert-manager self-check 需要从 pod 内访问 http://<domain>，公网 IP 在集群内不可达
+ensure_ingress_dns_hairpin() {
+  local INGRESS_HOST=""
+  INGRESS_HOST=$(helm get values "${RELEASE_NAME}" -n "${NAMESPACE}" -o json 2>/dev/null | jq -r '.ingress.host // empty' || true)
+  if [[ -z "${INGRESS_HOST}" ]]; then
+    # 首次安装时 helm values 还不存在，从 chart 默认值获取
+    INGRESS_HOST=$(grep -A1 '^ingress:' "${CHART_DIR}/values.yaml" 2>/dev/null | grep 'host:' | awk '{print $2}' || true)
+  fi
+  if [[ -z "${INGRESS_HOST}" ]]; then
+    log_warn "无法获取 ingress host，跳过 DNS hairpin 配置"
+    return 0
+  fi
+
+  local NODE_IP=""
+  if [[ "${K3S_MODE}" == "multi" ]]; then
+    NODE_IP=$(kubectl get nodes -l role=ingress -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+  else
+    NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+  fi
+
+  if [[ -z "${NODE_IP}" ]]; then
+    log_warn "无法获取 ingress 节点内网 IP，跳过 DNS hairpin 配置"
+    return 0
+  fi
+
+  log_info "配置 CoreDNS hairpin: ${INGRESS_HOST} → ${NODE_IP}"
+  cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  ingress-hairpin.override: |
+    template IN A ${INGRESS_HOST} {
+      answer "${INGRESS_HOST}. 60 IN A ${NODE_IP}"
+    }
+EOF
+  kubectl -n kube-system rollout restart deployment/coredns
+  kubectl -n kube-system rollout status deployment/coredns --timeout=60s || true
+  log_ok "CoreDNS hairpin DNS 就绪 (${INGRESS_HOST} → ${NODE_IP})"
+}
+
 check_core_dependencies() {
   log_info "检查关键依赖就绪状态..."
   kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
@@ -178,7 +222,7 @@ cmd_setup() {
   fi
 
   # 检查 Redis Operator
-  if kubectl get deployment redis-operator-redis-operator -n redis-operator-system &>/dev/null; then
+  if kubectl get deployment redis-operator -n redis-operator-system &>/dev/null; then
     log_ok "Redis Operator 已就绪"
   else
     log_warn "Redis Operator 可能未安装，请确认 redis-operator-system namespace 中有运行的 Pod"
@@ -333,6 +377,7 @@ cmd_deploy() {
   # preflight 里会运行 dns probe pod，先确保 namespace 存在
   kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   check_core_dependencies
+  ensure_ingress_dns_hairpin
   preflight_cluster
   wait_ingress_admission
   ensure_ingress_webhook_fail_open

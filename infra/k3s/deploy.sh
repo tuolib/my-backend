@@ -124,6 +124,9 @@ ensure_hairpin_nat_fix() {
   POD_CIDR=$(kubectl get nodes -o jsonpath='{.items[0].spec.podCIDR}' 2>/dev/null || echo "10.42.0.0/24")
   CNI_GW=$(echo "${POD_CIDR}" | sed 's|/.*||; s|\.[0-9]*$|.1|')
 
+  # 注意: 不能用 hosts {} 块，Corefile 已有 hosts /etc/coredns/NodeHosts
+  # CoreDNS 不允许同一 server block 中存在两个 hosts 插件实例
+  # 使用 template 插件返回固定 A 记录
   kubectl apply -f - <<HPEOF
 apiVersion: v1
 kind: ConfigMap
@@ -132,10 +135,8 @@ metadata:
   namespace: kube-system
 data:
   hairpin-nat.override: |
-    hosts {
-      ${CNI_GW} ${INGRESS_HOST}
-      ttl 60
-      fallthrough
+    template IN A ${INGRESS_HOST} {
+      answer "${INGRESS_HOST}. 60 IN A ${CNI_GW}"
     }
 HPEOF
 

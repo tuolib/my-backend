@@ -342,7 +342,10 @@ if [[ -n "${INGRESS_HOST}" ]]; then
   echo "  CoreDNS 覆盖: ${INGRESS_HOST} → ${CNI_GW} (CNI 网关)"
 
   # k3s CoreDNS 支持 coredns-custom ConfigMap
-  # Corefile 末尾的 import /etc/coredns/custom/*.override 会自动加载
+  # Corefile 中 import /etc/coredns/custom/*.override 会自动加载
+  # 注意: 不能用 hosts {} 块，因为 Corefile 已有 hosts /etc/coredns/NodeHosts，
+  #       CoreDNS 不允许同一 server block 中存在两个 hosts 插件实例
+  # 使用 template 插件返回固定 A 记录，不与现有 hosts 冲突
   ${KUBECTL} apply -f - <<HPEOF
 apiVersion: v1
 kind: ConfigMap
@@ -351,10 +354,8 @@ metadata:
   namespace: kube-system
 data:
   hairpin-nat.override: |
-    hosts {
-      ${CNI_GW} ${INGRESS_HOST}
-      ttl 60
-      fallthrough
+    template IN A ${INGRESS_HOST} {
+      answer "${INGRESS_HOST}. 60 IN A ${CNI_GW}"
     }
 HPEOF
 

@@ -47,18 +47,43 @@ function splitStatements(content: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-export async function migrate(databaseUrl?: string) {
+/**
+ * 创建数据库连接
+ * 优先使用独立环境变量（PGHOST/PGPASSWORD 等），避免 URL 编码问题
+ * 回退到 DATABASE_URL
+ */
+function createConnection(databaseUrl?: string): postgres.Sql {
+  const pgHost = process.env.PGHOST;
+  const pgPassword = process.env.PGPASSWORD;
+
+  if (pgHost && pgPassword) {
+    console.log(
+      `[migrate] connecting via PG env vars: ${pgHost}:${process.env.PGPORT || 5432}/${process.env.PGDATABASE || 'ecommerce'}`
+    );
+    return postgres({
+      host: pgHost,
+      port: parseInt(process.env.PGPORT || '5432'),
+      database: process.env.PGDATABASE || 'ecommerce',
+      username: process.env.PGUSER || 'postgres',
+      password: pgPassword,
+      max: 1,
+      connect_timeout: 30,
+    });
+  }
+
   const url = databaseUrl || process.env.DATABASE_URL;
   if (!url) {
-    console.error('[migrate] DATABASE_URL is required');
+    console.error('[migrate] DATABASE_URL or PGHOST+PGPASSWORD is required');
     process.exit(1);
   }
 
-  // 打印连接信息（隐藏密码）用于调试
   const safeUrl = url.replace(/\/\/([^:]+):([^@]+)@/, '//$1:***@');
-  console.log(`[migrate] connecting to ${safeUrl}`);
+  console.log(`[migrate] connecting via DATABASE_URL: ${safeUrl}`);
+  return postgres(url, { max: 1, connect_timeout: 30 });
+}
 
-  const sql = postgres(url, { max: 1, connect_timeout: 30 });
+export async function migrate(databaseUrl?: string) {
+  const sql = createConnection(databaseUrl);
 
   try {
     // 1. 创建 PG schema

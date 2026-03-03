@@ -42,26 +42,19 @@ spec:
       containers:
         - name: migrate
           image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.apiGateway.image "tag" .Values.global.imageTag) }}
-          command:
-            - sh
-            - -c
-            - |
-              echo "=== migrate container started ==="
-              echo "NODE_ENV=${NODE_ENV:-unset}"
-              echo "DATABASE_URL set: $([ -n "$DATABASE_URL" ] && echo yes || echo NO)"
-              ls -la packages/database/src/migrate.ts 2>&1 || echo "ERROR: migrate.ts not found"
-              ls packages/database/src/migrations/ 2>&1 || echo "ERROR: migrations dir not found"
-              echo "=== running migration ==="
-              bun run packages/database/src/migrate.ts
-          terminationMessagePolicy: FallbackToLogsOnError
+          command: ["bun", "run", "packages/database/src/migrate.ts"]
           env:
-            - name: POSTGRES_PASSWORD
+            # 直接从 CNPG 超级用户 Secret 读取密码，避免 URL 编码问题
+            - name: PGHOST
+              value: {{ include "ecom.pgRwHost" . }}
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: {{ .Values.postgresql.database }}
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "ecom.secretName" . }}
-                  key: postgres-password
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "ecom.secretName" . }}
-                  key: database-url
+                  name: {{ include "ecom.pgSecretName" . }}
+                  key: password

@@ -546,16 +546,42 @@ jobs:
           # ── 预检：在 Helm hook 之外直接跑迁移，捕获完整错误输出 ──
           echo "══════════ Pre-deploy: testing db-migrate ══════════"
           MIGRATE_IMAGE="${REGISTRY}/ecom-api-gateway:${TAG}"
-          DB_URL="$(kubectl get secret -n "${NAMESPACE}" "${RELEASE}-secrets" -o jsonpath='{.data.database-url}' 2>/dev/null | base64 -d || true)"
-          if [[ -n "${DB_URL}" ]]; then
+          PG_SECRET_NAME="${RELEASE}-pg-superuser"
+          PG_RW_HOST="${RELEASE}-pg-rw"
+          PG_PASS_RAW="$(kubectl get secret -n "${NAMESPACE}" "${PG_SECRET_NAME}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)"
+          if [[ -n "${PG_PASS_RAW}" ]]; then
             kubectl delete pod -n "${NAMESPACE}" migrate-debug --ignore-not-found=true >/dev/null 2>&1 || true
-            kubectl run migrate-debug -n "${NAMESPACE}" \
-              --image="${MIGRATE_IMAGE}" \
-              --restart=Never \
-              --override-type=strategic \
-              --overrides='{"spec":{"nodeSelector":{"role":"app"},"imagePullSecrets":[{"name":"ghcr-pull-secret"}]}}' \
-              --env="DATABASE_URL=${DB_URL}" \
-              --command -- bun run packages/database/src/migrate.ts
+            cat <<EOPOD | kubectl apply -f -
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: migrate-debug
+            namespace: ${NAMESPACE}
+          spec:
+            restartPolicy: Never
+            nodeSelector:
+              role: app
+            imagePullSecrets:
+              - name: ghcr-pull-secret
+            containers:
+              - name: migrate
+                image: ${MIGRATE_IMAGE}
+                command: ["bun", "run", "packages/database/src/migrate.ts"]
+                env:
+                  - name: PGHOST
+                    value: "${PG_RW_HOST}"
+                  - name: PGPORT
+                    value: "5432"
+                  - name: PGDATABASE
+                    value: "ecommerce"
+                  - name: PGUSER
+                    value: "postgres"
+                  - name: PGPASSWORD
+                    valueFrom:
+                      secretKeyRef:
+                        name: ${PG_SECRET_NAME}
+                        key: password
+          EOPOD
 
             # 等待 Pod 结束（最多 120 秒）
             if kubectl wait -n "${NAMESPACE}" pod/migrate-debug --for=condition=Ready --timeout=5s 2>/dev/null; then
@@ -578,7 +604,7 @@ jobs:
               exit 1
             fi
           else
-            echo "::warning::Secret ${RELEASE}-secrets not found, skipping pre-deploy migration test (first install?)"
+            echo "::warning::Secret ${PG_SECRET_NAME} not found, skipping pre-deploy migration test (first install?)"
           fi
 
           HELM_MAX_RETRIES=3

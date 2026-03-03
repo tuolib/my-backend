@@ -591,6 +591,14 @@ jobs:
               fi
             fi
 
+            if echo "${HELM_OUTPUT}" | grep -q 'post-upgrade hooks failed: resource Job/ecom/ecom-db-migrate'; then
+              echo "::warning::db-migrate hook failed, collecting diagnostics..."
+              kubectl get job -n "${NAMESPACE}" ecom-db-migrate -o wide || true
+              kubectl describe job -n "${NAMESPACE}" ecom-db-migrate || true
+              kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=db-migrate -o wide || true
+              kubectl logs -n "${NAMESPACE}" job/ecom-db-migrate --tail=300 || true
+            fi
+
             echo "::error::Helm deploy failed"
             dump_debug_state
             exit ${HELM_EXIT}

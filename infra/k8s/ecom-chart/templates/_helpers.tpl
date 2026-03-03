@@ -139,26 +139,27 @@ imagePullSecrets:
 
 {{/*
 通用健康检查探针
-用法: {{ include "ecom.probes" (dict "port" 3000) }}
+用法: {{ include "ecom.probes" (dict "port" 3000 "path" "/health/live") }}
 */}}
 {{- define "ecom.probes" -}}
+{{- $path := default "/health" .path -}}
 startupProbe:
   httpGet:
-    path: /health
+    path: {{ $path }}
     port: {{ .port }}
   initialDelaySeconds: 5
   periodSeconds: 5
   failureThreshold: 12
 livenessProbe:
   httpGet:
-    path: /health
+    path: {{ $path }}
     port: {{ .port }}
   periodSeconds: 15
   timeoutSeconds: 5
   failureThreshold: 3
 readinessProbe:
   httpGet:
-    path: /health
+    path: {{ $path }}
     port: {{ .port }}
   periodSeconds: 10
   timeoutSeconds: 5

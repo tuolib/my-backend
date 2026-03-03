@@ -58,4 +58,4 @@ spec:
             limits:
               cpu: {{ .Values.apiGateway.resources.limits.cpu | quote }}
               memory: {{ .Values.apiGateway.resources.limits.memory | quote }}
-          {{- include "ecom.probes" (dict "port" .Values.apiGateway.port) | nindent 10 }}
+          {{- include "ecom.probes" (dict "port" .Values.apiGateway.port "path" "/health/live") | nindent 10 }}

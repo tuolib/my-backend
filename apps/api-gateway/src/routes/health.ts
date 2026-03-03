@@ -18,6 +18,11 @@ interface HealthChecks {
   orderService: string;
 }
 
+/** 轻量存活检查：仅确认进程可响应，不依赖外部组件 */
+export function liveCheck(c: Context<AppEnv>) {
+  return c.json({ status: 'ok', service: 'api-gateway' }, 200);
+}
+
 /** 检查单个下游服务健康状态 */
 async function checkService(url: string): Promise<string> {
   try {

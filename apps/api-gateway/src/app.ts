@@ -17,7 +17,7 @@ import { authGate } from './middleware/auth-gate';
 import { idempotentGate } from './middleware/idempotent-gate';
 import { blockInternal } from './middleware/block-internal';
 import { findTarget } from './routes/registry';
-import { healthCheck } from './routes/health';
+import { healthCheck, liveCheck } from './routes/health';
 import { forwardRequest } from './proxy/forward';
 
 const app = new Hono<AppEnv>();
@@ -33,6 +33,7 @@ app.use('*', idempotentGate());     // 7. 幂等（仅特定路由）
 app.onError(errorHandler);          // 8. 全局错误处理
 
 // ── 健康检查 ──
+app.get('/health/live', liveCheck);
 app.get('/health', healthCheck);
 app.post('/health', healthCheck);
 

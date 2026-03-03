@@ -42,7 +42,18 @@ spec:
       containers:
         - name: migrate
           image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.apiGateway.image "tag" .Values.global.imageTag) }}
-          command: ["bun", "run", "packages/database/src/migrate.ts"]
+          command:
+            - sh
+            - -c
+            - |
+              echo "=== migrate container started ==="
+              echo "NODE_ENV=${NODE_ENV:-unset}"
+              echo "DATABASE_URL set: $([ -n "$DATABASE_URL" ] && echo yes || echo NO)"
+              ls -la packages/database/src/migrate.ts 2>&1 || echo "ERROR: migrate.ts not found"
+              ls packages/database/src/migrations/ 2>&1 || echo "ERROR: migrations dir not found"
+              echo "=== running migration ==="
+              bun run packages/database/src/migrate.ts
+          terminationMessagePolicy: FallbackToLogsOnError
           env:
             - name: POSTGRES_PASSWORD
               valueFrom:

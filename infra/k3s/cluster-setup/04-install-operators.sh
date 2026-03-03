@@ -324,6 +324,49 @@ helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
 
 echo "Nginx Ingress Controller + cert-manager 已安装"
 
+# ============ Hairpin NAT 修复（VPS 环境 cert-manager HTTP-01） ============
+# 问题: cert-manager self-check 从集群内部解析域名 → 得到公网 IP → 连接超时
+# 原因: Vultr 等 VPS 不支持 hairpin NAT（pod → 公网 IP → 同节点回环不通）
+# 修复: 通过 CoreDNS hosts 覆盖，将 ingress 域名解析到 CNI 网关 IP
+#       nginx-ingress 以 hostNetwork 运行，监听节点所有接口（含 cni0）
+
+INGRESS_HOST="${INGRESS_HOST:-}"
+
+if [[ -n "${INGRESS_HOST}" ]]; then
+  echo "配置 Hairpin NAT 修复: ${INGRESS_HOST}..."
+
+  # 自动检测 CNI 网关 IP（取第一个节点的 podCIDR 的 .1 地址）
+  POD_CIDR=$(${KUBECTL} get nodes -o jsonpath='{.items[0].spec.podCIDR}' 2>/dev/null || echo "10.42.0.0/24")
+  CNI_GW=$(echo "${POD_CIDR}" | sed 's|/.*||; s|\.[0-9]*$|.1|')
+
+  echo "  CoreDNS 覆盖: ${INGRESS_HOST} → ${CNI_GW} (CNI 网关)"
+
+  # k3s CoreDNS 支持 coredns-custom ConfigMap
+  # Corefile 末尾的 import /etc/coredns/custom/*.override 会自动加载
+  ${KUBECTL} apply -f - <<HPEOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  hairpin-nat.override: |
+    hosts {
+      ${CNI_GW} ${INGRESS_HOST}
+      ttl 60
+      fallthrough
+    }
+HPEOF
+
+  ${KUBECTL} -n kube-system rollout restart deployment coredns
+  ${KUBECTL} -n kube-system rollout status deployment coredns --timeout=60s || true
+
+  echo "Hairpin NAT 修复已应用"
+else
+  echo "提示: 如需 HTTPS 证书自动签发（Let's Encrypt），请设置 INGRESS_HOST 环境变量"
+  echo "  例: INGRESS_HOST=api.find345.site ./04-install-operators.sh"
+fi
+
 echo ""
 echo "=========================================="
 echo " 所有 Operator 和组件安装完成！"

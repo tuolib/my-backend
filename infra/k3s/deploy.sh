@@ -100,6 +100,51 @@ ensure_ingress_webhook_fail_open() {
   kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true >/dev/null || true
 }
 
+ensure_hairpin_nat_fix() {
+  # Hairpin NAT 修复: VPS 不支持 pod → 公网 IP → 同节点回环
+  # 让 CoreDNS 将 ingress 域名解析到 CNI 网关 IP，确保 cert-manager self-check 可达
+  local INGRESS_HOST
+  INGRESS_HOST=$(awk '/^ingress:/{f=1} f && /host:/{print $2; exit}' "${CHART_DIR}/values.yaml" 2>/dev/null | tr -d '"' || true)
+
+  if [[ -z "${INGRESS_HOST}" ]]; then
+    return 0
+  fi
+
+  # 检查是否已配置（避免每次部署都 restart CoreDNS）
+  local EXISTING
+  EXISTING=$(kubectl -n kube-system get configmap coredns-custom -o jsonpath='{.data.hairpin-nat\.override}' 2>/dev/null || true)
+  if [[ "${EXISTING}" == *"${INGRESS_HOST}"* ]]; then
+    log_info "Hairpin NAT 修复已就绪: ${INGRESS_HOST}"
+    return 0
+  fi
+
+  log_info "配置 Hairpin NAT 修复: ${INGRESS_HOST}..."
+
+  local POD_CIDR CNI_GW
+  POD_CIDR=$(kubectl get nodes -o jsonpath='{.items[0].spec.podCIDR}' 2>/dev/null || echo "10.42.0.0/24")
+  CNI_GW=$(echo "${POD_CIDR}" | sed 's|/.*||; s|\.[0-9]*$|.1|')
+
+  kubectl apply -f - <<HPEOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  hairpin-nat.override: |
+    hosts {
+      ${CNI_GW} ${INGRESS_HOST}
+      ttl 60
+      fallthrough
+    }
+HPEOF
+
+  kubectl -n kube-system rollout restart deployment coredns
+  kubectl -n kube-system rollout status deployment coredns --timeout=60s || true
+
+  log_ok "Hairpin NAT 修复已应用: ${INGRESS_HOST} → ${CNI_GW}"
+}
+
 check_core_dependencies() {
   log_info "检查关键依赖就绪状态..."
   kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
@@ -333,6 +378,7 @@ cmd_deploy() {
   # preflight 里会运行 dns probe pod，先确保 namespace 存在
   kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   check_core_dependencies
+  ensure_hairpin_nat_fix
   preflight_cluster
   wait_ingress_admission
   ensure_ingress_webhook_fail_open

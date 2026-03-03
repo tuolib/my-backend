@@ -91,12 +91,23 @@ fi
 # ============ [2/3] 加入集群 ============
 echo "=== [2/3] 加入集群 ==="
 
+# 修复 systemd-resolved 兼容问题（同 01-install-server.sh）
+mkdir -p /etc/rancher/k3s
+if [[ ! -f /etc/rancher/k3s/resolv.conf ]]; then
+  cat > /etc/rancher/k3s/resolv.conf <<DNSEOF
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+DNSEOF
+  echo "已创建 /etc/rancher/k3s/resolv.conf（公共 DNS）"
+fi
+
 INSTALL_ENV="K3S_URL=${K3S_URL} K3S_TOKEN=${K3S_TOKEN}"
 K3S_FLAGS=(
   "--write-kubeconfig-mode" "644"
   "--node-name" "${NODE_NAME}"
   "--node-ip" "${NODE_IP}"
   "--tls-san" "${NODE_IP}"
+  "--resolv-conf" "/etc/rancher/k3s/resolv.conf"
 )
 
 if [[ -n "${K3S_VERSION}" ]]; then

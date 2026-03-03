@@ -458,18 +458,38 @@ jobs:
 
             if [[ "${PLATFORM}" == k3s* ]]; then
               # 自动修复 CoreDNS：systemd-resolved (127.0.0.53) 在 Pod 网络内不可达
-              CURRENT_FWD=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -o 'forward \. .*' || true)
-              if echo "${CURRENT_FWD}" | grep -q '/etc/resolv.conf'; then
-                echo "Fixing CoreDNS: replacing /etc/resolv.conf with public DNS (8.8.8.8 1.1.1.1)..."
-                COREFILE=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}')
-                NEW_COREFILE=$(echo "${COREFILE}" | sed 's|forward \. /etc/resolv.conf|forward . 8.8.8.8 1.1.1.1|')
-                kubectl get configmap coredns -n kube-system -o json | \
-                  jq --arg cf "${NEW_COREFILE}" '.data.Corefile = $cf' | \
-                  kubectl apply -f -
-                kubectl rollout restart deployment/coredns -n kube-system
-                kubectl -n kube-system rollout status deployment/coredns --timeout=60s || true
+              # 主修复在节点安装阶段通过 --resolv-conf 完成；此处作为补充 patch configmap
+              fix_coredns_forward() {
+                local CUR_FWD
+                CUR_FWD=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || true)
+                if echo "${CUR_FWD}" | grep -q '/etc/resolv.conf'; then
+                  echo "Fixing CoreDNS: replacing /etc/resolv.conf with public DNS (8.8.8.8 1.1.1.1)..."
+                  local COREFILE NEW_COREFILE
+                  COREFILE=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}')
+                  NEW_COREFILE=$(echo "${COREFILE}" | sed 's|forward \. /etc/resolv\.conf|forward . 8.8.8.8 1.1.1.1|')
+                  kubectl get configmap coredns -n kube-system -o json | \
+                    jq --arg cf "${NEW_COREFILE}" '.data.Corefile = $cf' | \
+                    kubectl apply -f -
+                  kubectl rollout restart deployment/coredns -n kube-system
+                  kubectl -n kube-system rollout status deployment/coredns --timeout=60s || true
+                  sleep 5
+                  return 0
+                fi
+                return 1
+              }
+
+              if fix_coredns_forward; then
+                # 验证 k3s addon controller 是否回滚了 configmap
+                VERIFY_FWD=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || true)
+                if echo "${VERIFY_FWD}" | grep -q '/etc/resolv.conf'; then
+                  echo "::warning::k3s reverted CoreDNS configmap, retrying patch..."
+                  fix_coredns_forward || true
+                fi
                 echo "CoreDNS patched."
               fi
+
+              # 诊断：输出 CoreDNS Pod 实际使用的 Corefile forward 行
+              echo "CoreDNS Corefile forward: $(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || echo 'N/A')"
 
               echo "Probing in-cluster DNS resolution (kubernetes.default + Let's Encrypt)..."
               DNS_POD="dns-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"

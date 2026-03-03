@@ -120,12 +120,44 @@ check_core_dependencies() {
   fi
 }
 
+fix_coredns_forward() {
+  local CUR_FWD
+  CUR_FWD=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || true)
+  if echo "${CUR_FWD}" | grep -q '/etc/resolv.conf'; then
+    log_info "检测到 CoreDNS 使用 /etc/resolv.conf（systemd-resolved 不兼容），修改为公共 DNS..."
+    local COREFILE NEW_COREFILE
+    COREFILE=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}')
+    NEW_COREFILE=$(echo "${COREFILE}" | sed 's|forward \. /etc/resolv\.conf|forward . 8.8.8.8 1.1.1.1|')
+    kubectl get configmap coredns -n kube-system -o json | \
+      jq --arg cf "${NEW_COREFILE}" '.data.Corefile = $cf' | \
+      kubectl apply -f -
+    kubectl rollout restart deployment/coredns -n kube-system
+    kubectl -n kube-system rollout status deployment/coredns --timeout=60s || true
+    sleep 5
+    return 0
+  fi
+  return 1
+}
+
 preflight_cluster() {
   log_info "执行集群预检（Node/CoreDNS/DNS）..."
   kubectl get nodes -o wide || true
   kubectl wait --for=condition=Ready node --all --timeout=180s || true
   kubectl -n kube-system rollout status deployment/coredns --timeout=180s || true
 
+  # 自动修复 CoreDNS：systemd-resolved (127.0.0.53) 在 Pod 网络内不可达
+  if fix_coredns_forward; then
+    VERIFY_FWD=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || true)
+    if echo "${VERIFY_FWD}" | grep -q '/etc/resolv.conf'; then
+      log_warn "k3s 回滚了 CoreDNS 配置，重新 patch..."
+      fix_coredns_forward || true
+    fi
+    log_ok "CoreDNS 已更新为使用公共 DNS (8.8.8.8, 1.1.1.1)"
+  fi
+
+  log_info "CoreDNS forward: $(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || echo 'N/A')"
+
+  log_info "探测集群 DNS 解析（内部 + 外部）..."
   DNS_POD="dns-probe-$(date +%s)"
   kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
   kubectl -n "${NAMESPACE}" run "${DNS_POD}" \

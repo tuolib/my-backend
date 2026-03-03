@@ -369,8 +369,15 @@ jobs:
               return 0
             fi
 
-            echo "Waiting for ingress-nginx controller deployment..."
-            kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+            if kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
+              echo "Waiting for ingress-nginx controller deployment..."
+              kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+            elif kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
+              echo "Waiting for ingress-nginx controller daemonset..."
+              kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
+            else
+              echo "::warning::ingress-nginx-controller not found as Deployment/DaemonSet in namespace ingress-nginx"
+            fi
 
             echo "Waiting for ingress-nginx admission endpoints..."
             for i in $(seq 1 36); do

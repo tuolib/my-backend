@@ -528,6 +528,16 @@ jobs:
           # 未配置 GitHub Actions Variables 时使用 chart 默认服务名
           REDIS_SERVICE_NAME="${REDIS_SERVICE_NAME:-ecom-redis}"
 
+          # 若集群已有 CNPG 超级用户密码，优先使用其值，避免与仓库 Secret 漂移
+          PG_SECRET_NAME="${RELEASE}-pg-superuser"
+          if kubectl -n "${NAMESPACE}" get secret "${PG_SECRET_NAME}" >/dev/null 2>&1; then
+            PG_PASS_CLUSTER="$(kubectl -n "${NAMESPACE}" get secret "${PG_SECRET_NAME}" -o jsonpath='{.data.password}' | base64 -d)"
+            if [[ -n "${PG_PASS_CLUSTER}" ]]; then
+              PG_PASS="${PG_PASS_CLUSTER}"
+              echo "Using PostgreSQL password from cluster secret: ${PG_SECRET_NAME}"
+            fi
+          fi
+
           check_core_dependencies
           preflight_cluster
           wait_ingress_admission
@@ -549,11 +559,11 @@ jobs:
                 --set "global.imageTag=${TAG}" \
                 --set "global.imagePullSecrets[0]=ghcr-pull-secret" \
                 --set "redis.serviceName=${REDIS_SERVICE_NAME}" \
-                --set "secrets.postgresPassword=${PG_PASS}" \
-                --set "secrets.replicationPassword=${REPL_PASS}" \
-                --set "secrets.jwtAccessSecret=${JWT_ACCESS}" \
-                --set "secrets.jwtRefreshSecret=${JWT_REFRESH}" \
-                --set "secrets.internalSecret=${INTERNAL}" \
+                --set-string "secrets.postgresPassword=${PG_PASS}" \
+                --set-string "secrets.replicationPassword=${REPL_PASS}" \
+                --set-string "secrets.jwtAccessSecret=${JWT_ACCESS}" \
+                --set-string "secrets.jwtRefreshSecret=${JWT_REFRESH}" \
+                --set-string "secrets.internalSecret=${INTERNAL}" \
                 "${HELM_EXTRA_ARGS[@]}" \
                 --wait \
                 --wait-for-jobs \

@@ -192,6 +192,16 @@ cmd_deploy() {
     HELM_ARGS+=(--set "services.corsOrigins=${CORS_ORIGINS}")
   fi
 
+  # 若集群已有 CNPG 超级用户密码，优先使用其值覆盖 Helm，避免 CI/本地密码漂移导致鉴权失败
+  PG_SECRET_NAME="${RELEASE_NAME}-pg-superuser"
+  if kubectl -n "${NAMESPACE}" get secret "${PG_SECRET_NAME}" >/dev/null 2>&1; then
+    PG_PASS_CLUSTER="$(kubectl -n "${NAMESPACE}" get secret "${PG_SECRET_NAME}" -o jsonpath='{.data.password}' | base64 -d)"
+    if [[ -n "${PG_PASS_CLUSTER}" ]]; then
+      HELM_ARGS+=(--set-string "secrets.postgresPassword=${PG_PASS_CLUSTER}")
+      log_info "已从集群 Secret(${PG_SECRET_NAME}) 自动同步 PostgreSQL 密码"
+    fi
+  fi
+
   log_info "部署 Helm Chart (release=${RELEASE_NAME}, tag=${TAG})..."
   helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \
     --namespace "${NAMESPACE}" \

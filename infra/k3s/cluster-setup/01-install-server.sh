@@ -51,19 +51,6 @@ if [ -d /var/lib/rancher/k3s ]; then
 fi
 
 # ============ [1/4] 基础参数 ============
-
-# 修复 systemd-resolved 兼容问题：Ubuntu 22.04 的 /etc/resolv.conf 指向 127.0.0.53，
-# Pod 网络内不可达。创建自定义 resolv.conf 并通过 --resolv-conf 告知 kubelet，
-# 使 CoreDNS 的 "forward . /etc/resolv.conf" 在 Pod 内能正确解析外部域名。
-mkdir -p /etc/rancher/k3s
-if [[ ! -f /etc/rancher/k3s/resolv.conf ]]; then
-  cat > /etc/rancher/k3s/resolv.conf <<DNSEOF
-nameserver 8.8.8.8
-nameserver 1.1.1.1
-DNSEOF
-  echo "已创建 /etc/rancher/k3s/resolv.conf（公共 DNS）"
-fi
-
 K3S_FLAGS=(
   "--disable" "traefik"
   "--disable" "servicelb"
@@ -71,7 +58,6 @@ K3S_FLAGS=(
   "--node-name" "${NODE_NAME}"
   "--node-ip" "${NODE_IP}"
   "--tls-san" "${NODE_IP}"
-  "--resolv-conf" "/etc/rancher/k3s/resolv.conf"
 )
 
 # 追加 VIP 到 TLS SAN（kube-vip 高可用需要）

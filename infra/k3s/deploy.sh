@@ -120,71 +120,18 @@ check_core_dependencies() {
   fi
 }
 
-fix_coredns_forward() {
-  local CUR_FWD
-  CUR_FWD=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || true)
-  if echo "${CUR_FWD}" | grep -q '/etc/resolv.conf'; then
-    log_info "检测到 CoreDNS 使用 /etc/resolv.conf（systemd-resolved 不兼容），修改为公共 DNS..."
-    local COREFILE NEW_COREFILE
-    COREFILE=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}')
-    NEW_COREFILE=$(echo "${COREFILE}" | sed 's|forward \. /etc/resolv\.conf|forward . 8.8.8.8 1.1.1.1|')
-    kubectl get configmap coredns -n kube-system -o json | \
-      jq --arg cf "${NEW_COREFILE}" '.data.Corefile = $cf' | \
-      kubectl apply -f -
-    kubectl rollout restart deployment/coredns -n kube-system
-    kubectl -n kube-system rollout status deployment/coredns --timeout=60s || true
-    sleep 5
-    return 0
-  fi
-  return 1
-}
-
 preflight_cluster() {
   log_info "执行集群预检（Node/CoreDNS/DNS）..."
   kubectl get nodes -o wide || true
   kubectl wait --for=condition=Ready node --all --timeout=180s || true
   kubectl -n kube-system rollout status deployment/coredns --timeout=180s || true
 
-  # 自动修复 CoreDNS：systemd-resolved (127.0.0.53) 在 Pod 网络内不可达
-  if fix_coredns_forward; then
-    VERIFY_FWD=$(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || true)
-    if echo "${VERIFY_FWD}" | grep -q '/etc/resolv.conf'; then
-      log_warn "k3s 回滚了 CoreDNS 配置，重新 patch..."
-      fix_coredns_forward || true
-    fi
-    log_ok "CoreDNS 已更新为使用公共 DNS (8.8.8.8, 1.1.1.1)"
-  fi
-
-  # 诊断：输出完整 Corefile
-  log_info "══════════ CoreDNS Corefile ══════════"
-  kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null || true
-  echo ""
-
-  log_info "探测集群 DNS 解析（内部 + 外部 + 直连上游）..."
   DNS_POD="dns-probe-$(date +%s)"
   kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
   kubectl -n "${NAMESPACE}" run "${DNS_POD}" \
     --image=busybox:1.36 \
     --restart=Never \
-    --command -- sh -c '
-      echo "--- Test 1: cluster internal DNS ---"
-      nslookup kubernetes.default.svc.cluster.local
-      echo ""
-      echo "--- Test 2: external via cluster DNS ---"
-      nslookup acme-v02.api.letsencrypt.org 2>&1 || true
-      echo ""
-      echo "--- Test 3: external direct to 8.8.8.8 (bypass CoreDNS) ---"
-      nslookup acme-v02.api.letsencrypt.org 8.8.8.8 2>&1 || true
-      echo ""
-      echo "--- Test 4: external direct to 1.1.1.1 ---"
-      nslookup acme-v02.api.letsencrypt.org 1.1.1.1 2>&1 || true
-      echo ""
-      echo "--- Pod /etc/resolv.conf ---"
-      cat /etc/resolv.conf
-      echo ""
-      echo "--- Final verdict ---"
-      nslookup acme-v02.api.letsencrypt.org
-    ' >/dev/null
+    --command -- sh -c 'nslookup kubernetes.default.svc.cluster.local && nslookup acme-v02.api.letsencrypt.org' >/dev/null
 
   for i in $(seq 1 30); do
     PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
@@ -199,8 +146,6 @@ preflight_cluster() {
   kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
 
   if [[ "${PHASE}" != "Succeeded" ]]; then
-    log_warn "══════════ CoreDNS logs (last 30) ══════════"
-    kubectl -n kube-system logs -l k8s-app=kube-dns --tail=30 2>/dev/null || true
     log_warn "检测到集群 DNS 外网解析异常，当前发布自动关闭 ingress TLS（仅本次）"
     HELM_DYNAMIC_ARGS+=(--set "ingress.tls.enabled=false")
   fi

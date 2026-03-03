@@ -304,6 +304,7 @@ NGINX_HELM_ARGS=(
   --set controller.dnsPolicy=ClusterFirstWithHostNet
   --set controller.service.enabled=false
   --set controller.ingressClassResource.default=true
+  --set controller.admissionWebhooks.failurePolicy=Ignore
   --set 'controller.config.use-forwarded-headers=true'
   --set 'controller.config.compute-full-forwarded-for=true'
   --set 'controller.config.use-proxy-protocol=false'
@@ -318,6 +319,13 @@ helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   --version "${INGRESS_NGINX_VERSION}" \
   "${NGINX_HELM_ARGS[@]}" \
   --wait --timeout 120s
+
+# 避免 k3s 下 apiserver 到 ingress admission 偶发超时导致 Ingress 创建失败
+if ${KUBECTL} get validatingwebhookconfiguration ingress-nginx-admission >/dev/null 2>&1; then
+  ${KUBECTL} patch validatingwebhookconfiguration ingress-nginx-admission \
+    --type='merge' \
+    -p '{"webhooks":[{"name":"validate.nginx.ingress.kubernetes.io","failurePolicy":"Ignore","timeoutSeconds":2}]}' >/dev/null || true
+fi
 
 echo "Nginx Ingress Controller + cert-manager 已安装"
 

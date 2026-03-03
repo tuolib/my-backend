@@ -408,9 +408,10 @@ jobs:
             fi
 
             echo "Patching ingress-nginx validating webhook to fail-open on k3s..."
-            kubectl patch validatingwebhookconfiguration ingress-nginx-admission \
-              --type='merge' \
-              -p '{"webhooks":[{"name":"validate.nginx.ingress.kubernetes.io","failurePolicy":"Ignore","timeoutSeconds":2}]}' >/dev/null
+            kubectl get validatingwebhookconfiguration ingress-nginx-admission -o json \
+              | jq '(.webhooks[] | select(.name=="validate.nginx.ingress.kubernetes.io") | .failurePolicy) = "Ignore"
+                    | (.webhooks[] | select(.name=="validate.nginx.ingress.kubernetes.io") | .timeoutSeconds) = 2' \
+              | kubectl apply -f - >/dev/null
 
             kubectl get validatingwebhookconfiguration ingress-nginx-admission \
               -o jsonpath='{range .webhooks[*]}{.name}{" failurePolicy="}{.failurePolicy}{" timeoutSeconds="}{.timeoutSeconds}{"\n"}{end}' || true

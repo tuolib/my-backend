@@ -66,6 +66,47 @@ check_helm() {
   fi
 }
 
+wait_ingress_admission() {
+  if [[ "${K3S_MODE}" != "multi" && "${K3S_MODE}" != "single" ]]; then
+    return 0
+  fi
+
+  if kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
+    log_info "等待 ingress-nginx controller deployment 就绪..."
+    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+  elif kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
+    log_info "等待 ingress-nginx controller daemonset 就绪..."
+    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
+  else
+    log_warn "未发现 ingress-nginx-controller（Deployment/DaemonSet）"
+  fi
+
+  log_info "等待 ingress-nginx admission endpoints..."
+  for i in $(seq 1 36); do
+    EP_READY=$(kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)
+    if [[ -n "${EP_READY}" ]]; then
+      log_ok "ingress-nginx admission endpoint 就绪: ${EP_READY}"
+      return 0
+    fi
+    sleep 5
+  done
+
+  log_warn "ingress-nginx admission endpoint 180s 内未就绪"
+}
+
+ensure_ingress_webhook_fail_open() {
+  if ! kubectl get validatingwebhookconfiguration ingress-nginx-admission >/dev/null 2>&1; then
+    log_warn "未发现 ingress-nginx-admission webhook 配置，跳过 patch"
+    return 0
+  fi
+
+  log_info "将 ingress validating webhook 调整为 fail-open..."
+  kubectl get validatingwebhookconfiguration ingress-nginx-admission -o json \
+    | jq '(.webhooks[] | select(.name=="validate.nginx.ingress.kubernetes.io") | .failurePolicy) = "Ignore"
+          | (.webhooks[] | select(.name=="validate.nginx.ingress.kubernetes.io") | .timeoutSeconds) = 2' \
+    | kubectl apply -f - >/dev/null || true
+}
+
 # ============ setup — 初始化命名空间、验证 Operator、创建 Secret ============
 cmd_setup() {
   check_kubectl
@@ -221,6 +262,9 @@ cmd_deploy() {
     log_warn "检测到 ${STATUS} 状态，回滚到上一个稳定版本..."
     helm rollback "${RELEASE_NAME}" 0 -n "${NAMESPACE}" --no-hooks || true
   fi
+
+  wait_ingress_admission
+  ensure_ingress_webhook_fail_open
 
   log_info "部署 Helm Chart (release=${RELEASE_NAME}, tag=${TAG}, mode=${K3S_MODE}, values=$(basename "${VALUES_FILE}"))..."
   helm upgrade --install "${RELEASE_NAME}" "${CHART_DIR}" \

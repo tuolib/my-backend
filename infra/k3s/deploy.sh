@@ -171,19 +171,19 @@ preflight_cluster() {
       nslookup kubernetes.default.svc.cluster.local
       echo ""
       echo "--- Test 2: external via cluster DNS ---"
-      nslookup acme-v2.api.letsencrypt.org 2>&1 || true
+      nslookup acme-v02.api.letsencrypt.org 2>&1 || true
       echo ""
       echo "--- Test 3: external direct to 8.8.8.8 (bypass CoreDNS) ---"
-      nslookup acme-v2.api.letsencrypt.org 8.8.8.8 2>&1 || true
+      nslookup acme-v02.api.letsencrypt.org 8.8.8.8 2>&1 || true
       echo ""
       echo "--- Test 4: external direct to 1.1.1.1 ---"
-      nslookup acme-v2.api.letsencrypt.org 1.1.1.1 2>&1 || true
+      nslookup acme-v02.api.letsencrypt.org 1.1.1.1 2>&1 || true
       echo ""
       echo "--- Pod /etc/resolv.conf ---"
       cat /etc/resolv.conf
       echo ""
       echo "--- Final verdict ---"
-      nslookup acme-v2.api.letsencrypt.org
+      nslookup acme-v02.api.letsencrypt.org
     ' >/dev/null
 
   for i in $(seq 1 30); do

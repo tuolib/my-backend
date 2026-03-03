@@ -95,8 +95,6 @@ orderService:
   nodeSelector:
     role: app
 
-# 当前集群 CoreDNS 无法解析外网（acme-v2.api.letsencrypt.org），
-# 暂时关闭 cert-manager/ACME 证书签发，避免 Helm --wait 被 ClusterIssuer 阻塞。
 ingress:
   tls:
-    enabled: false
+    enabled: true

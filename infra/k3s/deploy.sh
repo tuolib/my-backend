@@ -155,15 +155,36 @@ preflight_cluster() {
     log_ok "CoreDNS 已更新为使用公共 DNS (8.8.8.8, 1.1.1.1)"
   fi
 
-  log_info "CoreDNS forward: $(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || echo 'N/A')"
+  # 诊断：输出完整 Corefile
+  log_info "══════════ CoreDNS Corefile ══════════"
+  kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null || true
+  echo ""
 
-  log_info "探测集群 DNS 解析（内部 + 外部）..."
+  log_info "探测集群 DNS 解析（内部 + 外部 + 直连上游）..."
   DNS_POD="dns-probe-$(date +%s)"
   kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
   kubectl -n "${NAMESPACE}" run "${DNS_POD}" \
     --image=busybox:1.36 \
     --restart=Never \
-    --command -- sh -c 'nslookup kubernetes.default.svc.cluster.local && nslookup acme-v2.api.letsencrypt.org' >/dev/null
+    --command -- sh -c '
+      echo "--- Test 1: cluster internal DNS ---"
+      nslookup kubernetes.default.svc.cluster.local
+      echo ""
+      echo "--- Test 2: external via cluster DNS ---"
+      nslookup acme-v2.api.letsencrypt.org 2>&1 || true
+      echo ""
+      echo "--- Test 3: external direct to 8.8.8.8 (bypass CoreDNS) ---"
+      nslookup acme-v2.api.letsencrypt.org 8.8.8.8 2>&1 || true
+      echo ""
+      echo "--- Test 4: external direct to 1.1.1.1 ---"
+      nslookup acme-v2.api.letsencrypt.org 1.1.1.1 2>&1 || true
+      echo ""
+      echo "--- Pod /etc/resolv.conf ---"
+      cat /etc/resolv.conf
+      echo ""
+      echo "--- Final verdict ---"
+      nslookup acme-v2.api.letsencrypt.org
+    ' >/dev/null
 
   for i in $(seq 1 30); do
     PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
@@ -178,6 +199,8 @@ preflight_cluster() {
   kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
 
   if [[ "${PHASE}" != "Succeeded" ]]; then
+    log_warn "══════════ CoreDNS logs (last 30) ══════════"
+    kubectl -n kube-system logs -l k8s-app=kube-dns --tail=30 2>/dev/null || true
     log_warn "检测到集群 DNS 外网解析异常，当前发布自动关闭 ingress TLS（仅本次）"
     HELM_DYNAMIC_ARGS+=(--set "ingress.tls.enabled=false")
   fi

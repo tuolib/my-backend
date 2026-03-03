@@ -488,16 +488,37 @@ jobs:
                 echo "CoreDNS patched."
               fi
 
-              # 诊断：输出 CoreDNS Pod 实际使用的 Corefile forward 行
-              echo "CoreDNS Corefile forward: $(kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null | grep -oE 'forward \. .+' || echo 'N/A')"
+              # 诊断：输出完整 Corefile（排查 hosts 插件 fallthrough 是否阻拦外部查询）
+              echo "══════════ CoreDNS Corefile ══════════"
+              kubectl get configmap coredns -n kube-system -o jsonpath='{.data.Corefile}' 2>/dev/null || true
+              echo ""
 
               echo "Probing in-cluster DNS resolution (kubernetes.default + Let's Encrypt)..."
               DNS_POD="dns-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
               kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
+              # 多维度诊断：集群 DNS / 直连 8.8.8.8 / Pod resolv.conf
               kubectl -n "${NAMESPACE}" run "${DNS_POD}" \
                 --image=busybox:1.36 \
                 --restart=Never \
-                --command -- sh -c 'nslookup kubernetes.default.svc.cluster.local && nslookup acme-v2.api.letsencrypt.org'
+                --command -- sh -c '
+                  echo "--- Test 1: cluster internal DNS ---"
+                  nslookup kubernetes.default.svc.cluster.local
+                  echo ""
+                  echo "--- Test 2: external via cluster DNS ---"
+                  nslookup acme-v2.api.letsencrypt.org 2>&1 || true
+                  echo ""
+                  echo "--- Test 3: external direct to 8.8.8.8 (bypass CoreDNS) ---"
+                  nslookup acme-v2.api.letsencrypt.org 8.8.8.8 2>&1 || true
+                  echo ""
+                  echo "--- Test 4: external direct to 1.1.1.1 ---"
+                  nslookup acme-v2.api.letsencrypt.org 1.1.1.1 2>&1 || true
+                  echo ""
+                  echo "--- Pod /etc/resolv.conf ---"
+                  cat /etc/resolv.conf
+                  echo ""
+                  echo "--- Final verdict ---"
+                  nslookup acme-v2.api.letsencrypt.org
+                '
 
               for i in $(seq 1 30); do
                 PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
@@ -512,6 +533,8 @@ jobs:
               kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
 
               if [[ "${PHASE}" != "Succeeded" ]]; then
+                echo "══════════ CoreDNS logs (last 30) ══════════"
+                kubectl -n kube-system logs -l k8s-app=kube-dns --tail=30 2>/dev/null || true
                 echo "::warning::Cluster DNS cannot resolve external domains. Force disable ingress TLS for this deploy."
                 HELM_EXTRA_ARGS+=(--set "ingress.tls.enabled=false")
               fi

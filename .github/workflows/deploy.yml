@@ -409,48 +409,6 @@ jobs:
             kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true
           }
 
-          # 解决 VPS 无 hairpin NAT 问题：集群内 DNS 解析 ingress 域名到节点内网 IP
-          ensure_ingress_dns_hairpin() {
-            if [[ "${PLATFORM}" != k3s* ]]; then
-              return 0
-            fi
-
-            local INGRESS_HOST="${DOMAIN}"
-            if [[ -z "${INGRESS_HOST}" ]]; then
-              echo "::warning::DOMAIN not set, skipping DNS hairpin"
-              return 0
-            fi
-
-            local NODE_IP=""
-            if [[ "${PLATFORM}" == "k3s-multi" ]]; then
-              NODE_IP=$(kubectl get nodes -l role=ingress -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
-            else
-              NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
-            fi
-
-            if [[ -z "${NODE_IP}" ]]; then
-              echo "::warning::Cannot determine ingress node internal IP, skipping DNS hairpin"
-              return 0
-            fi
-
-            echo "Configuring CoreDNS hairpin: ${INGRESS_HOST} -> ${NODE_IP}"
-            cat <<DNSEOF | kubectl apply -f -
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: coredns-custom
-            namespace: kube-system
-          data:
-            ingress-hairpin.override: |
-              template IN A ${INGRESS_HOST} {
-                answer "${INGRESS_HOST}. 60 IN A ${NODE_IP}"
-              }
-          DNSEOF
-            kubectl -n kube-system rollout restart deployment/coredns
-            kubectl -n kube-system rollout status deployment/coredns --timeout=60s || true
-            echo "CoreDNS hairpin DNS ready (${INGRESS_HOST} -> ${NODE_IP})"
-          }
-
           dump_debug_state() {
             echo "══════════ DEBUG: pods ══════════"
             kubectl get pods -n "${NAMESPACE}" -o wide || true
@@ -581,7 +539,6 @@ jobs:
           fi
 
           check_core_dependencies
-          ensure_ingress_dns_hairpin
           preflight_cluster
           wait_ingress_admission
           ensure_ingress_webhook_fail_open

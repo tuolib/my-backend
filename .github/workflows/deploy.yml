@@ -595,8 +595,19 @@ jobs:
               echo "::warning::db-migrate hook failed, collecting diagnostics..."
               kubectl get job -n "${NAMESPACE}" ecom-db-migrate -o wide || true
               kubectl describe job -n "${NAMESPACE}" ecom-db-migrate || true
+              echo "══════════ migrate pods ══════════"
               kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=db-migrate -o wide || true
-              kubectl logs -n "${NAMESPACE}" job/ecom-db-migrate --tail=300 || true
+              echo "══════════ migrate pod logs (all containers) ══════════"
+              for POD in $(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=db-migrate -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+                echo "--- pod: ${POD} ---"
+                echo ">> init container (wait-pg):"
+                kubectl logs -n "${NAMESPACE}" "${POD}" -c wait-pg --tail=20 2>&1 || true
+                echo ">> main container (migrate):"
+                kubectl logs -n "${NAMESPACE}" "${POD}" -c migrate --tail=100 2>&1 || true
+                echo ">> termination message:"
+                kubectl get pod -n "${NAMESPACE}" "${POD}" -o jsonpath='{.status.containerStatuses[0].state.terminated.message}' 2>&1 || true
+                echo ""
+              done
             fi
 
             echo "::error::Helm deploy failed"

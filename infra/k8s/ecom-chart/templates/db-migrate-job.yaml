@@ -22,7 +22,7 @@ spec:
         app.kubernetes.io/name: db-migrate
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      restartPolicy: OnFailure
+      restartPolicy: Never
       nodeSelector:
         {{- toYaml .Values.apiGateway.nodeSelector | nindent 8 }}
       initContainers:

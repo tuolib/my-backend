@@ -553,7 +553,7 @@ jobs:
               --image="${MIGRATE_IMAGE}" \
               --restart=Never \
               --override-type=strategic \
-              --overrides='{"spec":{"nodeSelector":{"role":"app"}}}' \
+              --overrides='{"spec":{"nodeSelector":{"role":"app"},"imagePullSecrets":[{"name":"ghcr-pull-secret"}]}}' \
               --env="DATABASE_URL=${DB_URL}" \
               --command -- bun run packages/database/src/migrate.ts
 

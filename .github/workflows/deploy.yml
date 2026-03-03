@@ -543,11 +543,27 @@ jobs:
           wait_ingress_admission
           ensure_ingress_webhook_fail_open
 
+          # ── 同步 PG 密码：Secret → PostgreSQL（解决初始 bootstrap 密码漂移） ──
+          PG_SECRET_NAME="${RELEASE}-pg-superuser"
+          PG_RW_HOST="${RELEASE}-pg-rw"
+          PG_PRIMARY="${RELEASE}-pg-1"
+
+          if kubectl -n "${NAMESPACE}" get pod "${PG_PRIMARY}" >/dev/null 2>&1; then
+            echo "══════════ Syncing postgres password from Secret to PostgreSQL ══════════"
+            # 构造 ALTER USER SQL，通过 stdin 管道传入 psql，避免所有 shell 转义问题
+            # base64 -d 在 CI runner 解码 → sed 转义 SQL 单引号 → psql 在 PG pod 内执行
+            (
+              printf "ALTER USER postgres PASSWORD '"
+              kubectl get secret -n "${NAMESPACE}" "${PG_SECRET_NAME}" \
+                -o jsonpath='{.data.password}' | base64 -d | sed "s/'/''/g"
+              printf "';\n"
+            ) | kubectl exec -i -n "${NAMESPACE}" "${PG_PRIMARY}" -c postgres -- psql -U postgres 2>&1 || true
+            echo "Password sync done."
+          fi
+
           # ── 预检：在 Helm hook 之外直接跑迁移，捕获完整错误输出 ──
           echo "══════════ Pre-deploy: testing db-migrate ══════════"
           MIGRATE_IMAGE="${REGISTRY}/ecom-api-gateway:${TAG}"
-          PG_SECRET_NAME="${RELEASE}-pg-superuser"
-          PG_RW_HOST="${RELEASE}-pg-rw"
           PG_PASS_RAW="$(kubectl get secret -n "${NAMESPACE}" "${PG_SECRET_NAME}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)"
           if [[ -n "${PG_PASS_RAW}" ]]; then
             kubectl delete pod -n "${NAMESPACE}" migrate-debug --ignore-not-found=true >/dev/null 2>&1 || true

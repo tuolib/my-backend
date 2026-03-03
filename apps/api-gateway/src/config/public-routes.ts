@@ -25,6 +25,7 @@ export const PUBLIC_ROUTES: string[] = [
 
   // 健康检查
   '/health',
+  '/health/live',
 ];
 
 /** 判断路径是否为公开路由（精确匹配） */

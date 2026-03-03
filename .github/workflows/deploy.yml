@@ -543,8 +543,15 @@ jobs:
           wait_ingress_admission
           ensure_ingress_webhook_fail_open
 
-          # Clean up cert-manager in-flight challenges to avoid Ingress field ownership conflicts with Helm
-          kubectl delete challenge -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
+          # Clean up cert-manager resources to avoid Ingress field ownership conflicts with Helm
+          # Must delete Certificate too, otherwise cert-manager immediately recreates challenges
+          if kubectl get challenge -n "${NAMESPACE}" --no-headers 2>/dev/null | grep -q .; then
+            echo "Detected in-flight ACME challenge, cleaning up cert-manager resources..."
+            kubectl delete certificate -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
+            kubectl delete order -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
+            kubectl delete challenge -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
+            sleep 3
+          fi
 
           # ── 同步 PG 密码：Secret → PostgreSQL（解决初始 bootstrap 密码漂移） ──
           PG_SECRET_NAME="${RELEASE}-pg-superuser"

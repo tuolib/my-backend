@@ -45,10 +45,5 @@ spec:
             - name: PRODUCT_SERVICE_URL
               value: "http://{{ include "ecom.fullname" . }}-product-service:{{ .Values.productService.port }}"
           resources:
-            requests:
-              cpu: {{ .Values.cartService.resources.requests.cpu | quote }}
-              memory: {{ .Values.cartService.resources.requests.memory | quote }}
-            limits:
-              cpu: {{ .Values.cartService.resources.limits.cpu | quote }}
-              memory: {{ .Values.cartService.resources.limits.memory | quote }}
+            {{- toYaml .Values.cartService.resources | nindent 12 }}
           {{- include "ecom.probes" (dict "port" .Values.cartService.port) | nindent 10 }}

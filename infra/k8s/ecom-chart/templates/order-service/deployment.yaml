@@ -49,10 +49,5 @@ spec:
             - name: USER_SERVICE_URL
               value: "http://{{ include "ecom.fullname" . }}-user-service:{{ .Values.userService.port }}"
           resources:
-            requests:
-              cpu: {{ .Values.orderService.resources.requests.cpu | quote }}
-              memory: {{ .Values.orderService.resources.requests.memory | quote }}
-            limits:
-              cpu: {{ .Values.orderService.resources.limits.cpu | quote }}
-              memory: {{ .Values.orderService.resources.limits.memory | quote }}
+            {{- toYaml .Values.orderService.resources | nindent 12 }}
           {{- include "ecom.probes" (dict "port" .Values.orderService.port) | nindent 10 }}

@@ -43,10 +43,5 @@ spec:
               value: {{ .Values.userService.port | quote }}
             {{- include "ecom.commonEnv" . | nindent 12 }}
           resources:
-            requests:
-              cpu: {{ .Values.userService.resources.requests.cpu | quote }}
-              memory: {{ .Values.userService.resources.requests.memory | quote }}
-            limits:
-              cpu: {{ .Values.userService.resources.limits.cpu | quote }}
-              memory: {{ .Values.userService.resources.limits.memory | quote }}
+            {{- toYaml .Values.userService.resources | nindent 12 }}
           {{- include "ecom.probes" (dict "port" .Values.userService.port) | nindent 10 }}

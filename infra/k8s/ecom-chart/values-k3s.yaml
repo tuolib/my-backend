@@ -38,10 +38,9 @@ apiGateway:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}
 
 userService:
@@ -49,10 +48,9 @@ userService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}
 
 productService:
@@ -60,10 +58,9 @@ productService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}
 
 cartService:
@@ -71,10 +68,9 @@ cartService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}
 
 orderService:
@@ -82,8 +78,7 @@ orderService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}

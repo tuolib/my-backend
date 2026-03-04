@@ -52,10 +52,5 @@ spec:
             - name: ORDER_SERVICE_URL
               value: "http://{{ include "ecom.fullname" . }}-order-service:{{ .Values.orderService.port }}"
           resources:
-            requests:
-              cpu: {{ .Values.apiGateway.resources.requests.cpu | quote }}
-              memory: {{ .Values.apiGateway.resources.requests.memory | quote }}
-            limits:
-              cpu: {{ .Values.apiGateway.resources.limits.cpu | quote }}
-              memory: {{ .Values.apiGateway.resources.limits.memory | quote }}
+            {{- toYaml .Values.apiGateway.resources | nindent 12 }}
           {{- include "ecom.probes" (dict "port" .Values.apiGateway.port "path" "/health/live") | nindent 10 }}

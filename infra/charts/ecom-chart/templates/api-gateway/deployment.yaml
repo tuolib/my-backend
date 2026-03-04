@@ -30,29 +30,11 @@ spec:
       terminationGracePeriodSeconds: 5
       nodeSelector:
         {{- toYaml .Values.apiGateway.nodeSelector | nindent 8 }}
-      initContainers:
-        - name: db-migrate
-          image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.apiGateway.image "tag" .Values.global.imageTag) }}
-          {{- include "ecom.securityContext" . | nindent 10 }}
-          command: ["bun", "run", "packages/database/src/migrate.ts"]
-          env:
-            - name: PGHOST
-              value: {{ include "ecom.pgRwHost" . }}
-            - name: PGPORT
-              value: "5432"
-            - name: PGDATABASE
-              value: {{ .Values.postgresql.database }}
-            - name: PGUSER
-              value: postgres
-            - name: PGPASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "ecom.pgSecretName" . }}
-                  key: password
       containers:
         - name: api-gateway
           image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.apiGateway.image "tag" .Values.global.imageTag) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["sh", "-c", "bun run packages/database/src/migrate.ts && exec bun run apps/api-gateway/src/index.ts"]
           ports:
             - name: http
               containerPort: {{ .Values.apiGateway.port }}

@@ -585,10 +585,26 @@ jobs:
             namespace: ${NAMESPACE}
           spec:
             restartPolicy: Never
-            nodeSelector:
-              role: app
             imagePullSecrets:
               - name: ghcr-pull-secret
+            initContainers:
+              - name: wait-pg-dns
+                image: busybox:1.36
+                command:
+                  - sh
+                  - -c
+                  - |
+                    echo "Waiting for DNS resolution of ${PG_RW_HOST}..."
+                    for i in \$(seq 1 30); do
+                      if nslookup ${PG_RW_HOST}.${NAMESPACE}.svc.cluster.local >/dev/null 2>&1; then
+                        echo "DNS resolved successfully"
+                        exit 0
+                      fi
+                      echo "  attempt \$i/30: DNS not ready, retry in 2s..."
+                      sleep 2
+                    done
+                    echo "DNS resolution failed after 60s"
+                    exit 1
             containers:
               - name: migrate
                 image: ${MIGRATE_IMAGE}
@@ -609,16 +625,18 @@ jobs:
                         key: password
           EOPOD
 
-            # 等待 Pod 结束（最多 120 秒）
-            if kubectl wait -n "${NAMESPACE}" pod/migrate-debug --for=condition=Ready --timeout=5s 2>/dev/null; then
+            # 等待 Pod 结束（最多 180 秒，含 init container DNS 等待）
+            if kubectl wait -n "${NAMESPACE}" pod/migrate-debug --for=condition=Ready --timeout=10s 2>/dev/null; then
               true
             fi
             kubectl wait -n "${NAMESPACE}" pod/migrate-debug \
               --for=jsonpath='{.status.phase}'=Succeeded \
-              --timeout=120s 2>/dev/null || true
+              --timeout=180s 2>/dev/null || true
 
             PHASE=$(kubectl get pod -n "${NAMESPACE}" migrate-debug -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
             echo "migrate-debug pod phase: ${PHASE}"
+            echo "══════════ migrate-debug init container logs ══════════"
+            kubectl logs -n "${NAMESPACE}" migrate-debug -c wait-pg-dns --tail=50 2>&1 || true
             echo "══════════ migrate-debug logs ══════════"
             kubectl logs -n "${NAMESPACE}" migrate-debug --tail=200 2>&1 || true
             kubectl delete pod -n "${NAMESPACE}" migrate-debug --ignore-not-found=true >/dev/null 2>&1 || true

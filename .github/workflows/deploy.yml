@@ -623,17 +623,19 @@ jobs:
             exit ${HELM_EXIT}
           done
 
-          # ── 数据库迁移：在已运行的 Pod 上执行，DNS 可靠 ──
-          echo "Running database migration on existing pod..."
-          for i in 1 2 3; do
-            if kubectl exec -n "${NAMESPACE}" deploy/${RELEASE}-api-gateway -c api-gateway -- \
-              bun run packages/database/src/migrate.ts 2>&1; then
-              echo "Database migration completed."
-              break
-            fi
-            echo "Migration attempt ${i} failed, retrying in 3s..."
-            sleep 3
-          done
+          # ── 数据库迁移：绕过 DNS，用 ClusterIP 直连 PG ──
+          PG_SVC="${RELEASE}-pg-rw"
+          PG_IP=$(kubectl get svc -n "${NAMESPACE}" "${PG_SVC}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+          PG_PASS=$(kubectl get secret -n "${NAMESPACE}" "${RELEASE}-pg-superuser" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
+
+          if [[ -n "${PG_IP}" && -n "${PG_PASS}" ]]; then
+            echo "Running database migration (PG ClusterIP: ${PG_IP})..."
+            kubectl exec -n "${NAMESPACE}" deploy/${RELEASE}-api-gateway -c api-gateway -- \
+              env PGHOST="${PG_IP}" PGPORT=5432 PGDATABASE=ecommerce PGUSER=postgres PGPASSWORD="${PG_PASS}" \
+              bun run packages/database/src/migrate.ts 2>&1 || echo "::warning::Migration failed (may already be up to date)"
+          else
+            echo "::warning::PG service or secret not found, skipping migration"
+          fi
 
       - name: Verify deployment
         if: always()

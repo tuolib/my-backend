@@ -377,17 +377,32 @@ cmd_deploy() {
     exit 1
   fi
 
-  # 数据库迁移：在已运行的 Pod 上执行
+  # 数据库迁移：绕过 DNS，使用 ClusterIP 直连 PG
   log_info "运行数据库迁移..."
-  for i in 1 2 3; do
-    if kubectl exec -n "${NAMESPACE}" deploy/${RELEASE_NAME}-api-gateway -c api-gateway -- \
-      bun run packages/database/src/migrate.ts 2>&1; then
-      log_ok "数据库迁移完成"
-      break
-    fi
-    log_warn "迁移尝试 ${i} 失败，3s 后重试..."
-    sleep 3
-  done
+  local PG_SVC="${RELEASE_NAME}-pg-rw"
+  local PG_IP PG_PASS_MIG
+  PG_IP=$(kubectl get svc -n "${NAMESPACE}" "${PG_SVC}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+  PG_PASS_MIG=$(kubectl get secret -n "${NAMESPACE}" "${RELEASE_NAME}-pg-superuser" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
+
+  if [[ -n "${PG_IP}" && -n "${PG_PASS_MIG}" ]]; then
+    log_info "PG ClusterIP: ${PG_IP}"
+    for i in 1 2 3; do
+      if kubectl exec -n "${NAMESPACE}" deploy/${RELEASE_NAME}-api-gateway -c api-gateway -- \
+        env PGHOST="${PG_IP}" PGPORT=5432 PGDATABASE=ecommerce PGUSER=postgres PGPASSWORD="${PG_PASS_MIG}" \
+        bun run packages/database/src/migrate.ts 2>&1; then
+        log_ok "数据库迁移完成"
+        break
+      fi
+      if [[ ${i} -eq 3 ]]; then
+        log_warn "数据库迁移失败（可能已是最新）"
+      else
+        log_warn "迁移尝试 ${i} 失败，3s 后重试..."
+        sleep 3
+      fi
+    done
+  else
+    log_warn "未找到 PG Service 或 Secret，跳过迁移"
+  fi
 
   log_ok "部署完成"
   echo ""
@@ -456,53 +471,27 @@ cmd_destroy() {
 cmd_migrate() {
   check_kubectl
 
-  log_info "触发数据库迁移 Job..."
+  log_info "触发数据库迁移（kubectl exec + ClusterIP）..."
 
-  # 删除旧的迁移 Job（如果存在）
-  kubectl delete job "${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}" --ignore-not-found
+  local PG_SVC="${RELEASE_NAME}-pg-rw"
+  local PG_IP PG_PASS_MIG
+  PG_IP=$(kubectl get svc -n "${NAMESPACE}" "${PG_SVC}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+  PG_PASS_MIG=$(kubectl get secret -n "${NAMESPACE}" "${RELEASE_NAME}-pg-superuser" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
 
-  cat <<EOF | kubectl apply -f -
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: ${RELEASE_NAME}-db-migrate
-  namespace: ${NAMESPACE}
-spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 120
-  template:
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: migrate
-          image: ${REGISTRY}/ecom-api-gateway:${TAG}
-          command: ["bun", "run", "packages/database/src/migrate.ts"]
-          env:
-            - name: PGHOST
-              value: ${RELEASE_NAME}-pg-rw
-            - name: PGPORT
-              value: "5432"
-            - name: PGDATABASE
-              value: ecommerce
-            - name: PGUSER
-              value: postgres
-            - name: PGPASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: ${RELEASE_NAME}-pg-superuser
-                  key: password
-EOF
+  if [[ -z "${PG_IP}" || -z "${PG_PASS_MIG}" ]]; then
+    log_error "未找到 PG Service(${PG_SVC}) 或 Secret，无法执行迁移"
+    exit 1
+  fi
 
-  log_info "等待迁移完成..."
-  kubectl wait --for=condition=complete --timeout=120s \
-    job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}" || {
-    log_error "迁移失败，查看日志:"
-    kubectl logs job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}" || true
+  log_info "PG ClusterIP: ${PG_IP}"
+  kubectl exec -n "${NAMESPACE}" deploy/${RELEASE_NAME}-api-gateway -c api-gateway -- \
+    env PGHOST="${PG_IP}" PGPORT=5432 PGDATABASE=ecommerce PGUSER=postgres PGPASSWORD="${PG_PASS_MIG}" \
+    bun run packages/database/src/migrate.ts 2>&1 || {
+    log_error "数据库迁移失败"
     exit 1
   }
 
   log_ok "数据库迁移完成"
-  kubectl logs job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}"
 }
 
 # ============ rollback — Helm 回滚 ============

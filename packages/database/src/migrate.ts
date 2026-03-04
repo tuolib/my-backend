@@ -134,10 +134,24 @@ export async function migrate(databaseUrl?: string) {
 
 // 直接执行: DATABASE_URL=... bun run packages/database/src/migrate.ts
 if (import.meta.main) {
-  migrate()
-    .then(() => process.exit(0))
-    .catch((err) => {
-      console.error('[migrate] failed:', err);
-      process.exit(1);
-    });
+  const MAX_RETRIES = 5;
+  const RETRY_DELAY = 2000;
+
+  (async () => {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        await migrate();
+        process.exit(0);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[migrate] attempt ${attempt}/${MAX_RETRIES} failed: ${msg}`);
+        if (attempt === MAX_RETRIES) {
+          console.error('[migrate] all retries exhausted');
+          process.exit(1);
+        }
+        console.log(`[migrate] retrying in ${RETRY_DELAY / 1000}s...`);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY));
+      }
+    }
+  })();
 }

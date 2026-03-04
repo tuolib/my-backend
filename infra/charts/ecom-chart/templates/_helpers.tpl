@@ -141,6 +141,22 @@ imagePullSecrets:
 {{- end }}
 
 {{/*
+容器安全上下文（非 root、禁止提权、丢弃所有 capabilities）
+所有服务 Dockerfile 统一 UID/GID 1000
+不设 readOnlyRootFilesystem：Bun 运行时需写 /tmp 缓存
+用法: {{ include "ecom.securityContext" . | nindent 10 }}
+*/}}
+{{- define "ecom.securityContext" -}}
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+{{- end }}
+
+{{/*
 通用健康检查探针
 用法: {{ include "ecom.probes" (dict "port" 3000 "path" "/health/live") }}
 */}}
@@ -150,21 +166,22 @@ startupProbe:
   httpGet:
     path: {{ $path }}
     port: {{ .port }}
-  initialDelaySeconds: 5
-  periodSeconds: 5
-  failureThreshold: 12
+  initialDelaySeconds: 1
+  periodSeconds: 2
+  timeoutSeconds: 3
+  failureThreshold: 10
 livenessProbe:
   httpGet:
     path: {{ $path }}
     port: {{ .port }}
-  periodSeconds: 15
-  timeoutSeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
   failureThreshold: 3
 readinessProbe:
   httpGet:
     path: {{ $path }}
     port: {{ .port }}
-  periodSeconds: 10
-  timeoutSeconds: 5
+  periodSeconds: 2
+  timeoutSeconds: 3
   failureThreshold: 3
 {{- end }}

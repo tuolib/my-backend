@@ -161,7 +161,7 @@ echo "=== [4/4] 集群信息 ==="
 NODE_TOKEN_PATH="/var/lib/rancher/k3s/server/node-token"
 if [[ -f "${NODE_TOKEN_PATH}" ]]; then
   echo "Node Token 路径: ${NODE_TOKEN_PATH}"
-  echo "Node Token 值:   $(cat "${NODE_TOKEN_PATH}")"
+  echo "Node Token 值:   *** (已脱敏，执行 cat ${NODE_TOKEN_PATH} 查看)"
 else
   echo "警告: 未找到 node-token 文件"
 fi
@@ -176,9 +176,9 @@ echo ""
 if [[ "${K3S_MODE}" == "multi" ]]; then
   echo " 追加 Server: 在其他节点运行 02-join-server.sh"
   echo "   K3S_URL=https://${NODE_IP}:6443"
-  echo "   K3S_TOKEN=$(cat "${NODE_TOKEN_PATH}" 2>/dev/null || echo '<见上方>')"
+  echo "   K3S_TOKEN=\$(cat ${NODE_TOKEN_PATH})"
 fi
 echo " 追加 Agent:  在 worker 节点运行 03-join-agent.sh"
 echo "   K3S_URL=https://${NODE_IP}:6443"
-echo "   K3S_TOKEN=$(cat "${NODE_TOKEN_PATH}" 2>/dev/null || echo '<见上方>')"
+echo "   K3S_TOKEN=\$(cat ${NODE_TOKEN_PATH})"
 echo "=========================================="

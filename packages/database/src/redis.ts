@@ -9,10 +9,10 @@ const config = getConfig();
 
 export function createRedis(): Redis {
   return new Redis(config.redis.url, {
-    maxRetriesPerRequest: 3,
+    maxRetriesPerRequest: 10,
     retryStrategy(times) {
-      if (times > 3) return null;
-      return Math.min(times * 200, 2000);
+      if (times > 10) return null;
+      return Math.min(times * 500, 5000);
     },
     lazyConnect: true,
   });

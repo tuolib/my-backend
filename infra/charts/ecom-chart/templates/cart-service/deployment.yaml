@@ -17,8 +17,8 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      maxUnavailable: 1
+      maxSurge: 0
   template:
     metadata:
       labels:
@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       {{- include "ecom.imagePullSecrets" . | nindent 6 }}
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 5
       nodeSelector:
         {{- toYaml .Values.cartService.nodeSelector | nindent 8 }}
       containers:
@@ -45,10 +45,6 @@ spec:
             - name: PRODUCT_SERVICE_URL
               value: "http://{{ include "ecom.fullname" . }}-product-service:{{ .Values.productService.port }}"
           resources:
-            requests:
-              cpu: {{ .Values.cartService.resources.requests.cpu | quote }}
-              memory: {{ .Values.cartService.resources.requests.memory | quote }}
-            limits:
-              cpu: {{ .Values.cartService.resources.limits.cpu | quote }}
-              memory: {{ .Values.cartService.resources.limits.memory | quote }}
+            {{- toYaml .Values.cartService.resources | nindent 12 }}
+          {{- include "ecom.securityContext" . | nindent 10 }}
           {{- include "ecom.probes" (dict "port" .Values.cartService.port) | nindent 10 }}

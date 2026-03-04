@@ -1,5 +1,5 @@
-# values-k3s.yaml — k3s 生产环境覆盖值（轻量级单节点优化）
-# 用法: helm install ecom . -f values-k3s.yaml
+# values.yaml — k3s 单节点生产环境覆盖值（轻量级单节点优化）
+# 用法: helm install ecom ../charts/ecom-chart -f values.yaml
 #
 # 与 values.yaml（k8s 生产）的区别:
 #   - 所有 nodeSelector 设为 {}（单节点调度）
@@ -38,10 +38,9 @@ apiGateway:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}
 
 userService:
@@ -49,10 +48,9 @@ userService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}
 
 productService:
@@ -60,10 +58,9 @@ productService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}
 
 cartService:
@@ -71,10 +68,9 @@ cartService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}
 
 orderService:
@@ -82,8 +78,7 @@ orderService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector: {}

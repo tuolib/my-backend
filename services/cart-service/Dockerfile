@@ -15,8 +15,7 @@ RUN bun install --frozen-lockfile
 COPY packages/ ./packages/
 COPY services/cart-service/ ./services/cart-service/
 
-RUN addgroup -S app && adduser -S app -G app
-USER app
+USER bun
 
 EXPOSE 3003
 CMD ["bun", "run", "services/cart-service/src/index.ts"]

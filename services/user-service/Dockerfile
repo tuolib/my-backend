@@ -15,8 +15,7 @@ RUN bun install --frozen-lockfile
 COPY packages/ ./packages/
 COPY services/user-service/ ./services/user-service/
 
-RUN addgroup -S app && adduser -S app -G app
-USER app
+USER bun
 
 EXPOSE 3001
 CMD ["bun", "run", "services/user-service/src/index.ts"]

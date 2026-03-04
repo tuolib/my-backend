@@ -1,7 +1,7 @@
-# values-k3s-multi.yaml — k3s 多节点生产环境覆盖值
-# 用法: helm install ecom . -f values-k3s-multi.yaml
+# values-multi.yaml — k3s 多节点生产环境覆盖值
+# 用法: helm install ecom ../charts/ecom-chart -f values-multi.yaml
 #
-# 与 values-k3s.yaml（单节点）的区别:
+# 与 values.yaml（单节点）的区别:
 #   - nodeSelector 按角色分布（data / ingress / app），同 k8s
 #   - PG 实例数 2（主 + 备）、Redis 集群 3 节点
 #   - 各服务 2 副本
@@ -40,10 +40,9 @@ apiGateway:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector:
     role: app
 
@@ -52,10 +51,9 @@ userService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector:
     role: app
 
@@ -64,10 +62,9 @@ productService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector:
     role: app
 
@@ -76,10 +73,9 @@ cartService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector:
     role: app
 
@@ -88,10 +84,9 @@ orderService:
   resources:
     requests:
       cpu: "100m"
-      memory: "128Mi"
-    limits:
-      cpu: "250m"
       memory: "256Mi"
+    limits:
+      memory: "512Mi"
   nodeSelector:
     role: app
 

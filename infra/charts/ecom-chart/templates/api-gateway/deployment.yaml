@@ -17,8 +17,8 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+      maxUnavailable: 1
+      maxSurge: 0
   template:
     metadata:
       labels:
@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       {{- include "ecom.imagePullSecrets" . | nindent 6 }}
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 5
       nodeSelector:
         {{- toYaml .Values.apiGateway.nodeSelector | nindent 8 }}
       containers:
@@ -52,10 +52,6 @@ spec:
             - name: ORDER_SERVICE_URL
               value: "http://{{ include "ecom.fullname" . }}-order-service:{{ .Values.orderService.port }}"
           resources:
-            requests:
-              cpu: {{ .Values.apiGateway.resources.requests.cpu | quote }}
-              memory: {{ .Values.apiGateway.resources.requests.memory | quote }}
-            limits:
-              cpu: {{ .Values.apiGateway.resources.limits.cpu | quote }}
-              memory: {{ .Values.apiGateway.resources.limits.memory | quote }}
+            {{- toYaml .Values.apiGateway.resources | nindent 12 }}
+          {{- include "ecom.securityContext" . | nindent 10 }}
           {{- include "ecom.probes" (dict "port" .Values.apiGateway.port "path" "/health/live") | nindent 10 }}

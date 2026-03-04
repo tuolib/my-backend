@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy.sh — k3s 部署脚本（复用 k8s 共享 Helm Chart）
+# deploy.sh — k3s 部署脚本（复用共享 Helm Chart）
 # 用法: ./deploy.sh <command>
 # 命令: setup | build | deploy | status | destroy | migrate | rollback | full
 set -euo pipefail
@@ -7,16 +7,16 @@ set -euo pipefail
 # ============ 配置 ============
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-CHART_DIR="${PROJECT_ROOT}/infra/k8s/ecom-chart"
+CHART_DIR="${PROJECT_ROOT}/infra/charts/ecom-chart"
 NAMESPACE="ecom"
 RELEASE_NAME="ecom"
 
 # k3s 模式：single（默认）或 multi
 K3S_MODE="${K3S_MODE:-single}"
 if [[ "${K3S_MODE}" == "multi" ]]; then
-  VALUES_FILE="${CHART_DIR}/values-k3s-multi.yaml"
+  VALUES_FILE="${SCRIPT_DIR}/values-multi.yaml"
 else
-  VALUES_FILE="${CHART_DIR}/values-k3s.yaml"
+  VALUES_FILE="${SCRIPT_DIR}/values.yaml"
 fi
 
 # k3s 默认 kubeconfig
@@ -67,34 +67,6 @@ check_helm() {
   fi
 }
 
-wait_ingress_admission() {
-  if [[ "${K3S_MODE}" != "multi" && "${K3S_MODE}" != "single" ]]; then
-    return 0
-  fi
-
-  if kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-    log_info "等待 ingress-nginx controller deployment 就绪..."
-    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
-  elif kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-    log_info "等待 ingress-nginx controller daemonset 就绪..."
-    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
-  else
-    log_warn "未发现 ingress-nginx-controller（Deployment/DaemonSet）"
-  fi
-
-  log_info "等待 ingress-nginx admission endpoints..."
-  for i in $(seq 1 36); do
-    EP_READY=$(kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)
-    if [[ -n "${EP_READY}" ]]; then
-      log_ok "ingress-nginx admission endpoint 就绪: ${EP_READY}"
-      return 0
-    fi
-    sleep 5
-  done
-
-  log_warn "ingress-nginx admission endpoint 180s 内未就绪"
-}
-
 ensure_ingress_webhook_fail_open() {
   log_info "删除 ingress-nginx admission webhook（避免 k3s 下 webhook 访问超时阻塞发布）..."
   kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true >/dev/null || true
@@ -141,60 +113,58 @@ data:
 HPEOF
 
   kubectl -n kube-system rollout restart deployment coredns
-  kubectl -n kube-system rollout status deployment coredns --timeout=60s || true
+  kubectl -n kube-system rollout status deployment coredns --timeout=30s || true
 
   log_ok "Hairpin NAT 修复已应用: ${INGRESS_HOST} → ${CNI_GW}"
 }
 
-check_core_dependencies() {
-  log_info "检查关键依赖就绪状态..."
-  kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
+preflight_all() {
+  log_info "并行执行所有预检..."
+  local PIDS=() NAMES=() FAILS=0
+
+  kubectl get nodes -o wide || true
+
+  kubectl wait --for=condition=Ready node --all --timeout=30s &
+  PIDS+=($!); NAMES+=("nodes")
+
+  kubectl -n kube-system rollout status deployment/coredns --timeout=30s &
+  PIDS+=($!); NAMES+=("coredns")
+
+  kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=30s &
+  PIDS+=($!); NAMES+=("cnpg")
 
   if kubectl -n redis-operator-system get deployment redis-operator >/dev/null 2>&1; then
-    kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=180s || true
+    kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=30s &
+    PIDS+=($!); NAMES+=("redis-operator")
   else
     log_warn "未发现 redis-operator deployment（redis-operator-system）"
   fi
 
   if kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
+    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=30s &
+    PIDS+=($!); NAMES+=("ingress-nginx")
   elif kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=30s &
+    PIDS+=($!); NAMES+=("ingress-nginx")
   else
     log_error "未发现 ingress-nginx controller"
     return 1
   fi
-}
 
-preflight_cluster() {
-  log_info "执行集群预检（Node/CoreDNS/DNS）..."
-  kubectl get nodes -o wide || true
-  kubectl wait --for=condition=Ready node --all --timeout=180s || true
-  kubectl -n kube-system rollout status deployment/coredns --timeout=180s || true
-
-  DNS_POD="dns-probe-$(date +%s)"
-  kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
-  kubectl -n "${NAMESPACE}" run "${DNS_POD}" \
-    --image=busybox:1.36 \
-    --restart=Never \
-    --command -- sh -c 'nslookup kubernetes.default.svc.cluster.local && nslookup acme-v02.api.letsencrypt.org' >/dev/null
-
-  for i in $(seq 1 30); do
-    PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-    if [[ "${PHASE}" == "Succeeded" || "${PHASE}" == "Failed" ]]; then
-      break
+  for i in "${!PIDS[@]}"; do
+    if wait ${PIDS[$i]}; then
+      log_ok "${NAMES[$i]} ready"
+    else
+      log_error "${NAMES[$i]} not ready"
+      FAILS=$((FAILS + 1))
     fi
-    sleep 2
   done
 
-  kubectl -n "${NAMESPACE}" logs "${DNS_POD}" || true
-  PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-  kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
-
-  if [[ "${PHASE}" != "Succeeded" ]]; then
-    log_warn "检测到集群 DNS 外网解析异常，当前发布自动关闭 ingress TLS（仅本次）"
-    HELM_DYNAMIC_ARGS+=(--set "ingress.tls.enabled=false")
+  if [ ${FAILS} -gt 0 ]; then
+    log_error "${FAILS} 项预检失败"
+    return 1
   fi
+  log_ok "所有预检通过"
 }
 
 dump_debug_state() {
@@ -378,10 +348,8 @@ cmd_deploy() {
 
   # preflight 里会运行 dns probe pod，先确保 namespace 存在
   kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  check_core_dependencies
+  preflight_all
   ensure_hairpin_nat_fix
-  preflight_cluster
-  wait_ingress_admission
   ensure_ingress_webhook_fail_open
 
   # 清理 cert-manager 资源，避免 Ingress 字段所有权冲突导致 Helm upgrade 失败
@@ -391,7 +359,6 @@ cmd_deploy() {
     kubectl delete certificate -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
     kubectl delete order -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
     kubectl delete challenge -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
-    sleep 3
   fi
 
   log_info "部署 Helm Chart (release=${RELEASE_NAME}, tag=${TAG}, mode=${K3S_MODE}, values=$(basename "${VALUES_FILE}"))..."
@@ -404,14 +371,40 @@ cmd_deploy() {
     "${HELM_ARGS[@]}" \
     "${HELM_DYNAMIC_ARGS[@]}" \
     --wait \
-    --wait-for-jobs \
-    --timeout 600s; then
+    --timeout 180s; then
     log_error "Helm 部署失败，输出诊断信息..."
     dump_debug_state
     exit 1
   fi
 
-  log_ok "Helm 部署完成"
+  # 数据库迁移：绕过 DNS，使用 ClusterIP 直连 PG
+  log_info "运行数据库迁移..."
+  local PG_SVC="${RELEASE_NAME}-pg-rw"
+  local PG_IP PG_PASS_MIG
+  PG_IP=$(kubectl get svc -n "${NAMESPACE}" "${PG_SVC}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+  PG_PASS_MIG=$(kubectl get secret -n "${NAMESPACE}" "${RELEASE_NAME}-pg-superuser" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
+
+  if [[ -n "${PG_IP}" && -n "${PG_PASS_MIG}" ]]; then
+    log_info "PG ClusterIP: ${PG_IP}"
+    for i in 1 2 3; do
+      if kubectl exec -n "${NAMESPACE}" deploy/${RELEASE_NAME}-api-gateway -c api-gateway -- \
+        env PGHOST="${PG_IP}" PGPORT=5432 PGDATABASE=ecommerce PGUSER=postgres PGPASSWORD="${PG_PASS_MIG}" \
+        bun run packages/database/src/migrate.ts 2>&1; then
+        log_ok "数据库迁移完成"
+        break
+      fi
+      if [[ ${i} -eq 3 ]]; then
+        log_warn "数据库迁移失败（可能已是最新）"
+      else
+        log_warn "迁移尝试 ${i} 失败，3s 后重试..."
+        sleep 3
+      fi
+    done
+  else
+    log_warn "未找到 PG Service 或 Secret，跳过迁移"
+  fi
+
+  log_ok "部署完成"
   echo ""
   cmd_status
 }
@@ -478,57 +471,27 @@ cmd_destroy() {
 cmd_migrate() {
   check_kubectl
 
-  log_info "触发数据库迁移 Job..."
+  log_info "触发数据库迁移（kubectl exec + ClusterIP）..."
 
-  # 删除旧的迁移 Job（如果存在）
-  kubectl delete job "${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}" --ignore-not-found
+  local PG_SVC="${RELEASE_NAME}-pg-rw"
+  local PG_IP PG_PASS_MIG
+  PG_IP=$(kubectl get svc -n "${NAMESPACE}" "${PG_SVC}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+  PG_PASS_MIG=$(kubectl get secret -n "${NAMESPACE}" "${RELEASE_NAME}-pg-superuser" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
 
-  # 使用 api-gateway 镜像运行迁移
-  kubectl create job "${RELEASE_NAME}-db-migrate" \
-    --namespace "${NAMESPACE}" \
-    --image="${REGISTRY}/ecom-api-gateway:${TAG}" \
-    --from=cronjob/"${RELEASE_NAME}-db-migrate" 2>/dev/null || {
-    # 如果没有 CronJob，直接创建 Job
-    cat <<EOF | kubectl apply -f -
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: ${RELEASE_NAME}-db-migrate
-  namespace: ${NAMESPACE}
-spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 120
-  template:
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: migrate
-          image: ${REGISTRY}/ecom-api-gateway:${TAG}
-          command: ["bun", "run", "packages/database/src/migrate.ts"]
-          envFrom:
-            - secretRef:
-                name: ${RELEASE_NAME}-secrets
-          env:
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: ${RELEASE_NAME}-secrets
-                  key: postgres-password
-            - name: DATABASE_URL
-              value: "postgresql://postgres:\$(POSTGRES_PASSWORD)@${RELEASE_NAME}-pg-rw:5432/ecommerce"
-EOF
-  }
+  if [[ -z "${PG_IP}" || -z "${PG_PASS_MIG}" ]]; then
+    log_error "未找到 PG Service(${PG_SVC}) 或 Secret，无法执行迁移"
+    exit 1
+  fi
 
-  log_info "等待迁移完成..."
-  kubectl wait --for=condition=complete --timeout=120s \
-    job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}" || {
-    log_error "迁移未在 120s 内完成，查看日志:"
-    kubectl logs job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}"
+  log_info "PG ClusterIP: ${PG_IP}"
+  kubectl exec -n "${NAMESPACE}" deploy/${RELEASE_NAME}-api-gateway -c api-gateway -- \
+    env PGHOST="${PG_IP}" PGPORT=5432 PGDATABASE=ecommerce PGUSER=postgres PGPASSWORD="${PG_PASS_MIG}" \
+    bun run packages/database/src/migrate.ts 2>&1 || {
+    log_error "数据库迁移失败"
     exit 1
   }
 
   log_ok "数据库迁移完成"
-  kubectl logs job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}"
 }
 
 # ============ rollback — Helm 回滚 ============

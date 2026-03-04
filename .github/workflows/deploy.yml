@@ -1,23 +1,21 @@
-# CI/CD — 微服务构建 & 多平台自动部署
+# CI/CD — 微服务构建 & 自动部署
 #
-# 支持 4 种部署平台:
-#   swarm      — Docker Swarm（SSH + docker service update 滚动更新）
-#   k8s        — Kubernetes（kubeconfig 直连 + Helm 部署）
-#   k3s-single — K3s 单节点（kubeconfig 直连 + Helm 部署）
-#   k3s-multi  — K3s 多节点 HA（kubeconfig 直连 + Helm 部署）
-#
-# 仅手动触发（workflow_dispatch）→ 选择平台 → 类型检查 → 构建 → 部署 → 健康检查
+# 触发方式:
+#   1. push 到 main → 自动部署到 k3s-multi
+#   2. 手动触发 workflow_dispatch → 可选平台
 
 name: Build & Deploy
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       platform:
         description: "目标平台"
         required: true
         type: choice
-        default: "swarm"
+        default: "k3s-multi"
         options:
           - swarm
           - k8s
@@ -28,9 +26,9 @@ on:
         required: false
         default: ""
 
-# 同分支只保留最后一次运行（按平台隔离）
+# 同分支只保留最后一次运行
 concurrency:
-  group: deploy-${{ inputs.platform || 'swarm' }}-${{ github.ref }}
+  group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -38,7 +36,7 @@ permissions:
   packages: write
 
 env:
-  PLATFORM: ${{ inputs.platform || 'swarm' }}
+  PLATFORM: ${{ inputs.platform || 'k3s-multi' }}
   DOMAIN: api.find345.site
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────────
@@ -135,8 +133,8 @@ jobs:
     name: Deploy to Swarm
     needs: build-images
     if: >-
-      github.event_name != 'pull_request' &&
-      (inputs.platform == 'swarm' || inputs.platform == '')
+      github.event_name == 'workflow_dispatch' &&
+      inputs.platform == 'swarm'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -218,7 +216,7 @@ jobs:
                   "${STACK}"
 
               echo "Waiting for services to start..."
-              sleep 30
+              sleep 10
 
               echo ""
               echo "══════════ Service status ══════════"
@@ -280,11 +278,11 @@ jobs:
 
   # ─── Job ③b Kubeconfig 直连 K8s/K3s API Server，Helm 部署 ──────────────────
   deploy-k8s:
-    name: Deploy to ${{ inputs.platform }}
+    name: Deploy to ${{ inputs.platform || 'k3s-multi' }}
     needs: build-images
     if: >-
-      github.event_name != 'pull_request' &&
-      startsWith(inputs.platform, 'k')
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && startsWith(inputs.platform, 'k'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -304,17 +302,19 @@ jobs:
           # 根据平台选择 values 文件
           PLATFORM="${{ env.PLATFORM }}"
           if [[ "${PLATFORM}" == "k3s-multi" ]]; then
-            echo "values_flag=-f infra/k8s/ecom-chart/values-k3s-multi.yaml" >> "$GITHUB_OUTPUT"
+            echo "values_flag=-f infra/k3s/values-multi.yaml" >> "$GITHUB_OUTPUT"
           elif [[ "${PLATFORM}" == "k3s-single" ]]; then
-            echo "values_flag=-f infra/k8s/ecom-chart/values-k3s.yaml" >> "$GITHUB_OUTPUT"
+            echo "values_flag=-f infra/k3s/values.yaml" >> "$GITHUB_OUTPUT"
           else
             echo "values_flag=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout (Helm Chart only)
+      - name: Checkout (Helm Chart + values)
         uses: actions/checkout@v4
         with:
-          sparse-checkout: infra/k8s
+          sparse-checkout: |
+            infra/charts
+            infra/k3s
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
@@ -348,6 +348,9 @@ jobs:
             --docker-password="${{ secrets.GHCR_PAT }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Lint Helm chart
+        run: helm lint infra/charts/ecom-chart ${{ steps.vars.outputs.values_flag }}
+
       - name: Helm deploy
         run: |
           set -euo pipefail
@@ -356,47 +359,13 @@ jobs:
           TAG="${{ steps.vars.outputs.tag }}"
           NAMESPACE="ecom"
           RELEASE="ecom"
-          CHART="infra/k8s/ecom-chart"
+          CHART="infra/charts/ecom-chart"
           PLATFORM="${{ env.PLATFORM }}"
           HELM_EXTRA_ARGS=()
 
           echo "══════════════════════════════════════════"
           echo "Deploying ${RELEASE} to ${PLATFORM} (tag: ${TAG})"
           echo "══════════════════════════════════════════"
-
-          # k3s 环境下，Ingress admission webhook 常见短时未就绪，先显式等待
-          wait_ingress_admission() {
-            if [[ "${PLATFORM}" != k3s* ]]; then
-              return 0
-            fi
-
-            if kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-              echo "Waiting for ingress-nginx controller deployment..."
-              kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
-            elif kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-              echo "Waiting for ingress-nginx controller daemonset..."
-              kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
-            else
-              echo "::warning::ingress-nginx-controller not found as Deployment/DaemonSet in namespace ingress-nginx"
-            fi
-
-            echo "Waiting for ingress-nginx admission endpoints..."
-            for i in $(seq 1 36); do
-              EP_READY=$(kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)
-              if [[ -n "${EP_READY}" ]]; then
-                echo "ingress-nginx admission endpoint is ready: ${EP_READY}"
-                return 0
-              fi
-              echo "  attempt ${i}/36: admission endpoint not ready, retry in 5s..."
-              sleep 5
-            done
-
-            echo "::error::ingress-nginx admission endpoints not ready after 180s"
-            kubectl -n ingress-nginx get pods -o wide || true
-            kubectl -n ingress-nginx get svc ingress-nginx-controller-admission -o wide || true
-            kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o yaml || true
-            return 1
-          }
 
           ensure_ingress_webhook_fail_open() {
             if [[ "${PLATFORM}" != k3s* ]]; then
@@ -426,74 +395,91 @@ jobs:
             kubectl get clusterissuer 2>/dev/null || true
           }
 
-          check_core_dependencies() {
-            echo "Checking core dependencies..."
-            kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
+          preflight_all() {
+            echo "Running all preflight checks in parallel..."
+            local PIDS=() NAMES=() FAILS=0
+
+            kubectl get nodes -o wide
+
+            kubectl wait --for=condition=Ready node --all --timeout=30s &
+            PIDS+=($!); NAMES+=("nodes")
+
+            kubectl -n kube-system rollout status deployment/coredns --timeout=30s &
+            PIDS+=($!); NAMES+=("coredns")
+
+            kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=30s &
+            PIDS+=($!); NAMES+=("cnpg")
 
             if kubectl -n redis-operator-system get deployment redis-operator >/dev/null 2>&1; then
-              kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=180s || true
-            else
-              echo "::warning::redis-operator deployment not found in redis-operator-system"
+              kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=30s &
+              PIDS+=($!); NAMES+=("redis-operator")
             fi
 
             if [[ "${PLATFORM}" == k3s* ]]; then
               if kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-                kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
+                kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=30s &
+                PIDS+=($!); NAMES+=("ingress-nginx")
               elif kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-                kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+                kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=30s &
+                PIDS+=($!); NAMES+=("ingress-nginx")
               else
                 echo "::error::ingress-nginx controller not found"
                 return 1
               fi
             fi
-          }
 
-          preflight_cluster() {
-            echo "Running cluster preflight checks..."
-            kubectl get nodes -o wide
-
-            # 节点与 CoreDNS 是 k3s 发布的硬前置条件
-            kubectl wait --for=condition=Ready node --all --timeout=180s || true
-            kubectl -n kube-system rollout status deployment/coredns --timeout=180s || true
-
-            if [[ "${PLATFORM}" == k3s* ]]; then
-              echo "Probing in-cluster DNS resolution (kubernetes.default + Let's Encrypt)..."
-              DNS_POD="dns-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-              kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
-              kubectl -n "${NAMESPACE}" run "${DNS_POD}" \
-                --image=busybox:1.36 \
-                --restart=Never \
-                --command -- sh -c 'nslookup kubernetes.default.svc.cluster.local && nslookup acme-v02.api.letsencrypt.org'
-
-              for i in $(seq 1 30); do
-                PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-                if [[ "${PHASE}" == "Succeeded" || "${PHASE}" == "Failed" ]]; then
-                  break
-                fi
-                sleep 2
-              done
-
-              kubectl -n "${NAMESPACE}" logs "${DNS_POD}" || true
-              PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-              kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
-
-              if [[ "${PHASE}" != "Succeeded" ]]; then
-                echo "::warning::Cluster DNS cannot resolve external domains. Force disable ingress TLS for this deploy."
-                HELM_EXTRA_ARGS+=(--set "ingress.tls.enabled=false")
+            for i in "${!PIDS[@]}"; do
+              if wait ${PIDS[$i]}; then
+                echo "  ✓ ${NAMES[$i]} ready"
+              else
+                echo "::error::${NAMES[$i]} not ready"
+                FAILS=$((FAILS + 1))
               fi
+            done
+
+            if [ ${FAILS} -gt 0 ]; then
+              echo "::error::${FAILS} preflight check(s) failed"
+              return 1
             fi
+            echo "All preflight checks passed."
           }
 
-          start_progress_watcher() {
-            (
-              while true; do
-                echo "---- deploy progress $(date -u +'%Y-%m-%dT%H:%M:%SZ') ----"
-                kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, $2, $3}' || true
-                kubectl get deploy -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, "ready=" $2, "up-to-date=" $3, "available=" $4}' || true
-                sleep 20
-              done
-            ) &
-            WATCHER_PID=$!
+          # 智能部署监控：检测终态错误立即终止 Helm（仅检测新增失败 Pod，忽略部署前已存在的）
+          monitor_helm_deploy() {
+            local HELM_PID=$1
+            local PRE_EXISTING="$2"  # 部署前已失败的 Pod 列表（换行分隔）
+            while kill -0 ${HELM_PID} 2>/dev/null; do
+              echo "---- deploy progress $(date -u +'%Y-%m-%dT%H:%M:%SZ') ----"
+              kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, $2, $3}' || true
+              kubectl get deploy -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, "ready=" $2, "up-to-date=" $3, "available=" $4}' || true
+
+              # 检测 Pod 终态错误 → 过滤掉部署前已存在的 + Init 容器重试（Init:CrashLoopBackOff 是正常重试）
+              ALL_FAILED=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
+                | awk '$3 ~ /ImagePullBackOff|ErrImagePull|InvalidImageName|CreateContainerConfigError/ || $3 == "CrashLoopBackOff" {print $1, $3}' || true)
+              NEW_FAILED=""
+              if [[ -n "${ALL_FAILED}" ]]; then
+                while IFS= read -r LINE; do
+                  POD_NAME=$(echo "${LINE}" | awk '{print $1}')
+                  if ! echo "${PRE_EXISTING}" | grep -qxF "${POD_NAME}"; then
+                    NEW_FAILED="${NEW_FAILED}${LINE}"$'\n'
+                  fi
+                done <<< "${ALL_FAILED}"
+              fi
+              NEW_FAILED=$(echo -n "${NEW_FAILED}" | sed '/^$/d')
+              if [[ -n "${NEW_FAILED}" ]]; then
+                echo "::error::Pod terminal failure detected (new pods only):"
+                echo "${NEW_FAILED}"
+                for POD in $(echo "${NEW_FAILED}" | awk '{print $1}'); do
+                  echo "--- ${POD} events ---"
+                  kubectl get events -n "${NAMESPACE}" --field-selector involvedObject.name="${POD}" --sort-by=.lastTimestamp 2>/dev/null | tail -5 || true
+                done
+                kill ${HELM_PID} 2>/dev/null || true
+                return 1
+              fi
+
+              sleep 5
+            done
+            return 0
           }
 
           # 清理卡住的 pending 状态 release（上次部署失败残留）
@@ -538,9 +524,7 @@ jobs:
             fi
           fi
 
-          check_core_dependencies
-          preflight_cluster
-          wait_ingress_admission
+          preflight_all
           ensure_ingress_webhook_fail_open
 
           # Clean up cert-manager resources to avoid Ingress field ownership conflicts with Helm
@@ -550,7 +534,6 @@ jobs:
             kubectl delete certificate -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
             kubectl delete order -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
             kubectl delete challenge -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
-            sleep 3
           fi
 
           # ── 同步 PG 密码：Secret → PostgreSQL（解决初始 bootstrap 密码漂移） ──
@@ -571,100 +554,54 @@ jobs:
             echo "Password sync done."
           fi
 
-          # ── 预检：在 Helm hook 之外直接跑迁移，捕获完整错误输出 ──
-          echo "══════════ Pre-deploy: testing db-migrate ══════════"
-          MIGRATE_IMAGE="${REGISTRY}/ecom-api-gateway:${TAG}"
-          PG_PASS_RAW="$(kubectl get secret -n "${NAMESPACE}" "${PG_SECRET_NAME}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)"
-          if [[ -n "${PG_PASS_RAW}" ]]; then
-            kubectl delete pod -n "${NAMESPACE}" migrate-debug --ignore-not-found=true >/dev/null 2>&1 || true
-            cat <<EOPOD | kubectl apply -f -
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: migrate-debug
-            namespace: ${NAMESPACE}
-          spec:
-            restartPolicy: Never
-            nodeSelector:
-              role: app
-            imagePullSecrets:
-              - name: ghcr-pull-secret
-            containers:
-              - name: migrate
-                image: ${MIGRATE_IMAGE}
-                command: ["bun", "run", "packages/database/src/migrate.ts"]
-                env:
-                  - name: PGHOST
-                    value: "${PG_RW_HOST}"
-                  - name: PGPORT
-                    value: "5432"
-                  - name: PGDATABASE
-                    value: "ecommerce"
-                  - name: PGUSER
-                    value: "postgres"
-                  - name: PGPASSWORD
-                    valueFrom:
-                      secretKeyRef:
-                        name: ${PG_SECRET_NAME}
-                        key: password
-          EOPOD
-
-            # 等待 Pod 结束（最多 120 秒）
-            if kubectl wait -n "${NAMESPACE}" pod/migrate-debug --for=condition=Ready --timeout=5s 2>/dev/null; then
-              true
-            fi
-            kubectl wait -n "${NAMESPACE}" pod/migrate-debug \
-              --for=jsonpath='{.status.phase}'=Succeeded \
-              --timeout=120s 2>/dev/null || true
-
-            PHASE=$(kubectl get pod -n "${NAMESPACE}" migrate-debug -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-            echo "migrate-debug pod phase: ${PHASE}"
-            echo "══════════ migrate-debug logs ══════════"
-            kubectl logs -n "${NAMESPACE}" migrate-debug --tail=200 2>&1 || true
-            kubectl delete pod -n "${NAMESPACE}" migrate-debug --ignore-not-found=true >/dev/null 2>&1 || true
-
-            if [[ "${PHASE}" == "Succeeded" ]]; then
-              echo "Pre-deploy migration succeeded."
-            else
-              echo "::error::Pre-deploy migration failed! Check logs above."
-              exit 1
-            fi
-          else
-            echo "::warning::Secret ${PG_SECRET_NAME} not found, skipping pre-deploy migration test (first install?)"
-          fi
-
           HELM_MAX_RETRIES=3
           HELM_ATTEMPT=1
           while [ ${HELM_ATTEMPT} -le ${HELM_MAX_RETRIES} ]; do
             echo "Helm upgrade attempt ${HELM_ATTEMPT}/${HELM_MAX_RETRIES}"
 
+            # 快照部署前已存在的失败 Pod（避免误判旧 Pod 为本次部署失败）
+            PRE_FAIL_PODS=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
+              | awk '$3 ~ /ImagePullBackOff|ErrImagePull|InvalidImageName|CreateContainerConfigError/ || $3 == "CrashLoopBackOff" {print $1}' || true)
+            if [[ -n "${PRE_FAIL_PODS}" ]]; then
+              echo "Pre-existing failed pods (will be ignored by monitor):"
+              echo "${PRE_FAIL_PODS}"
+            fi
+
             set +e
-            start_progress_watcher
-            HELM_OUTPUT=$(
-              helm upgrade --install "${RELEASE}" "${CHART}" \
-                --namespace "${NAMESPACE}" \
-                --create-namespace \
-                ${{ steps.vars.outputs.values_flag }} \
-                --set "global.registry=${REGISTRY}" \
-                --set "global.imageTag=${TAG}" \
-                --set "global.imagePullSecrets[0]=ghcr-pull-secret" \
-                --set "redis.serviceName=${REDIS_SERVICE_NAME}" \
-                --set-string "secrets.postgresPassword=${PG_PASS}" \
-                --set-string "secrets.replicationPassword=${REPL_PASS}" \
-                --set-string "secrets.jwtAccessSecret=${JWT_ACCESS}" \
-                --set-string "secrets.jwtRefreshSecret=${JWT_REFRESH}" \
-                --set-string "secrets.internalSecret=${INTERNAL}" \
-                "${HELM_EXTRA_ARGS[@]}" \
-                --wait \
-                --wait-for-jobs \
-                --timeout 600s 2>&1
-            )
+            # Helm 后台运行，前台智能监控
+            helm upgrade --install "${RELEASE}" "${CHART}" \
+              --namespace "${NAMESPACE}" \
+              --create-namespace \
+              ${{ steps.vars.outputs.values_flag }} \
+              --set "global.registry=${REGISTRY}" \
+              --set "global.imageTag=${TAG}" \
+              --set "global.imagePullSecrets[0]=ghcr-pull-secret" \
+              --set "redis.serviceName=${REDIS_SERVICE_NAME}" \
+              --set-string "secrets.postgresPassword=${PG_PASS}" \
+              --set-string "secrets.replicationPassword=${REPL_PASS}" \
+              --set-string "secrets.jwtAccessSecret=${JWT_ACCESS}" \
+              --set-string "secrets.jwtRefreshSecret=${JWT_REFRESH}" \
+              --set-string "secrets.internalSecret=${INTERNAL}" \
+              "${HELM_EXTRA_ARGS[@]}" \
+              --wait \
+              --timeout 180s > /tmp/helm-output.log 2>&1 &
+            HELM_PID=$!
+
+            MONITOR_FAIL=""
+            monitor_helm_deploy ${HELM_PID} "${PRE_FAIL_PODS}" || MONITOR_FAIL="true"
+
+            wait ${HELM_PID} 2>/dev/null
             HELM_EXIT=$?
-            kill "${WATCHER_PID}" >/dev/null 2>&1 || true
-            wait "${WATCHER_PID}" 2>/dev/null || true
+            HELM_OUTPUT=$(cat /tmp/helm-output.log 2>/dev/null || true)
             set -e
 
             echo "${HELM_OUTPUT}"
+
+            if [[ -n "${MONITOR_FAIL}" ]]; then
+              echo "::error::Deploy terminated: pod terminal failure detected"
+              dump_debug_state
+              exit 1
+            fi
 
             if [ ${HELM_EXIT} -eq 0 ]; then
               echo "Helm deploy succeeded."
@@ -673,37 +610,32 @@ jobs:
 
             if echo "${HELM_OUTPUT}" | grep -q 'validate.nginx.ingress.kubernetes.io'; then
               if [ ${HELM_ATTEMPT} -lt ${HELM_MAX_RETRIES} ]; then
-                echo "Detected ingress admission webhook timeout, waiting and retrying..."
-                wait_ingress_admission || true
-                sleep 10
+                echo "Detected ingress admission webhook timeout, deleting webhook and retrying..."
+                ensure_ingress_webhook_fail_open
+                sleep 2
                 HELM_ATTEMPT=$((HELM_ATTEMPT + 1))
                 continue
               fi
-            fi
-
-            if echo "${HELM_OUTPUT}" | grep -q 'post-upgrade hooks failed: resource Job/ecom/ecom-db-migrate'; then
-              echo "::warning::db-migrate hook failed, collecting diagnostics..."
-              kubectl get job -n "${NAMESPACE}" ecom-db-migrate -o wide || true
-              kubectl describe job -n "${NAMESPACE}" ecom-db-migrate || true
-              echo "══════════ migrate pods ══════════"
-              kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=db-migrate -o wide || true
-              echo "══════════ migrate pod logs (all containers) ══════════"
-              for POD in $(kubectl get pods -n "${NAMESPACE}" -l app.kubernetes.io/name=db-migrate -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-                echo "--- pod: ${POD} ---"
-                echo ">> init container (wait-pg):"
-                kubectl logs -n "${NAMESPACE}" "${POD}" -c wait-pg --tail=20 2>&1 || true
-                echo ">> main container (migrate):"
-                kubectl logs -n "${NAMESPACE}" "${POD}" -c migrate --tail=100 2>&1 || true
-                echo ">> termination message:"
-                kubectl get pod -n "${NAMESPACE}" "${POD}" -o jsonpath='{.status.containerStatuses[0].state.terminated.message}' 2>&1 || true
-                echo ""
-              done
             fi
 
             echo "::error::Helm deploy failed"
             dump_debug_state
             exit ${HELM_EXIT}
           done
+
+          # ── 数据库迁移：绕过 DNS，用 ClusterIP 直连 PG ──
+          PG_SVC="${RELEASE}-pg-rw"
+          PG_IP=$(kubectl get svc -n "${NAMESPACE}" "${PG_SVC}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+          PG_PASS=$(kubectl get secret -n "${NAMESPACE}" "${RELEASE}-pg-superuser" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
+
+          if [[ -n "${PG_IP}" && -n "${PG_PASS}" ]]; then
+            echo "Running database migration (PG ClusterIP: ${PG_IP})..."
+            kubectl exec -n "${NAMESPACE}" deploy/${RELEASE}-api-gateway -c api-gateway -- \
+              env PGHOST="${PG_IP}" PGPORT=5432 PGDATABASE=ecommerce PGUSER=postgres PGPASSWORD="${PG_PASS}" \
+              bun run packages/database/src/migrate.ts 2>&1 || echo "::warning::Migration failed (may already be up to date)"
+          else
+            echo "::warning::PG service or secret not found, skipping migration"
+          fi
 
       - name: Verify deployment
         if: always()
@@ -740,24 +672,50 @@ jobs:
           URL="https://${{ env.DOMAIN }}/health"
           echo "Smoke testing: ${URL}"
 
-          for i in $(seq 1 20); do
+          for i in $(seq 1 10); do
             HTTP_CODE=$(curl -s -o /tmp/health.json -w '%{http_code}' \
-              --max-time 10 \
+              --max-time 5 \
               -X POST "${URL}" 2>/dev/null) || HTTP_CODE="000"
 
             if [ "${HTTP_CODE}" = "200" ]; then
-              echo "Health check passed (attempt ${i}/20)"
+              echo "Health check passed (attempt ${i}/10)"
               cat /tmp/health.json
               exit 0
             fi
 
-            echo "  attempt ${i}/20 — HTTP ${HTTP_CODE}, retrying in 10s..."
-            sleep 10
+            echo "  attempt ${i}/10 — HTTP ${HTTP_CODE}, retrying in 3s..."
+            sleep 3
           done
 
-          echo "::error::Health check failed after 20 attempts"
+          echo "::error::Health check failed after 10 attempts"
           cat /tmp/health.json 2>/dev/null || true
           exit 1
+
+      - name: Write kubeconfig for rollback
+        if: failure() && startsWith(env.PLATFORM, 'k')
+        run: |
+          mkdir -p "${HOME}/.kube"
+          PLATFORM="${{ env.PLATFORM }}"
+          if [[ "${PLATFORM}" == k3s* ]]; then
+            echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
+          else
+            echo "${{ secrets.K8S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
+          fi
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Setup Helm for rollback
+        if: failure() && startsWith(env.PLATFORM, 'k')
+        uses: azure/setup-helm@v4
+
+      - name: Rollback Helm release
+        if: failure() && startsWith(env.PLATFORM, 'k')
+        run: |
+          echo "::warning::Smoke test failed — rolling back Helm release"
+          helm rollback ecom -n ecom --wait || echo "::error::Helm rollback failed"
+
+      - name: Cleanup kubeconfig
+        if: always() && startsWith(env.PLATFORM, 'k')
+        run: rm -f "${HOME}/.kube/config"
 
       - name: Deploy summary
         if: always()

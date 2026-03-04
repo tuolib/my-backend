@@ -152,7 +152,8 @@ startupProbe:
     port: {{ .port }}
   initialDelaySeconds: 5
   periodSeconds: 5
-  failureThreshold: 12
+  timeoutSeconds: 5
+  failureThreshold: 18
 livenessProbe:
   httpGet:
     path: {{ $path }}

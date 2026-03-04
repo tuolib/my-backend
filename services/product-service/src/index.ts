@@ -15,11 +15,14 @@ import internalRoutes from './routes/internal';
 import stockRoutes from './routes/stock';
 
 // 启动时注册 Lua 脚本（带重试，等待 Redis 就绪）
+// 注意：不阻塞 HTTP 服务启动，确保启动探针可达
+let luaReady = false;
 async function initLuaScripts(maxRetries = 10, delayMs = 3000): Promise<void> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       await redis.ping();
       await registerLuaScripts(redis);
+      luaReady = true;
       console.log('[INIT] Lua scripts registered');
       return;
     } catch (err) {
@@ -31,7 +34,11 @@ async function initLuaScripts(maxRetries = 10, delayMs = 3000): Promise<void> {
     }
   }
 }
-await initLuaScripts();
+// 后台初始化，不阻塞 HTTP 服务器启动
+initLuaScripts().catch((err) => {
+  console.error('[FATAL] Lua script init failed, process will exit:', err);
+  process.exit(1);
+});
 
 const app = new Hono<AppEnv>();
 

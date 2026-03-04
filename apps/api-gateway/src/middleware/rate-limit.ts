@@ -35,6 +35,12 @@ function getClientIp(c: { req: { header: (name: string) => string | undefined } 
 export function rateLimitMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const path = c.req.path;
+
+    // 健康检查路径跳过限流，确保启动探针不受 Redis 延迟影响
+    if (path === '/health' || path === '/health/live') {
+      return next();
+    }
+
     const ip = getClientIp(c);
     const hasAuth = !!c.req.header('Authorization');
 

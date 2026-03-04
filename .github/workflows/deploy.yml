@@ -457,8 +457,11 @@ jobs:
               INIT_FAIL_PODS=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
                 | awk '$3 ~ /^Init:/ && $3 !~ /Running/ {print $1}' || true)
               for POD in ${INIT_FAIL_PODS}; do
-                echo "--- ${POD} init container logs ---"
-                kubectl logs -n "${NAMESPACE}" "${POD}" --all-containers --init-containers 2>/dev/null | tail -10 || true
+                INIT_NAMES=$(kubectl get pod -n "${NAMESPACE}" "${POD}" -o jsonpath='{.spec.initContainers[*].name}' 2>/dev/null || true)
+                for IC in ${INIT_NAMES}; do
+                  echo "--- ${POD} / init:${IC} logs ---"
+                  kubectl logs -n "${NAMESPACE}" "${POD}" -c "${IC}" 2>/dev/null | tail -20 || true
+                done
               done
 
               # 检测 Pod 终态错误 → 过滤掉部署前已存在的 + Init 容器重试（Init:CrashLoopBackOff 是正常重试）

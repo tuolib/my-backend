@@ -1,23 +1,21 @@
-# CI/CD — 微服务构建 & 多平台自动部署
+# CI/CD — 微服务构建 & 自动部署
 #
-# 支持 4 种部署平台:
-#   swarm      — Docker Swarm（SSH + docker service update 滚动更新）
-#   k8s        — Kubernetes（kubeconfig 直连 + Helm 部署）
-#   k3s-single — K3s 单节点（kubeconfig 直连 + Helm 部署）
-#   k3s-multi  — K3s 多节点 HA（kubeconfig 直连 + Helm 部署）
-#
-# 仅手动触发（workflow_dispatch）→ 选择平台 → 类型检查 → 构建 → 部署 → 健康检查
+# 触发方式:
+#   1. push 到 main → 自动部署到 k3s-multi
+#   2. 手动触发 workflow_dispatch → 可选平台
 
 name: Build & Deploy
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       platform:
         description: "目标平台"
         required: true
         type: choice
-        default: "swarm"
+        default: "k3s-multi"
         options:
           - swarm
           - k8s
@@ -28,9 +26,9 @@ on:
         required: false
         default: ""
 
-# 同分支只保留最后一次运行（按平台隔离）
+# 同分支只保留最后一次运行
 concurrency:
-  group: deploy-${{ inputs.platform || 'swarm' }}-${{ github.ref }}
+  group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -38,7 +36,7 @@ permissions:
   packages: write
 
 env:
-  PLATFORM: ${{ inputs.platform || 'swarm' }}
+  PLATFORM: ${{ inputs.platform || 'k3s-multi' }}
   DOMAIN: api.find345.site
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────────
@@ -135,8 +133,8 @@ jobs:
     name: Deploy to Swarm
     needs: build-images
     if: >-
-      github.event_name != 'pull_request' &&
-      (inputs.platform == 'swarm' || inputs.platform == '')
+      github.event_name == 'workflow_dispatch' &&
+      inputs.platform == 'swarm'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -280,11 +278,11 @@ jobs:
 
   # ─── Job ③b Kubeconfig 直连 K8s/K3s API Server，Helm 部署 ──────────────────
   deploy-k8s:
-    name: Deploy to ${{ inputs.platform }}
+    name: Deploy to ${{ inputs.platform || 'k3s-multi' }}
     needs: build-images
     if: >-
-      github.event_name != 'pull_request' &&
-      startsWith(inputs.platform, 'k')
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && startsWith(inputs.platform, 'k'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

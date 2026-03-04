@@ -167,65 +167,6 @@ preflight_all() {
   log_ok "所有预检通过"
 }
 
-# 智能监控 db-migrate Job：轮询状态，检测终态错误立即退出
-wait_migrate_job() {
-  local JOB="${RELEASE_NAME}-db-migrate"
-  local MAX_POLLS=30
-  local POLL=0
-  log_info "监控 db-migrate job..."
-
-  # 等待 Job 出现（Helm post-upgrade hook 创建）
-  for i in $(seq 1 10); do
-    kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1 && break
-    sleep 1
-  done
-  if ! kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1; then
-    log_warn "db-migrate job 10s 内未出现，跳过监控"
-    return 0
-  fi
-
-  while [ ${POLL} -lt ${MAX_POLLS} ]; do
-    # Job 成功？
-    local SUCCEEDED=$(kubectl get job -n "${NAMESPACE}" "${JOB}" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
-    if [[ "${SUCCEEDED}" == "1" ]]; then
-      log_ok "db-migrate 完成"
-      kubectl logs -n "${NAMESPACE}" -l job-name="${JOB}" -c migrate --tail=20 2>/dev/null || true
-      return 0
-    fi
-
-    # Job 失败（backoffLimit / activeDeadline）？
-    local FAILED_STATUS=$(kubectl get job -n "${NAMESPACE}" "${JOB}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
-    if [[ "${FAILED_STATUS}" == "True" ]]; then
-      log_error "db-migrate job 失败"
-      kubectl logs -n "${NAMESPACE}" -l job-name="${JOB}" --all-containers --tail=50 2>/dev/null || true
-      return 1
-    fi
-
-    # Pod 级别终态错误 → 立即快速失败
-    for POD in $(kubectl get pods -n "${NAMESPACE}" -l job-name="${JOB}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-      for JP in \
-        '{.status.containerStatuses[0].state.waiting.reason}' \
-        '{.status.initContainerStatuses[0].state.waiting.reason}'; do
-        local REASON=$(kubectl get pod -n "${NAMESPACE}" "${POD}" -o jsonpath="${JP}" 2>/dev/null || true)
-        case "${REASON}" in
-          ImagePullBackOff|ErrImagePull|InvalidImageName|CreateContainerConfigError)
-            log_error "db-migrate pod 终态错误: ${REASON}"
-            kubectl describe pod -n "${NAMESPACE}" "${POD}" | tail -15 || true
-            return 1
-            ;;
-        esac
-      done
-    done
-
-    sleep 2
-    POLL=$((POLL + 1))
-  done
-
-  log_error "db-migrate 监控超时 (${MAX_POLLS} 轮)"
-  kubectl logs -n "${NAMESPACE}" -l job-name="${JOB}" --all-containers --tail=50 2>/dev/null || true
-  return 1
-}
-
 dump_debug_state() {
   echo ""
   echo -e "${BLUE}=== Debug: Pods ===${NC}"
@@ -436,16 +377,7 @@ cmd_deploy() {
     exit 1
   fi
 
-  log_ok "Helm 资源部署完成"
-
-  # 监控 post-upgrade hook（db-migrate）— 自动检测完成/失败
-  if ! wait_migrate_job; then
-    log_error "数据库迁移失败"
-    dump_debug_state
-    exit 1
-  fi
-
-  log_ok "部署完成（含数据库迁移）"
+  log_ok "部署完成（db-migrate 作为 api-gateway init 容器自动运行）"
   echo ""
   cmd_status
 }
@@ -517,13 +449,7 @@ cmd_migrate() {
   # 删除旧的迁移 Job（如果存在）
   kubectl delete job "${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}" --ignore-not-found
 
-  # 使用 api-gateway 镜像运行迁移
-  kubectl create job "${RELEASE_NAME}-db-migrate" \
-    --namespace "${NAMESPACE}" \
-    --image="${REGISTRY}/ecom-api-gateway:${TAG}" \
-    --from=cronjob/"${RELEASE_NAME}-db-migrate" 2>/dev/null || {
-    # 如果没有 CronJob，直接创建 Job
-    cat <<EOF | kubectl apply -f -
+  cat <<EOF | kubectl apply -f -
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -539,25 +465,27 @@ spec:
         - name: migrate
           image: ${REGISTRY}/ecom-api-gateway:${TAG}
           command: ["bun", "run", "packages/database/src/migrate.ts"]
-          envFrom:
-            - secretRef:
-                name: ${RELEASE_NAME}-secrets
           env:
-            - name: POSTGRES_PASSWORD
+            - name: PGHOST
+              value: ${RELEASE_NAME}-pg-rw
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: ecommerce
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: ${RELEASE_NAME}-secrets
-                  key: postgres-password
-            - name: DATABASE_URL
-              value: "postgresql://postgres:\$(POSTGRES_PASSWORD)@${RELEASE_NAME}-pg-rw:5432/ecommerce"
+                  name: ${RELEASE_NAME}-pg-superuser
+                  key: password
 EOF
-  }
 
   log_info "等待迁移完成..."
-  kubectl wait --for=condition=complete --timeout=60s \
+  kubectl wait --for=condition=complete --timeout=120s \
     job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}" || {
-    log_error "迁移未在 60s 内完成，查看日志:"
-    kubectl logs job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}"
+    log_error "迁移失败，查看日志:"
+    kubectl logs job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}" || true
     exit 1
   }
 

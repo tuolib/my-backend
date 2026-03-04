@@ -444,65 +444,6 @@ jobs:
             echo "All preflight checks passed."
           }
 
-          # 智能监控 db-migrate Job：轮询状态，检测终态错误立即退出
-          wait_migrate_job() {
-            local JOB="${RELEASE}-db-migrate"
-            local MAX_POLLS=30
-            local POLL=0
-            echo "Monitoring db-migrate job..."
-
-            # 等待 Job 出现（Helm post-upgrade hook 创建）
-            for i in $(seq 1 10); do
-              kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1 && break
-              sleep 1
-            done
-            if ! kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1; then
-              echo "::warning::db-migrate job not found after 10s, skipping"
-              return 0
-            fi
-
-            while [ ${POLL} -lt ${MAX_POLLS} ]; do
-              # Job 成功？
-              local SUCCEEDED=$(kubectl get job -n "${NAMESPACE}" "${JOB}" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
-              if [[ "${SUCCEEDED}" == "1" ]]; then
-                echo "db-migrate completed successfully."
-                kubectl logs -n "${NAMESPACE}" -l job-name="${JOB}" -c migrate --tail=20 2>/dev/null || true
-                return 0
-              fi
-
-              # Job 失败（backoffLimit / activeDeadline）？
-              local FAILED_STATUS=$(kubectl get job -n "${NAMESPACE}" "${JOB}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
-              if [[ "${FAILED_STATUS}" == "True" ]]; then
-                echo "::error::db-migrate job failed"
-                kubectl logs -n "${NAMESPACE}" -l job-name="${JOB}" --all-containers --tail=50 2>/dev/null || true
-                return 1
-              fi
-
-              # Pod 级别终态错误 → 立即快速失败
-              for POD in $(kubectl get pods -n "${NAMESPACE}" -l job-name="${JOB}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-                for JP in \
-                  '{.status.containerStatuses[0].state.waiting.reason}' \
-                  '{.status.initContainerStatuses[0].state.waiting.reason}'; do
-                  local REASON=$(kubectl get pod -n "${NAMESPACE}" "${POD}" -o jsonpath="${JP}" 2>/dev/null || true)
-                  case "${REASON}" in
-                    ImagePullBackOff|ErrImagePull|InvalidImageName|CreateContainerConfigError)
-                      echo "::error::db-migrate pod terminal failure: ${REASON}"
-                      kubectl describe pod -n "${NAMESPACE}" "${POD}" | tail -15 || true
-                      return 1
-                      ;;
-                  esac
-                done
-              done
-
-              sleep 2
-              POLL=$((POLL + 1))
-            done
-
-            echo "::error::db-migrate monitoring timeout (${MAX_POLLS} polls)"
-            kubectl logs -n "${NAMESPACE}" -l job-name="${JOB}" --all-containers --tail=50 2>/dev/null || true
-            return 1
-          }
-
           # 智能部署监控：检测终态错误立即终止 Helm（仅检测新增失败 Pod，忽略部署前已存在的）
           monitor_helm_deploy() {
             local HELM_PID=$1
@@ -682,8 +623,7 @@ jobs:
             exit ${HELM_EXIT}
           done
 
-          # Helm resources ready; now monitor post-upgrade hook (db-migrate)
-          wait_migrate_job
+          echo "Deploy complete (db-migrate runs as api-gateway init container)."
 
       - name: Verify deployment
         if: always()

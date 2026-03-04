@@ -25,5 +25,5 @@ COPY --from=build /app/tsconfig.json ./
 COPY --from=build /app/drizzle ./drizzle
 
 EXPOSE 3000
-USER bun
+USER 1000
 CMD ["bun", "run", "src/index.ts"]

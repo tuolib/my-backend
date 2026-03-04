@@ -15,8 +15,8 @@ RUN bun install --frozen-lockfile
 COPY packages/ ./packages/
 COPY apps/api-gateway/ ./apps/api-gateway/
 
-RUN addgroup -S app && adduser -S app -G app
-USER app
+RUN addgroup -g 1000 -S app && adduser -u 1000 -S app -G app
+USER 1000
 
 EXPOSE 3000
 CMD ["bun", "run", "apps/api-gateway/src/index.ts"]

@@ -1,0 +1,270 @@
+# 手动触发：安装 Loki + Promtail + Grafana 日志收集栈
+#
+# 一次性基础设施初始化，在 GitHub Actions UI 中手动触发
+# 通过 kubeconfig 远程连接 k3s 集群执行 Helm 安装
+
+name: Install Loki Stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      grafana_host:
+        description: "Grafana 域名"
+        required: false
+        default: "log.find345.site"
+      grafana_admin_password:
+        description: "Grafana admin 密码"
+        required: false
+        default: "admin"
+      loki_storage_size:
+        description: "Loki PVC 大小"
+        required: false
+        default: "5Gi"
+      grafana_storage_size:
+        description: "Grafana PVC 大小"
+        required: false
+        default: "1Gi"
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install Loki + Grafana
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "${HOME}/.kube"
+          echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Verify cluster connectivity
+        run: kubectl cluster-info
+
+      - name: Create monitoring namespace
+        run: kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Delete ingress admission webhook
+        run: kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true
+
+      - name: Install Loki
+        run: |
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update grafana
+
+          helm upgrade --install loki grafana/loki \
+            --namespace monitoring \
+            --set deploymentMode=SingleBinary \
+            --set loki.auth_enabled=false \
+            --set loki.commonConfig.replication_factor=1 \
+            --set loki.storage.type=filesystem \
+            --set 'loki.schemaConfig.configs[0].from=2024-01-01' \
+            --set 'loki.schemaConfig.configs[0].store=tsdb' \
+            --set 'loki.schemaConfig.configs[0].object_store=filesystem' \
+            --set 'loki.schemaConfig.configs[0].schema=v13' \
+            --set 'loki.schemaConfig.configs[0].index.prefix=loki_index_' \
+            --set 'loki.schemaConfig.configs[0].index.period=24h' \
+            --set singleBinary.replicas=1 \
+            --set singleBinary.persistence.enabled=true \
+            --set "singleBinary.persistence.size=${{ inputs.loki_storage_size }}" \
+            --set singleBinary.resources.requests.cpu=100m \
+            --set singleBinary.resources.requests.memory=128Mi \
+            --set singleBinary.resources.limits.cpu=250m \
+            --set singleBinary.resources.limits.memory=256Mi \
+            --set read.replicas=0 \
+            --set write.replicas=0 \
+            --set backend.replicas=0 \
+            --set chunksCache.enabled=false \
+            --set resultsCache.enabled=false \
+            --set gateway.enabled=false \
+            --set test.enabled=false \
+            --set lokiCanary.enabled=false \
+            --wait --timeout 180s
+
+      - name: Install Promtail
+        run: |
+          # 创建 promtail pipeline 配置（提取 ecom 命名空间的 JSON 日志字段为 label）
+          cat > /tmp/promtail-values.yaml << 'EOF'
+          config:
+            snippets:
+              pipelineStages:
+                - match:
+                    selector: '{namespace="ecom"}'
+                    stages:
+                      - json:
+                          expressions:
+                            level: level
+                            service: service
+                            traceId: traceId
+                            msg: msg
+                      - labels:
+                            level:
+                            service:
+                      - json:
+                          expressions:
+                            time: time
+                      - timestamp:
+                          source: time
+                          format: RFC3339Nano
+                          fallback_formats:
+                            - RFC3339
+            positions:
+              filename: /run/promtail/positions.yaml
+          EOF
+
+          helm upgrade --install promtail grafana/promtail \
+            --namespace monitoring \
+            -f /tmp/promtail-values.yaml \
+            --set "config.clients[0].url=http://loki:3100/loki/api/v1/push" \
+            --set resources.requests.cpu=50m \
+            --set resources.requests.memory=64Mi \
+            --set resources.limits.cpu=100m \
+            --set resources.limits.memory=128Mi \
+            --wait --timeout 120s
+
+      - name: Install Grafana
+        run: |
+          helm upgrade --install grafana grafana/grafana \
+            --namespace monitoring \
+            --set "adminPassword=${{ inputs.grafana_admin_password }}" \
+            --set persistence.enabled=true \
+            --set "persistence.size=${{ inputs.grafana_storage_size }}" \
+            --set resources.requests.cpu=100m \
+            --set resources.requests.memory=128Mi \
+            --set resources.limits.cpu=250m \
+            --set resources.limits.memory=256Mi \
+            --set 'datasources.datasources\.yaml.apiVersion=1' \
+            --set 'datasources.datasources\.yaml.datasources[0].name=Loki' \
+            --set 'datasources.datasources\.yaml.datasources[0].type=loki' \
+            --set 'datasources.datasources\.yaml.datasources[0].url=http://loki:3100' \
+            --set 'datasources.datasources\.yaml.datasources[0].access=proxy' \
+            --set 'datasources.datasources\.yaml.datasources[0].isDefault=true' \
+            --wait --timeout 120s
+
+      - name: Create Grafana Ingress
+        env:
+          GRAFANA_HOST: ${{ inputs.grafana_host }}
+        run: |
+          # 检测 ClusterIssuer 是否存在
+          TLS_ENABLED=false
+          if kubectl get clusterissuer letsencrypt-prod &>/dev/null; then
+            TLS_ENABLED=true
+            echo "ClusterIssuer letsencrypt-prod found, enabling HTTPS"
+          fi
+
+          # 构建 Ingress YAML
+          if [[ "${TLS_ENABLED}" == "true" ]]; then
+            cat <<YAML | kubectl apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: grafana-ingress
+            namespace: monitoring
+            annotations:
+              cert-manager.io/cluster-issuer: "letsencrypt-prod"
+              nginx.ingress.kubernetes.io/ssl-redirect: "true"
+              nginx.ingress.kubernetes.io/configuration-snippet: |
+                more_set_headers "X-Content-Type-Options: nosniff";
+                more_set_headers "X-Frame-Options: DENY";
+          spec:
+            ingressClassName: nginx
+            tls:
+              - hosts:
+                  - ${GRAFANA_HOST}
+                secretName: grafana-tls
+            rules:
+              - host: ${GRAFANA_HOST}
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: grafana
+                          port:
+                            number: 80
+          YAML
+          else
+            cat <<YAML | kubectl apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: grafana-ingress
+            namespace: monitoring
+            annotations:
+              nginx.ingress.kubernetes.io/ssl-redirect: "false"
+              nginx.ingress.kubernetes.io/configuration-snippet: |
+                more_set_headers "X-Content-Type-Options: nosniff";
+                more_set_headers "X-Frame-Options: DENY";
+          spec:
+            ingressClassName: nginx
+            rules:
+              - host: ${GRAFANA_HOST}
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: grafana
+                          port:
+                            number: 80
+          YAML
+          fi
+
+      - name: Wait for TLS certificate
+        run: |
+          echo "Waiting for TLS certificate..."
+          for i in $(seq 1 12); do
+            if kubectl get secret grafana-tls -n monitoring &>/dev/null; then
+              echo "TLS certificate ready"
+              exit 0
+            fi
+            echo "  attempt ${i}/12, waiting 10s..."
+            sleep 10
+          done
+          echo "::warning::TLS certificate not ready yet, may take a few more minutes"
+
+      - name: Verify installation
+        run: |
+          echo "══════════ Pods ══════════"
+          kubectl get pods -n monitoring
+          echo ""
+          echo "══════════ Services ══════════"
+          kubectl get svc -n monitoring
+          echo ""
+          echo "══════════ Ingress ══════════"
+          kubectl get ingress -n monitoring
+          echo ""
+          echo "══════════ Certificate ══════════"
+          kubectl get certificate -n monitoring 2>/dev/null || echo "(none)"
+
+      - name: Summary
+        run: |
+          echo "## Loki Stack Installed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Grafana** | https://${{ inputs.grafana_host }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **账号** | admin / ${{ inputs.grafana_admin_password }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Loki PVC** | ${{ inputs.loki_storage_size }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 日志查询示例" >> "$GITHUB_STEP_SUMMARY"
+          echo '```logql' >> "$GITHUB_STEP_SUMMARY"
+          echo '{namespace="ecom"} | json' >> "$GITHUB_STEP_SUMMARY"
+          echo '{namespace="ecom"} | json | traceId = "xxx"' >> "$GITHUB_STEP_SUMMARY"
+          echo '{namespace="ecom", service="order"} | json | level = "error"' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup kubeconfig
+        if: always()
+        run: rm -f "${HOME}/.kube/config"

@@ -3,9 +3,10 @@
  * Redis Key 规范: product:{resource}:{id}
  */
 import { redis } from '@repo/database';
-import { sha256 } from '@repo/shared';
+import { sha256, createLogger } from '@repo/shared';
 import type { ProductDetail, CategoryNode } from '../types';
 
+const log = createLogger('cache');
 const EMPTY_MARKER = '{"empty":true}';
 
 // ── 商品详情缓存 ──
@@ -14,14 +15,14 @@ export async function getCachedProductDetail(productId: string): Promise<Product
   const key = `product:detail:${productId}`;
   const cached = await redis.get(key);
   if (cached === null) {
-    console.log(`[CACHE MISS] product:detail:${productId}`);
+    log.debug('cache miss', { key });
     return null;
   }
   if (cached === EMPTY_MARKER) {
-    console.log(`[CACHE HIT empty] product:detail:${productId}`);
+    log.debug('cache hit empty', { key });
     return 'empty';
   }
-  console.log(`[CACHE HIT] product:detail:${productId}`);
+  log.debug('cache hit', { key });
   return JSON.parse(cached) as ProductDetail;
 }
 

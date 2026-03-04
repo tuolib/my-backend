@@ -1,9 +1,12 @@
 /**
  * 请求日志中间件 — 记录请求/响应摘要
- * 格式：[traceId] POST /api/v1/product/list → 200 (12ms)
+ * 生产环境输出结构化 JSON，开发环境输出彩色文本
  */
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../types/context';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('http');
 
 export function logger(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
@@ -13,10 +16,9 @@ export function logger(): MiddlewareHandler<AppEnv> {
 
     await next();
 
-    const duration = Math.round(performance.now() - start);
-    const traceId = c.get('traceId') ?? '-';
+    const durationMs = Math.round(performance.now() - start);
     const status = c.res.status;
 
-    console.log(`[${traceId}] ${method} ${path} → ${status} (${duration}ms)`);
+    log.info('request completed', { method, path, status, durationMs });
   };
 }

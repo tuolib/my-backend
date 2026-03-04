@@ -53,6 +53,8 @@ export type {
 } from './types/context';
 
 // ── utils ──
+export { createLogger } from './utils/logger';
+export type { Logger } from './utils/logger';
 export { generateId, generateOrderNo } from './utils/id';
 export { now, addMinutes, addDays, isExpired, formatISO } from './utils/time';
 export { hashPassword, verifyPassword, sha256 } from './utils/hash';

@@ -2,9 +2,10 @@
  * API Gateway 入口
  * 唯一外部入口 :3000
  */
-import { getConfig } from '@repo/shared';
+import { getConfig, createLogger } from '@repo/shared';
 import { app } from './app';
 
+const log = createLogger('api-gateway');
 const config = getConfig();
 const port = config.server.ports.gateway;
 
@@ -13,4 +14,4 @@ export default {
   fetch: app.fetch,
 };
 
-console.log(`API Gateway running at http://localhost:${port}`);
+log.info('API Gateway started', { port });

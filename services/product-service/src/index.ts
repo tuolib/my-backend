@@ -3,7 +3,7 @@
  * 商品管理、分类、SKU、搜索、缓存、库存内部接口
  */
 import { Hono } from 'hono';
-import { requestId, logger, errorHandler } from '@repo/shared';
+import { requestId, logger, errorHandler, createLogger } from '@repo/shared';
 import type { AppEnv } from '@repo/shared';
 import { redis, registerLuaScripts } from '@repo/database';
 import productRoutes from './routes/product';
@@ -14,6 +14,8 @@ import adminStockRoutes from './routes/admin-stock';
 import internalRoutes from './routes/internal';
 import stockRoutes from './routes/stock';
 
+const log = createLogger('product-service');
+
 // 启动时注册 Lua 脚本（带重试，等待 Redis 就绪）
 // 注意：不阻塞 HTTP 服务启动，确保启动探针可达
 let luaReady = false;
@@ -23,10 +25,12 @@ async function initLuaScripts(maxRetries = 10, delayMs = 3000): Promise<void> {
       await redis.ping();
       await registerLuaScripts(redis);
       luaReady = true;
-      console.log('[INIT] Lua scripts registered');
+      log.info('Lua scripts registered');
       return;
     } catch (err) {
-      console.warn(`[INIT] Lua script registration failed (attempt ${attempt}/${maxRetries}):`, (err as Error).message);
+      log.warn('Lua script registration failed', {
+        attempt, maxRetries, error: (err as Error).message,
+      });
       if (attempt === maxRetries) {
         throw new Error(`Failed to register Lua scripts after ${maxRetries} attempts`);
       }
@@ -36,7 +40,7 @@ async function initLuaScripts(maxRetries = 10, delayMs = 3000): Promise<void> {
 }
 // 后台初始化，不阻塞 HTTP 服务器启动
 initLuaScripts().catch((err) => {
-  console.error('[FATAL] Lua script init failed, process will exit:', err);
+  log.fatal('Lua script init failed, process will exit', { error: (err as Error).message });
   process.exit(1);
 });
 

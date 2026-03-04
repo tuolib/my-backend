@@ -3,11 +3,12 @@
  * 封装对 user-service 内部接口的调用
  * 用于获取收货地址信息
  */
-import { getConfig, internalFetch } from '@repo/shared';
+import { getConfig, internalFetch, createLogger } from '@repo/shared';
 import type { UserAddressDetail } from '../types';
 
 const config = getConfig();
 const USER_SERVICE_URL = config.services.userUrl;
+const log = createLogger('user-client');
 
 /** 根据地址 ID 和用户 ID 获取收货地址详情 */
 export async function fetchAddress(
@@ -20,7 +21,7 @@ export async function fetchAddress(
   });
 
   if (!res.ok) {
-    console.error(`[order-service] user address fetch failed: ${res.status}`);
+    log.error('user address fetch failed', { status: res.status });
     return null;
   }
 

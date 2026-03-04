@@ -13,6 +13,7 @@ import {
   NotFoundError,
   ErrorCode,
   isExpired,
+  createLogger,
 } from '@repo/shared';
 import { redis } from '@repo/database';
 
@@ -29,6 +30,7 @@ import type {
   PaymentStatusResult,
 } from '../types';
 
+const log = createLogger('payment');
 const TIMEOUT_ZSET_KEY = 'order:timeout';
 
 // ═══════════════════════════════════════════════════
@@ -104,14 +106,14 @@ export async function handleNotify(
   // 第 3 步：查订单
   const order = await orderRepo.findById(body.orderId);
   if (!order) {
-    console.warn(`[payment] notify for non-existent order: ${body.orderId}`);
+    log.warn('notify for non-existent order', { orderId: body.orderId });
     return { success: true }; // 不让三方重试
   }
 
   if (order.status !== OrderStatus.PENDING) {
-    console.warn(
-      `[payment] notify for order in non-pending status: ${body.orderId}, status=${order.status}`,
-    );
+    log.warn('notify for order in non-pending status', {
+      orderId: body.orderId, status: order.status,
+    });
     return { success: true }; // 不让三方重试
   }
 
@@ -144,7 +146,7 @@ export async function handleNotify(
 
     if (!updated) {
       // 乐观锁冲突 — 可能同时被取消或超时
-      console.warn(`[payment] optimistic lock conflict for order: ${body.orderId}`);
+      log.warn('optimistic lock conflict', { orderId: body.orderId });
       return { success: true };
     }
 
@@ -156,7 +158,9 @@ export async function handleNotify(
         body.orderId,
       );
     } catch (err) {
-      console.error(`[payment] stock confirm failed for order ${body.orderId}:`, err);
+      log.error('stock confirm failed', {
+        orderId: body.orderId, error: (err as Error).message,
+      });
       // 不影响支付回调返回，库存确认可通过后续对账修复
     }
 

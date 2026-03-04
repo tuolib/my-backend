@@ -28,10 +28,13 @@ import {
   InternalError,
   NotFoundError,
   ErrorCode,
+  createLogger,
 } from '@repo/shared';
 import * as stockRepo from '../repositories/stock.repo';
 import * as cacheService from './cache.service';
 import * as skuRepo from '../repositories/sku.repo';
+
+const log = createLogger('stock');
 
 // ═══════════════════════════════════════════════
 // reserve — 库存预扣（下单时调用）
@@ -64,7 +67,7 @@ export async function reserveSingle(
     quantity,
   });
 
-  console.log(`[STOCK RESERVE] skuId=${skuId} qty=${quantity} orderId=${orderId}`);
+  log.info('reserve completed', { skuId, quantity, orderId });
 }
 
 /** 多 SKU 原子预扣 */
@@ -93,9 +96,7 @@ export async function reserveMulti(
     })),
   );
 
-  console.log(
-    `[STOCK RESERVE MULTI] orderId=${orderId} items=${JSON.stringify(items)}`,
-  );
+  log.info('reserve multi completed', { orderId, items });
 }
 
 // ═══════════════════════════════════════════════
@@ -117,7 +118,7 @@ export async function releaseSingle(
     quantity,
   });
 
-  console.log(`[STOCK RELEASE] skuId=${skuId} qty=${quantity} orderId=${orderId}`);
+  log.info('release completed', { skuId, quantity, orderId });
 }
 
 /** 多 SKU 批量释放 */
@@ -136,9 +137,7 @@ export async function releaseMulti(
     })),
   );
 
-  console.log(
-    `[STOCK RELEASE MULTI] orderId=${orderId} items=${JSON.stringify(items)}`,
-  );
+  log.info('release multi completed', { orderId, items });
 }
 
 // ═══════════════════════════════════════════════
@@ -167,21 +166,22 @@ export async function confirmSingle(
         type: 'confirm',
         quantity,
       });
-      console.log(
-        `[STOCK CONFIRM] skuId=${skuId} qty=${quantity} orderId=${orderId} version=${skuStock.version}→${skuStock.version + 1}`,
-      );
+      log.info('confirm completed', {
+        skuId, quantity, orderId,
+        version: `${skuStock.version}→${skuStock.version + 1}`,
+      });
       return;
     }
 
-    console.warn(
-      `[STOCK CONFIRM RETRY] skuId=${skuId} attempt=${attempt}/${MAX_CONFIRM_RETRIES} version=${skuStock.version}`,
-    );
+    log.warn('confirm retry', {
+      skuId, attempt, maxRetries: MAX_CONFIRM_RETRIES, version: skuStock.version,
+    });
   }
 
   // 3 次重试均失败
-  console.error(
-    `[STOCK CONFIRM FAILED] skuId=${skuId} qty=${quantity} orderId=${orderId} — 乐观锁冲突超过最大重试次数`,
-  );
+  log.error('confirm failed — optimistic lock exceeded max retries', {
+    skuId, quantity, orderId,
+  });
   throw new InternalError(
     `Stock confirm failed after ${MAX_CONFIRM_RETRIES} retries for SKU ${skuId}`,
   );
@@ -231,9 +231,10 @@ export async function confirmMulti(
             quantity: item.quantity,
           });
 
-          console.log(
-            `[STOCK CONFIRM] skuId=${item.skuId} qty=${item.quantity} orderId=${orderId} version=${skuStock.version}→${skuStock.version + 1}`,
-          );
+          log.info('confirm completed', {
+            skuId: item.skuId, quantity: item.quantity, orderId,
+            version: `${skuStock.version}→${skuStock.version + 1}`,
+          });
           break;
         }
 
@@ -243,9 +244,9 @@ export async function confirmMulti(
           );
         }
 
-        console.warn(
-          `[STOCK CONFIRM RETRY] skuId=${item.skuId} attempt=${attempt}/${MAX_CONFIRM_RETRIES}`,
-        );
+        log.warn('confirm retry', {
+          skuId: item.skuId, attempt, maxRetries: MAX_CONFIRM_RETRIES,
+        });
       }
     }
   });
@@ -293,7 +294,5 @@ export async function adjust(
   // 4. 清除该 SKU 所属商品的详情缓存
   await cacheService.invalidateProductDetail(sku.productId);
 
-  console.log(
-    `[STOCK ADJUST] skuId=${skuId} newStock=${newStock} reason=${reason ?? 'N/A'}`,
-  );
+  log.info('adjust completed', { skuId, newStock, reason: reason ?? 'N/A' });
 }

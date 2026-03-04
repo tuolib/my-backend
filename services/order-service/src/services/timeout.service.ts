@@ -8,12 +8,14 @@
  *   - 取消失败不从 ZSET 移除（下轮重试），成功才移除
  */
 import { redis } from '@repo/database';
+import { createLogger } from '@repo/shared';
 
 import * as orderRepo from '../repositories/order.repo';
 import * as orderItemRepo from '../repositories/order-item.repo';
 import * as productClient from './product-client';
 import { OrderStatus } from '../state-machine/order-status';
 
+const log = createLogger('timeout');
 const TIMEOUT_ZSET_KEY = 'order:timeout';
 
 export class OrderTimeoutChecker {
@@ -24,7 +26,7 @@ export class OrderTimeoutChecker {
 
   start(): void {
     if (this.timer) return;
-    console.log('[TIMEOUT] Checker started, interval=%dms', this.intervalMs);
+    log.info('checker started', { intervalMs: this.intervalMs });
     this.timer = setInterval(() => this.check(), this.intervalMs);
     // 启动时立即执行一次
     this.check();
@@ -34,7 +36,7 @@ export class OrderTimeoutChecker {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
-      console.log('[TIMEOUT] Checker stopped');
+      log.info('checker stopped');
     }
   }
 
@@ -63,13 +65,13 @@ export class OrderTimeoutChecker {
 
       if (expiredOrderIds.length === 0) return;
 
-      console.log('[TIMEOUT] Found %d expired orders', expiredOrderIds.length);
+      log.info('found expired orders', { count: expiredOrderIds.length });
 
       for (const orderId of expiredOrderIds) {
         await this.cancelExpiredOrder(orderId);
       }
     } catch (err) {
-      console.error('[TIMEOUT] Check failed:', err);
+      log.error('check failed', { error: (err as Error).message });
     } finally {
       this.running = false;
     }
@@ -100,7 +102,7 @@ export class OrderTimeoutChecker {
 
       if (!updated) {
         // 乐观锁冲突（可能同时被用户取消/支付），下次循环再检查
-        console.warn('[TIMEOUT] Optimistic lock conflict for order %s', orderId);
+        log.warn('optimistic lock conflict', { orderId });
         return;
       }
 
@@ -114,9 +116,9 @@ export class OrderTimeoutChecker {
       // 5. 从 ZSET 移除
       await redis.zrem(TIMEOUT_ZSET_KEY, orderId);
 
-      console.log('[TIMEOUT] Order %s auto-cancelled, stock released', orderId);
+      log.info('order auto-cancelled, stock released', { orderId });
     } catch (err) {
-      console.error('[TIMEOUT] Failed to cancel order %s:', orderId, err);
+      log.error('failed to cancel order', { orderId, error: (err as Error).message });
       // 不从 ZSET 移除，下次循环重试
     }
   }

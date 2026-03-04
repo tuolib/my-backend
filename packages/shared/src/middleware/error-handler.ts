@@ -6,13 +6,20 @@
 import type { ErrorHandler } from 'hono';
 import type { AppEnv } from '../types/context';
 import { AppError } from '../errors/http-errors';
+import { createLogger } from '../utils/logger';
+
+const log = createLogger('error-handler');
 
 export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   const traceId = c.get('traceId') ?? '';
 
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
-      console.error(`[${traceId}] ${err.name}: ${err.message}`, err.stack);
+      log.error(err.message, {
+        errorCode: err.errorCode || 'INTERNAL_ERROR',
+        statusCode: err.statusCode,
+        stack: err.stack,
+      });
     }
 
     return c.json(
@@ -33,7 +40,10 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   }
 
   // 未知错误
-  console.error(`[${traceId}] Unhandled error:`, err);
+  log.error('unhandled error', {
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  });
 
   const message =
     process.env.NODE_ENV === 'production'

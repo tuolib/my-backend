@@ -3,11 +3,12 @@
  * 封装对 product-service 内部接口的调用
  * 用于 SKU 查询、库存预扣/释放/确认
  */
-import { getConfig, InternalError, internalFetch } from '@repo/shared';
+import { getConfig, InternalError, internalFetch, createLogger } from '@repo/shared';
 import type { SkuDetail } from '../types';
 
 const config = getConfig();
 const PRODUCT_SERVICE_URL = config.services.productUrl;
+const log = createLogger('product-client');
 
 /** 批量查询 SKU 详情（含商品信息 + 首图） */
 export async function fetchSkuBatch(skuIds: string[]): Promise<SkuDetail[]> {
@@ -65,7 +66,7 @@ export async function releaseStock(
   });
 
   if (!res.ok) {
-    console.error(`[order-service] stock release failed: ${res.status}, orderId=${orderId}`);
+    log.error('stock release failed', { status: res.status, orderId });
   }
 }
 

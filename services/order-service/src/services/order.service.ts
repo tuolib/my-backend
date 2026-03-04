@@ -17,6 +17,7 @@ import {
   NotFoundError,
   ErrorCode,
   InternalError,
+  createLogger,
 } from '@repo/shared';
 import { db, redis } from '@repo/database';
 import { orders, orderItems, orderAddresses } from '@repo/database';
@@ -39,6 +40,8 @@ import type {
   OrderAddressDetail,
 } from '../types';
 import type { PaginatedData, PaginationMeta } from '@repo/shared';
+
+const log = createLogger('order');
 
 // ── 常量 ──
 const ORDER_TIMEOUT_MINUTES = 30;
@@ -178,7 +181,7 @@ export async function create(
     // PG unique constraint on idempotency_key (code 23505) → 并发幂等竞争
     // 释放本次库存预扣，返回先成功插入的那条订单
     if (err?.code === '23505' && String(err?.constraint_name ?? err?.message ?? '').includes('idempotency')) {
-      console.warn(`[order-service] idempotency race detected, releasing stock for ${orderId}`);
+      log.warn('idempotency race detected, releasing stock', { orderId });
       await productClient.releaseStock(stockItems, orderId);
       const winner = await orderRepo.findByIdempotencyKey(idempotencyKey);
       if (winner) {
@@ -191,7 +194,7 @@ export async function create(
       }
     }
     // 其他 PG 事务失败 → 回滚库存预扣并抛出
-    console.error(`[order-service] PG transaction failed, releasing stock: ${(err as Error).message}`);
+    log.error('PG transaction failed, releasing stock', { error: (err as Error).message });
     await productClient.releaseStock(stockItems, orderId);
     throw err;
   }
@@ -201,7 +204,7 @@ export async function create(
 
   // 第 8 步：清理购物车（best effort，失败不影响订单）
   cartClient.clearCartItems(userId, skuIds).catch((err) => {
-    console.warn(`[order-service] cart cleanup failed: ${(err as Error).message}`);
+    log.warn('cart cleanup failed', { error: (err as Error).message });
   });
 
   // 第 9 步：返回

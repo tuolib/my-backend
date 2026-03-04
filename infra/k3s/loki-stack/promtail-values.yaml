@@ -1,0 +1,40 @@
+# Promtail pipeline 配置
+# 对 ecom 命名空间的 JSON 日志提取 level、service 为 Loki label
+# 支持在 Grafana 中按字段过滤：{service="order", level="error"}
+
+config:
+  snippets:
+    # 自定义 pipeline：仅对 ecom 命名空间的日志进行 JSON 解析
+    pipelineStages:
+      # 1. 仅处理 ecom 命名空间的日志
+      - match:
+          selector: '{namespace="ecom"}'
+          stages:
+            # 2. 解析 JSON 日志行
+            - json:
+                expressions:
+                  level: level
+                  service: service
+                  traceId: traceId
+                  msg: msg
+
+            # 3. 将 level 和 service 提升为 Loki label（可索引字段）
+            - labels:
+                level:
+                service:
+
+            # 4. 时间戳解析（使用日志中的 time 字段）
+            - json:
+                expressions:
+                  time: time
+            - timestamp:
+                source: time
+                format: RFC3339Nano
+                fallback_formats:
+                  - RFC3339
+
+      # 非 ecom 命名空间的日志保持原样（不解析）
+
+  # 只采集 Pod 日志（默认路径）
+  positions:
+    filename: /run/promtail/positions.yaml

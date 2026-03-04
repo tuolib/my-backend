@@ -5,11 +5,13 @@ import { describe, test, expect } from 'bun:test';
 import { Hono } from 'hono';
 import type { AppEnv } from '../types/context';
 import { requestId } from './request-id';
+import { success } from '../response';
 
 function createApp() {
   const app = new Hono<AppEnv>();
   app.use('*', requestId());
   app.get('/test', (c) => c.json({ traceId: c.get('traceId') }));
+  app.get('/success', (c) => c.json(success({ id: 1 })));
   return app;
 }
 
@@ -43,5 +45,16 @@ describe('requestId middleware', () => {
     const res = await app.request('/test');
 
     expect(res.headers.get('X-Request-Id')).toBeTruthy();
+  });
+
+  test('success() 构建器的空 traceId 被中间件正确注入', async () => {
+    const app = createApp();
+    const res = await app.request('/success');
+    const body = await res.json();
+
+    expect(body.success).toBe(true);
+    expect(body.traceId).toBeTruthy();
+    expect(body.traceId).toHaveLength(21);
+    expect(res.headers.get('X-Request-Id')).toBe(body.traceId);
   });
 });

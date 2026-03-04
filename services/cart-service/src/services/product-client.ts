@@ -3,7 +3,7 @@
  * 封装对 product-service 内部接口的调用
  * 用于获取 SKU 实时数据（价格、库存、状态）
  */
-import { getConfig } from '@repo/shared';
+import { getConfig, internalFetch } from '@repo/shared';
 import { redis } from '@repo/database';
 import type { SkuDetail } from '../types';
 
@@ -17,12 +17,8 @@ const PRODUCT_SERVICE_URL = config.services.productUrl;
 export async function fetchSkuBatch(skuIds: string[]): Promise<SkuDetail[]> {
   if (skuIds.length === 0) return [];
 
-  const res = await fetch(`${PRODUCT_SERVICE_URL}/internal/product/sku/batch`, {
+  const res = await internalFetch(`${PRODUCT_SERVICE_URL}/internal/product/sku/batch`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-internal-token': config.internal.secret,
-    },
     body: JSON.stringify({ skuIds }),
   });
 

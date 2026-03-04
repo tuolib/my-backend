@@ -3,7 +3,7 @@
  * 封装对 product-service 内部接口的调用
  * 用于 SKU 查询、库存预扣/释放/确认
  */
-import { getConfig, InternalError } from '@repo/shared';
+import { getConfig, InternalError, internalFetch } from '@repo/shared';
 import type { SkuDetail } from '../types';
 
 const config = getConfig();
@@ -13,12 +13,8 @@ const PRODUCT_SERVICE_URL = config.services.productUrl;
 export async function fetchSkuBatch(skuIds: string[]): Promise<SkuDetail[]> {
   if (skuIds.length === 0) return [];
 
-  const res = await fetch(`${PRODUCT_SERVICE_URL}/internal/product/sku/batch`, {
+  const res = await internalFetch(`${PRODUCT_SERVICE_URL}/internal/product/sku/batch`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-internal-token': config.internal.secret,
-    },
     body: JSON.stringify({ skuIds }),
   });
 
@@ -35,12 +31,8 @@ export async function reserveStock(
   items: Array<{ skuId: string; quantity: number }>,
   orderId: string,
 ): Promise<void> {
-  const res = await fetch(`${PRODUCT_SERVICE_URL}/internal/stock/reserve`, {
+  const res = await internalFetch(`${PRODUCT_SERVICE_URL}/internal/stock/reserve`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-internal-token': config.internal.secret,
-    },
     body: JSON.stringify({ items, orderId }),
   });
 
@@ -67,12 +59,8 @@ export async function releaseStock(
   items: Array<{ skuId: string; quantity: number }>,
   orderId: string,
 ): Promise<void> {
-  const res = await fetch(`${PRODUCT_SERVICE_URL}/internal/stock/release`, {
+  const res = await internalFetch(`${PRODUCT_SERVICE_URL}/internal/stock/release`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-internal-token': config.internal.secret,
-    },
     body: JSON.stringify({ items, orderId }),
   });
 
@@ -86,12 +74,8 @@ export async function confirmStock(
   items: Array<{ skuId: string; quantity: number }>,
   orderId: string,
 ): Promise<void> {
-  const res = await fetch(`${PRODUCT_SERVICE_URL}/internal/stock/confirm`, {
+  const res = await internalFetch(`${PRODUCT_SERVICE_URL}/internal/stock/confirm`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-internal-token': config.internal.secret,
-    },
     body: JSON.stringify({ items, orderId }),
   });
 

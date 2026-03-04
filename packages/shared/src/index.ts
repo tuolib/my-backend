@@ -56,6 +56,8 @@ export type {
 export { generateId, generateOrderNo } from './utils/id';
 export { now, addMinutes, addDays, isExpired, formatISO } from './utils/time';
 export { hashPassword, verifyPassword, sha256 } from './utils/hash';
+export { internalFetch } from './utils/internal-fetch';
+export { getTraceId, requestContext } from './utils/request-context';
 export {
   signAccessToken,
   verifyAccessToken,

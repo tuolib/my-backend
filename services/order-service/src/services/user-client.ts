@@ -3,7 +3,7 @@
  * 封装对 user-service 内部接口的调用
  * 用于获取收货地址信息
  */
-import { getConfig } from '@repo/shared';
+import { getConfig, internalFetch } from '@repo/shared';
 import type { UserAddressDetail } from '../types';
 
 const config = getConfig();
@@ -14,12 +14,8 @@ export async function fetchAddress(
   addressId: string,
   userId: string,
 ): Promise<UserAddressDetail | null> {
-  const res = await fetch(`${USER_SERVICE_URL}/internal/user/address/detail`, {
+  const res = await internalFetch(`${USER_SERVICE_URL}/internal/user/address/detail`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-internal-token': config.internal.secret,
-    },
     body: JSON.stringify({ addressId, userId }),
   });
 

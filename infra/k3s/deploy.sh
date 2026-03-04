@@ -118,31 +118,53 @@ HPEOF
   log_ok "Hairpin NAT 修复已应用: ${INGRESS_HOST} → ${CNI_GW}"
 }
 
-check_core_dependencies() {
-  log_info "检查关键依赖就绪状态..."
-  kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=30s
+preflight_all() {
+  log_info "并行执行所有预检..."
+  local PIDS=() NAMES=() FAILS=0
+
+  kubectl get nodes -o wide || true
+
+  kubectl wait --for=condition=Ready node --all --timeout=30s &
+  PIDS+=($!); NAMES+=("nodes")
+
+  kubectl -n kube-system rollout status deployment/coredns --timeout=30s &
+  PIDS+=($!); NAMES+=("coredns")
+
+  kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=30s &
+  PIDS+=($!); NAMES+=("cnpg")
 
   if kubectl -n redis-operator-system get deployment redis-operator >/dev/null 2>&1; then
-    kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=30s || true
+    kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=30s &
+    PIDS+=($!); NAMES+=("redis-operator")
   else
     log_warn "未发现 redis-operator deployment（redis-operator-system）"
   fi
 
   if kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=30s
+    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=30s &
+    PIDS+=($!); NAMES+=("ingress-nginx")
   elif kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=30s
+    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=30s &
+    PIDS+=($!); NAMES+=("ingress-nginx")
   else
     log_error "未发现 ingress-nginx controller"
     return 1
   fi
-}
 
-preflight_cluster() {
-  log_info "执行集群预检（Node/CoreDNS）..."
-  kubectl get nodes -o wide || true
-  kubectl wait --for=condition=Ready node --all --timeout=30s || true
-  kubectl -n kube-system rollout status deployment/coredns --timeout=30s || true
+  for i in "${!PIDS[@]}"; do
+    if wait ${PIDS[$i]}; then
+      log_ok "${NAMES[$i]} ready"
+    else
+      log_error "${NAMES[$i]} not ready"
+      FAILS=$((FAILS + 1))
+    fi
+  done
+
+  if [ ${FAILS} -gt 0 ]; then
+    log_error "${FAILS} 项预检失败"
+    return 1
+  fi
+  log_ok "所有预检通过"
 }
 
 # 智能监控 db-migrate Job：轮询状态，检测终态错误立即退出
@@ -155,10 +177,10 @@ wait_migrate_job() {
   # 等待 Job 出现（Helm post-upgrade hook 创建）
   for i in $(seq 1 10); do
     kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1 && break
-    sleep 2
+    sleep 1
   done
   if ! kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1; then
-    log_warn "db-migrate job 20s 内未出现，跳过监控"
+    log_warn "db-migrate job 10s 内未出现，跳过监控"
     return 0
   fi
 
@@ -195,7 +217,7 @@ wait_migrate_job() {
       done
     done
 
-    sleep 3
+    sleep 2
     POLL=$((POLL + 1))
   done
 
@@ -385,9 +407,8 @@ cmd_deploy() {
 
   # preflight 里会运行 dns probe pod，先确保 namespace 存在
   kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  check_core_dependencies
+  preflight_all
   ensure_hairpin_nat_fix
-  preflight_cluster
   ensure_ingress_webhook_fail_open
 
   # 清理 cert-manager 资源，避免 Ingress 字段所有权冲突导致 Helm upgrade 失败

@@ -181,7 +181,7 @@ readinessProbe:
   httpGet:
     path: {{ $path }}
     port: {{ .port }}
-  periodSeconds: 5
+  periodSeconds: 2
   timeoutSeconds: 3
   failureThreshold: 3
 {{- end }}

@@ -397,33 +397,53 @@ jobs:
             kubectl get clusterissuer 2>/dev/null || true
           }
 
-          check_core_dependencies() {
-            echo "Checking core dependencies..."
-            kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=30s
+          preflight_all() {
+            echo "Running all preflight checks in parallel..."
+            local PIDS=() NAMES=() FAILS=0
+
+            kubectl get nodes -o wide
+
+            kubectl wait --for=condition=Ready node --all --timeout=30s &
+            PIDS+=($!); NAMES+=("nodes")
+
+            kubectl -n kube-system rollout status deployment/coredns --timeout=30s &
+            PIDS+=($!); NAMES+=("coredns")
+
+            kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=30s &
+            PIDS+=($!); NAMES+=("cnpg")
 
             if kubectl -n redis-operator-system get deployment redis-operator >/dev/null 2>&1; then
-              kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=30s || true
-            else
-              echo "::warning::redis-operator deployment not found in redis-operator-system"
+              kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=30s &
+              PIDS+=($!); NAMES+=("redis-operator")
             fi
 
             if [[ "${PLATFORM}" == k3s* ]]; then
               if kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-                kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=30s
+                kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=30s &
+                PIDS+=($!); NAMES+=("ingress-nginx")
               elif kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-                kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=30s
+                kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=30s &
+                PIDS+=($!); NAMES+=("ingress-nginx")
               else
                 echo "::error::ingress-nginx controller not found"
                 return 1
               fi
             fi
-          }
 
-          preflight_cluster() {
-            echo "Running cluster preflight checks..."
-            kubectl get nodes -o wide
-            kubectl wait --for=condition=Ready node --all --timeout=30s || true
-            kubectl -n kube-system rollout status deployment/coredns --timeout=30s || true
+            for i in "${!PIDS[@]}"; do
+              if wait ${PIDS[$i]}; then
+                echo "  ✓ ${NAMES[$i]} ready"
+              else
+                echo "::error::${NAMES[$i]} not ready"
+                FAILS=$((FAILS + 1))
+              fi
+            done
+
+            if [ ${FAILS} -gt 0 ]; then
+              echo "::error::${FAILS} preflight check(s) failed"
+              return 1
+            fi
+            echo "All preflight checks passed."
           }
 
           # 智能监控 db-migrate Job：轮询状态，检测终态错误立即退出
@@ -436,10 +456,10 @@ jobs:
             # 等待 Job 出现（Helm post-upgrade hook 创建）
             for i in $(seq 1 10); do
               kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1 && break
-              sleep 2
+              sleep 1
             done
             if ! kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1; then
-              echo "::warning::db-migrate job not found after 20s, skipping"
+              echo "::warning::db-migrate job not found after 10s, skipping"
               return 0
             fi
 
@@ -476,7 +496,7 @@ jobs:
                 done
               done
 
-              sleep 3
+              sleep 2
               POLL=$((POLL + 1))
             done
 
@@ -507,7 +527,7 @@ jobs:
                 return 1
               fi
 
-              sleep 10
+              sleep 5
             done
             return 0
           }
@@ -554,8 +574,7 @@ jobs:
             fi
           fi
 
-          check_core_dependencies
-          preflight_cluster
+          preflight_all
           ensure_ingress_webhook_fail_open
 
           # Clean up cert-manager resources to avoid Ingress field ownership conflicts with Helm
@@ -695,8 +714,8 @@ jobs:
               exit 0
             fi
 
-            echo "  attempt ${i}/10 — HTTP ${HTTP_CODE}, retrying in 5s..."
-            sleep 5
+            echo "  attempt ${i}/10 — HTTP ${HTTP_CODE}, retrying in 3s..."
+            sleep 3
           done
 
           echo "::error::Health check failed after 10 attempts"

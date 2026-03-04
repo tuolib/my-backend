@@ -37,7 +37,7 @@ spec:
           command: ["bun", "run", "packages/database/src/migrate.ts"]
           env:
             - name: PGHOST
-              value: {{ include "ecom.pgRwHost" . }}.{{ .Values.global.namespace }}.svc.cluster.local
+              value: {{ include "ecom.pgRwHost" . }}
             - name: PGPORT
               value: "5432"
             - name: PGDATABASE

@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       {{- include "ecom.imagePullSecrets" . | nindent 6 }}
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 5
       nodeSelector:
         {{- toYaml .Values.orderService.nodeSelector | nindent 8 }}
       containers:

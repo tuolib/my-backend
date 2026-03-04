@@ -453,17 +453,6 @@ jobs:
               kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, $2, $3}' || true
               kubectl get deploy -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, "ready=" $2, "up-to-date=" $3, "available=" $4}' || true
 
-              # 显示 Init 容器失败日志（帮助诊断 db-migrate 等 init 容器问题）
-              INIT_FAIL_PODS=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
-                | awk '$3 ~ /^Init:/ && $3 !~ /Running/ {print $1}' || true)
-              for POD in ${INIT_FAIL_PODS}; do
-                INIT_NAMES=$(kubectl get pod -n "${NAMESPACE}" "${POD}" -o jsonpath='{.spec.initContainers[*].name}' 2>/dev/null || true)
-                for IC in ${INIT_NAMES}; do
-                  echo "--- ${POD} / init:${IC} logs ---"
-                  kubectl logs -n "${NAMESPACE}" "${POD}" -c "${IC}" 2>/dev/null | tail -20 || true
-                done
-              done
-
               # 检测 Pod 终态错误 → 过滤掉部署前已存在的 + Init 容器重试（Init:CrashLoopBackOff 是正常重试）
               ALL_FAILED=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
                 | awk '$3 ~ /ImagePullBackOff|ErrImagePull|InvalidImageName|CreateContainerConfigError/ || $3 == "CrashLoopBackOff" {print $1, $3}' || true)
@@ -634,7 +623,17 @@ jobs:
             exit ${HELM_EXIT}
           done
 
-          echo "Deploy complete (db-migrate runs as api-gateway init container)."
+          # ── 数据库迁移：在已运行的 Pod 上执行，DNS 可靠 ──
+          echo "Running database migration on existing pod..."
+          for i in 1 2 3; do
+            if kubectl exec -n "${NAMESPACE}" deploy/${RELEASE}-api-gateway -c api-gateway -- \
+              bun run packages/database/src/migrate.ts 2>&1; then
+              echo "Database migration completed."
+              break
+            fi
+            echo "Migration attempt ${i} failed, retrying in 3s..."
+            sleep 3
+          done
 
       - name: Verify deployment
         if: always()

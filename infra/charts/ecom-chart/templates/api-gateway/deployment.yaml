@@ -34,7 +34,6 @@ spec:
         - name: api-gateway
           image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.apiGateway.image "tag" .Values.global.imageTag) }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-          command: ["sh", "-c", "bun run packages/database/src/migrate.ts || echo '[migrate] skipped (may already be applied by another replica)'; exec bun run apps/api-gateway/src/index.ts"]
           ports:
             - name: http
               containerPort: {{ .Values.apiGateway.port }}

@@ -377,7 +377,19 @@ cmd_deploy() {
     exit 1
   fi
 
-  log_ok "部署完成（db-migrate 作为 api-gateway init 容器自动运行）"
+  # 数据库迁移：在已运行的 Pod 上执行
+  log_info "运行数据库迁移..."
+  for i in 1 2 3; do
+    if kubectl exec -n "${NAMESPACE}" deploy/${RELEASE_NAME}-api-gateway -c api-gateway -- \
+      bun run packages/database/src/migrate.ts 2>&1; then
+      log_ok "数据库迁移完成"
+      break
+    fi
+    log_warn "迁移尝试 ${i} 失败，3s 后重试..."
+    sleep 3
+  done
+
+  log_ok "部署完成"
   echo ""
   cmd_status
 }

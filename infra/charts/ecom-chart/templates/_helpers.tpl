@@ -166,22 +166,22 @@ startupProbe:
   httpGet:
     path: {{ $path }}
     port: {{ .port }}
-  initialDelaySeconds: 5
-  periodSeconds: 5
-  timeoutSeconds: 5
-  failureThreshold: 18
+  initialDelaySeconds: 1
+  periodSeconds: 2
+  timeoutSeconds: 3
+  failureThreshold: 10
 livenessProbe:
   httpGet:
     path: {{ $path }}
     port: {{ .port }}
-  periodSeconds: 15
-  timeoutSeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
   failureThreshold: 3
 readinessProbe:
   httpGet:
     path: {{ $path }}
     port: {{ .port }}
-  periodSeconds: 10
-  timeoutSeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
   failureThreshold: 3
 {{- end }}

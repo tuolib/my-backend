@@ -218,7 +218,7 @@ jobs:
                   "${STACK}"
 
               echo "Waiting for services to start..."
-              sleep 30
+              sleep 10
 
               echo ""
               echo "══════════ Service status ══════════"
@@ -399,19 +399,19 @@ jobs:
 
           check_core_dependencies() {
             echo "Checking core dependencies..."
-            kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
+            kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=30s
 
             if kubectl -n redis-operator-system get deployment redis-operator >/dev/null 2>&1; then
-              kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=180s || true
+              kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=30s || true
             else
               echo "::warning::redis-operator deployment not found in redis-operator-system"
             fi
 
             if [[ "${PLATFORM}" == k3s* ]]; then
               if kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-                kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
+                kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=30s
               elif kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-                kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+                kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=30s
               else
                 echo "::error::ingress-nginx controller not found"
                 return 1
@@ -422,24 +422,24 @@ jobs:
           preflight_cluster() {
             echo "Running cluster preflight checks..."
             kubectl get nodes -o wide
-            kubectl wait --for=condition=Ready node --all --timeout=120s || true
-            kubectl -n kube-system rollout status deployment/coredns --timeout=120s || true
+            kubectl wait --for=condition=Ready node --all --timeout=30s || true
+            kubectl -n kube-system rollout status deployment/coredns --timeout=30s || true
           }
 
           # 智能监控 db-migrate Job：轮询状态，检测终态错误立即退出
           wait_migrate_job() {
             local JOB="${RELEASE}-db-migrate"
-            local MAX_POLLS=60
+            local MAX_POLLS=30
             local POLL=0
             echo "Monitoring db-migrate job..."
 
             # 等待 Job 出现（Helm post-upgrade hook 创建）
-            for i in $(seq 1 12); do
+            for i in $(seq 1 10); do
               kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1 && break
-              sleep 5
+              sleep 2
             done
             if ! kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1; then
-              echo "::warning::db-migrate job not found after 60s, skipping"
+              echo "::warning::db-migrate job not found after 20s, skipping"
               return 0
             fi
 
@@ -476,7 +476,7 @@ jobs:
                 done
               done
 
-              sleep 5
+              sleep 3
               POLL=$((POLL + 1))
             done
 
@@ -507,7 +507,7 @@ jobs:
                 return 1
               fi
 
-              sleep 15
+              sleep 10
             done
             return 0
           }
@@ -565,7 +565,6 @@ jobs:
             kubectl delete certificate -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
             kubectl delete order -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
             kubectl delete challenge -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
-            sleep 3
           fi
 
           # ── 同步 PG 密码：Secret → PostgreSQL（解决初始 bootstrap 密码漂移） ──
@@ -608,7 +607,7 @@ jobs:
               --set-string "secrets.internalSecret=${INTERNAL}" \
               "${HELM_EXTRA_ARGS[@]}" \
               --wait \
-              --timeout 300s > /tmp/helm-output.log 2>&1 &
+              --timeout 180s > /tmp/helm-output.log 2>&1 &
             HELM_PID=$!
 
             MONITOR_FAIL=""
@@ -636,7 +635,7 @@ jobs:
               if [ ${HELM_ATTEMPT} -lt ${HELM_MAX_RETRIES} ]; then
                 echo "Detected ingress admission webhook timeout, deleting webhook and retrying..."
                 ensure_ingress_webhook_fail_open
-                sleep 5
+                sleep 2
                 HELM_ATTEMPT=$((HELM_ATTEMPT + 1))
                 continue
               fi
@@ -685,22 +684,22 @@ jobs:
           URL="https://${{ env.DOMAIN }}/health"
           echo "Smoke testing: ${URL}"
 
-          for i in $(seq 1 20); do
+          for i in $(seq 1 10); do
             HTTP_CODE=$(curl -s -o /tmp/health.json -w '%{http_code}' \
-              --max-time 10 \
+              --max-time 5 \
               -X POST "${URL}" 2>/dev/null) || HTTP_CODE="000"
 
             if [ "${HTTP_CODE}" = "200" ]; then
-              echo "Health check passed (attempt ${i}/20)"
+              echo "Health check passed (attempt ${i}/10)"
               cat /tmp/health.json
               exit 0
             fi
 
-            echo "  attempt ${i}/20 — HTTP ${HTTP_CODE}, retrying in 10s..."
-            sleep 10
+            echo "  attempt ${i}/10 — HTTP ${HTTP_CODE}, retrying in 5s..."
+            sleep 5
           done
 
-          echo "::error::Health check failed after 20 attempts"
+          echo "::error::Health check failed after 10 attempts"
           cat /tmp/health.json 2>/dev/null || true
           exit 1
 

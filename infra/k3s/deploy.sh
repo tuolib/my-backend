@@ -113,25 +113,25 @@ data:
 HPEOF
 
   kubectl -n kube-system rollout restart deployment coredns
-  kubectl -n kube-system rollout status deployment coredns --timeout=60s || true
+  kubectl -n kube-system rollout status deployment coredns --timeout=30s || true
 
   log_ok "Hairpin NAT 修复已应用: ${INGRESS_HOST} → ${CNI_GW}"
 }
 
 check_core_dependencies() {
   log_info "检查关键依赖就绪状态..."
-  kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
+  kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=30s
 
   if kubectl -n redis-operator-system get deployment redis-operator >/dev/null 2>&1; then
-    kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=180s || true
+    kubectl -n redis-operator-system rollout status deployment/redis-operator --timeout=30s || true
   else
     log_warn "未发现 redis-operator deployment（redis-operator-system）"
   fi
 
   if kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
+    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=30s
   elif kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=30s
   else
     log_error "未发现 ingress-nginx controller"
     return 1
@@ -141,24 +141,24 @@ check_core_dependencies() {
 preflight_cluster() {
   log_info "执行集群预检（Node/CoreDNS）..."
   kubectl get nodes -o wide || true
-  kubectl wait --for=condition=Ready node --all --timeout=120s || true
-  kubectl -n kube-system rollout status deployment/coredns --timeout=120s || true
+  kubectl wait --for=condition=Ready node --all --timeout=30s || true
+  kubectl -n kube-system rollout status deployment/coredns --timeout=30s || true
 }
 
 # 智能监控 db-migrate Job：轮询状态，检测终态错误立即退出
 wait_migrate_job() {
   local JOB="${RELEASE_NAME}-db-migrate"
-  local MAX_POLLS=60
+  local MAX_POLLS=30
   local POLL=0
   log_info "监控 db-migrate job..."
 
   # 等待 Job 出现（Helm post-upgrade hook 创建）
-  for i in $(seq 1 12); do
+  for i in $(seq 1 10); do
     kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1 && break
-    sleep 5
+    sleep 2
   done
   if ! kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1; then
-    log_warn "db-migrate job 60s 内未出现，跳过监控"
+    log_warn "db-migrate job 20s 内未出现，跳过监控"
     return 0
   fi
 
@@ -195,7 +195,7 @@ wait_migrate_job() {
       done
     done
 
-    sleep 5
+    sleep 3
     POLL=$((POLL + 1))
   done
 
@@ -397,7 +397,6 @@ cmd_deploy() {
     kubectl delete certificate -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
     kubectl delete order -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
     kubectl delete challenge -n "${NAMESPACE}" --all --ignore-not-found=true 2>/dev/null || true
-    sleep 3
   fi
 
   log_info "部署 Helm Chart (release=${RELEASE_NAME}, tag=${TAG}, mode=${K3S_MODE}, values=$(basename "${VALUES_FILE}"))..."
@@ -410,7 +409,7 @@ cmd_deploy() {
     "${HELM_ARGS[@]}" \
     "${HELM_DYNAMIC_ARGS[@]}" \
     --wait \
-    --timeout 300s; then
+    --timeout 180s; then
     log_error "Helm 部署失败，输出诊断信息..."
     dump_debug_state
     exit 1
@@ -534,9 +533,9 @@ EOF
   }
 
   log_info "等待迁移完成..."
-  kubectl wait --for=condition=complete --timeout=120s \
+  kubectl wait --for=condition=complete --timeout=60s \
     job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}" || {
-    log_error "迁移未在 120s 内完成，查看日志:"
+    log_error "迁移未在 60s 内完成，查看日志:"
     kubectl logs job/"${RELEASE_NAME}-db-migrate" -n "${NAMESPACE}"
     exit 1
   }

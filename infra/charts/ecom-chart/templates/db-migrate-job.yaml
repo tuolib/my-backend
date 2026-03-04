@@ -15,7 +15,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   backoffLimit: 3
-  activeDeadlineSeconds: 120
+  activeDeadlineSeconds: 60
   template:
     metadata:
       labels:
@@ -37,8 +37,8 @@ spec:
             - |
               echo "等待 PostgreSQL 就绪..."
               until nc -z {{ include "ecom.fullname" . }}-pg-rw 5432; do
-                echo "PostgreSQL 未就绪，5s 后重试..."
-                sleep 5
+                echo "PostgreSQL 未就绪，2s 后重试..."
+                sleep 2
               done
               echo "PostgreSQL 已就绪"
       containers:

@@ -145,6 +145,65 @@ preflight_cluster() {
   kubectl -n kube-system rollout status deployment/coredns --timeout=120s || true
 }
 
+# 智能监控 db-migrate Job：轮询状态，检测终态错误立即退出
+wait_migrate_job() {
+  local JOB="${RELEASE_NAME}-db-migrate"
+  local MAX_POLLS=60
+  local POLL=0
+  log_info "监控 db-migrate job..."
+
+  # 等待 Job 出现（Helm post-upgrade hook 创建）
+  for i in $(seq 1 12); do
+    kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1 && break
+    sleep 5
+  done
+  if ! kubectl get job -n "${NAMESPACE}" "${JOB}" >/dev/null 2>&1; then
+    log_warn "db-migrate job 60s 内未出现，跳过监控"
+    return 0
+  fi
+
+  while [ ${POLL} -lt ${MAX_POLLS} ]; do
+    # Job 成功？
+    local SUCCEEDED=$(kubectl get job -n "${NAMESPACE}" "${JOB}" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
+    if [[ "${SUCCEEDED}" == "1" ]]; then
+      log_ok "db-migrate 完成"
+      kubectl logs -n "${NAMESPACE}" -l job-name="${JOB}" -c migrate --tail=20 2>/dev/null || true
+      return 0
+    fi
+
+    # Job 失败（backoffLimit / activeDeadline）？
+    local FAILED_STATUS=$(kubectl get job -n "${NAMESPACE}" "${JOB}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+    if [[ "${FAILED_STATUS}" == "True" ]]; then
+      log_error "db-migrate job 失败"
+      kubectl logs -n "${NAMESPACE}" -l job-name="${JOB}" --all-containers --tail=50 2>/dev/null || true
+      return 1
+    fi
+
+    # Pod 级别终态错误 → 立即快速失败
+    for POD in $(kubectl get pods -n "${NAMESPACE}" -l job-name="${JOB}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+      for JP in \
+        '{.status.containerStatuses[0].state.waiting.reason}' \
+        '{.status.initContainerStatuses[0].state.waiting.reason}'; do
+        local REASON=$(kubectl get pod -n "${NAMESPACE}" "${POD}" -o jsonpath="${JP}" 2>/dev/null || true)
+        case "${REASON}" in
+          ImagePullBackOff|ErrImagePull|InvalidImageName|CreateContainerConfigError)
+            log_error "db-migrate pod 终态错误: ${REASON}"
+            kubectl describe pod -n "${NAMESPACE}" "${POD}" | tail -15 || true
+            return 1
+            ;;
+        esac
+      done
+    done
+
+    sleep 5
+    POLL=$((POLL + 1))
+  done
+
+  log_error "db-migrate 监控超时 (${MAX_POLLS} 轮)"
+  kubectl logs -n "${NAMESPACE}" -l job-name="${JOB}" --all-containers --tail=50 2>/dev/null || true
+  return 1
+}
+
 dump_debug_state() {
   echo ""
   echo -e "${BLUE}=== Debug: Pods ===${NC}"
@@ -351,14 +410,22 @@ cmd_deploy() {
     "${HELM_ARGS[@]}" \
     "${HELM_DYNAMIC_ARGS[@]}" \
     --wait \
-    --wait-for-jobs \
-    --timeout 600s; then
+    --timeout 300s; then
     log_error "Helm 部署失败，输出诊断信息..."
     dump_debug_state
     exit 1
   fi
 
-  log_ok "Helm 部署完成"
+  log_ok "Helm 资源部署完成"
+
+  # 监控 post-upgrade hook（db-migrate）— 自动检测完成/失败
+  if ! wait_migrate_job; then
+    log_error "数据库迁移失败"
+    dump_debug_state
+    exit 1
+  fi
+
+  log_ok "部署完成（含数据库迁移）"
   echo ""
   cmd_status
 }

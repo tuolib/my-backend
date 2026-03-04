@@ -503,21 +503,32 @@ jobs:
             return 1
           }
 
-          # 智能部署监控：检测终态错误立即终止 Helm
+          # 智能部署监控：检测终态错误立即终止 Helm（仅检测新增失败 Pod，忽略部署前已存在的）
           monitor_helm_deploy() {
             local HELM_PID=$1
+            local PRE_EXISTING="$2"  # 部署前已失败的 Pod 列表（换行分隔）
             while kill -0 ${HELM_PID} 2>/dev/null; do
               echo "---- deploy progress $(date -u +'%Y-%m-%dT%H:%M:%SZ') ----"
               kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, $2, $3}' || true
               kubectl get deploy -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, "ready=" $2, "up-to-date=" $3, "available=" $4}' || true
 
-              # 检测 Pod 终态错误 → 立即终止
-              FAILED_PODS=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
+              # 检测 Pod 终态错误 → 过滤掉部署前已存在的失败 Pod
+              ALL_FAILED=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
                 | awk '$3 ~ /ImagePullBackOff|ErrImagePull|CrashLoopBackOff|InvalidImageName|CreateContainerConfigError/ {print $1, $3}' || true)
-              if [[ -n "${FAILED_PODS}" ]]; then
-                echo "::error::Pod terminal failure detected:"
-                echo "${FAILED_PODS}"
-                for POD in $(echo "${FAILED_PODS}" | awk '{print $1}'); do
+              NEW_FAILED=""
+              if [[ -n "${ALL_FAILED}" ]]; then
+                while IFS= read -r LINE; do
+                  POD_NAME=$(echo "${LINE}" | awk '{print $1}')
+                  if ! echo "${PRE_EXISTING}" | grep -qxF "${POD_NAME}"; then
+                    NEW_FAILED="${NEW_FAILED}${LINE}"$'\n'
+                  fi
+                done <<< "${ALL_FAILED}"
+              fi
+              NEW_FAILED=$(echo -n "${NEW_FAILED}" | sed '/^$/d')
+              if [[ -n "${NEW_FAILED}" ]]; then
+                echo "::error::Pod terminal failure detected (new pods only):"
+                echo "${NEW_FAILED}"
+                for POD in $(echo "${NEW_FAILED}" | awk '{print $1}'); do
                   echo "--- ${POD} events ---"
                   kubectl get events -n "${NAMESPACE}" --field-selector involvedObject.name="${POD}" --sort-by=.lastTimestamp 2>/dev/null | tail -5 || true
                 done
@@ -607,6 +618,14 @@ jobs:
           while [ ${HELM_ATTEMPT} -le ${HELM_MAX_RETRIES} ]; do
             echo "Helm upgrade attempt ${HELM_ATTEMPT}/${HELM_MAX_RETRIES}"
 
+            # 快照部署前已存在的失败 Pod（避免误判旧 Pod 为本次部署失败）
+            PRE_FAIL_PODS=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
+              | awk '$3 ~ /ImagePullBackOff|ErrImagePull|CrashLoopBackOff|InvalidImageName|CreateContainerConfigError/ {print $1}' || true)
+            if [[ -n "${PRE_FAIL_PODS}" ]]; then
+              echo "Pre-existing failed pods (will be ignored by monitor):"
+              echo "${PRE_FAIL_PODS}"
+            fi
+
             set +e
             # Helm 后台运行，前台智能监控
             helm upgrade --install "${RELEASE}" "${CHART}" \
@@ -628,7 +647,7 @@ jobs:
             HELM_PID=$!
 
             MONITOR_FAIL=""
-            monitor_helm_deploy ${HELM_PID} || MONITOR_FAIL="true"
+            monitor_helm_deploy ${HELM_PID} "${PRE_FAIL_PODS}" || MONITOR_FAIL="true"
 
             wait ${HELM_PID} 2>/dev/null
             HELM_EXIT=$?

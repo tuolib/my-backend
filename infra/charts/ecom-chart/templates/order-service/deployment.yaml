@@ -50,4 +50,5 @@ spec:
               value: "http://{{ include "ecom.fullname" . }}-user-service:{{ .Values.userService.port }}"
           resources:
             {{- toYaml .Values.orderService.resources | nindent 12 }}
+          {{- include "ecom.securityContext" . | nindent 10 }}
           {{- include "ecom.probes" (dict "port" .Values.orderService.port) | nindent 10 }}

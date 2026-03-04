@@ -53,4 +53,5 @@ spec:
               value: "http://{{ include "ecom.fullname" . }}-order-service:{{ .Values.orderService.port }}"
           resources:
             {{- toYaml .Values.apiGateway.resources | nindent 12 }}
+          {{- include "ecom.securityContext" . | nindent 10 }}
           {{- include "ecom.probes" (dict "port" .Values.apiGateway.port "path" "/health/live") | nindent 10 }}

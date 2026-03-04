@@ -46,4 +46,5 @@ spec:
               value: "http://{{ include "ecom.fullname" . }}-product-service:{{ .Values.productService.port }}"
           resources:
             {{- toYaml .Values.cartService.resources | nindent 12 }}
+          {{- include "ecom.securityContext" . | nindent 10 }}
           {{- include "ecom.probes" (dict "port" .Values.cartService.port) | nindent 10 }}

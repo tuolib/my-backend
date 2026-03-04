@@ -44,4 +44,5 @@ spec:
             {{- include "ecom.commonEnv" . | nindent 12 }}
           resources:
             {{- toYaml .Values.productService.resources | nindent 12 }}
+          {{- include "ecom.securityContext" . | nindent 10 }}
           {{- include "ecom.probes" (dict "port" .Values.productService.port) | nindent 10 }}

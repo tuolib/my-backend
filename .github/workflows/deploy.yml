@@ -350,6 +350,9 @@ jobs:
             --docker-password="${{ secrets.GHCR_PAT }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Lint Helm chart
+        run: helm lint infra/charts/ecom-chart ${{ steps.vars.outputs.values_flag }}
+
       - name: Helm deploy
         run: |
           set -euo pipefail
@@ -778,6 +781,32 @@ jobs:
           echo "::error::Health check failed after 20 attempts"
           cat /tmp/health.json 2>/dev/null || true
           exit 1
+
+      - name: Write kubeconfig for rollback
+        if: failure() && startsWith(env.PLATFORM, 'k')
+        run: |
+          mkdir -p "${HOME}/.kube"
+          PLATFORM="${{ env.PLATFORM }}"
+          if [[ "${PLATFORM}" == k3s* ]]; then
+            echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
+          else
+            echo "${{ secrets.K8S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
+          fi
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Setup Helm for rollback
+        if: failure() && startsWith(env.PLATFORM, 'k')
+        uses: azure/setup-helm@v4
+
+      - name: Rollback Helm release
+        if: failure() && startsWith(env.PLATFORM, 'k')
+        run: |
+          echo "::warning::Smoke test failed — rolling back Helm release"
+          helm rollback ecom -n ecom --wait || echo "::error::Helm rollback failed"
+
+      - name: Cleanup kubeconfig
+        if: always() && startsWith(env.PLATFORM, 'k')
+        run: rm -f "${HOME}/.kube/config"
 
       - name: Deploy summary
         if: always()

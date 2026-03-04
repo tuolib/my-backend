@@ -141,6 +141,20 @@ imagePullSecrets:
 {{- end }}
 
 {{/*
+容器安全上下文（非 root、禁止提权、丢弃所有 capabilities）
+不设 runAsUser：各 Dockerfile USER 指令的 UID 不同（Alpine app ~100, oven/bun 1000）
+不设 readOnlyRootFilesystem：Bun 运行时需写 /tmp 缓存
+用法: {{ include "ecom.securityContext" . | nindent 10 }}
+*/}}
+{{- define "ecom.securityContext" -}}
+securityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+{{- end }}
+
+{{/*
 通用健康检查探针
 用法: {{ include "ecom.probes" (dict "port" 3000 "path" "/health/live") }}
 */}}

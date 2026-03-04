@@ -29,6 +29,7 @@ spec:
         # 等待 PostgreSQL 就绪后再运行迁移
         - name: wait-pg
           image: busybox:1.36
+          {{- include "ecom.securityContext" . | nindent 10 }}
           command:
             - sh
             - -c
@@ -42,6 +43,7 @@ spec:
       containers:
         - name: migrate
           image: {{ include "ecom.serviceImage" (dict "registry" .Values.global.registry "image" .Values.apiGateway.image "tag" .Values.global.imageTag) }}
+          {{- include "ecom.securityContext" . | nindent 10 }}
           command: ["bun", "run", "packages/database/src/migrate.ts"]
           env:
             # 直接从 CNPG 超级用户 Secret 读取密码，避免 URL 编码问题

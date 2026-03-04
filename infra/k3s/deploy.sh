@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy.sh — k3s 部署脚本（复用 k8s 共享 Helm Chart）
+# deploy.sh — k3s 部署脚本（复用共享 Helm Chart）
 # 用法: ./deploy.sh <command>
 # 命令: setup | build | deploy | status | destroy | migrate | rollback | full
 set -euo pipefail
@@ -7,16 +7,16 @@ set -euo pipefail
 # ============ 配置 ============
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-CHART_DIR="${PROJECT_ROOT}/infra/k8s/ecom-chart"
+CHART_DIR="${PROJECT_ROOT}/infra/charts/ecom-chart"
 NAMESPACE="ecom"
 RELEASE_NAME="ecom"
 
 # k3s 模式：single（默认）或 multi
 K3S_MODE="${K3S_MODE:-single}"
 if [[ "${K3S_MODE}" == "multi" ]]; then
-  VALUES_FILE="${CHART_DIR}/values-k3s-multi.yaml"
+  VALUES_FILE="${SCRIPT_DIR}/values-multi.yaml"
 else
-  VALUES_FILE="${CHART_DIR}/values-k3s.yaml"
+  VALUES_FILE="${SCRIPT_DIR}/values.yaml"
 fi
 
 # k3s 默认 kubeconfig

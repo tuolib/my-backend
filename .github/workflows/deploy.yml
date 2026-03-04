@@ -304,17 +304,19 @@ jobs:
           # 根据平台选择 values 文件
           PLATFORM="${{ env.PLATFORM }}"
           if [[ "${PLATFORM}" == "k3s-multi" ]]; then
-            echo "values_flag=-f infra/k8s/ecom-chart/values-k3s-multi.yaml" >> "$GITHUB_OUTPUT"
+            echo "values_flag=-f infra/k3s/values-multi.yaml" >> "$GITHUB_OUTPUT"
           elif [[ "${PLATFORM}" == "k3s-single" ]]; then
-            echo "values_flag=-f infra/k8s/ecom-chart/values-k3s.yaml" >> "$GITHUB_OUTPUT"
+            echo "values_flag=-f infra/k3s/values.yaml" >> "$GITHUB_OUTPUT"
           else
             echo "values_flag=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout (Helm Chart only)
+      - name: Checkout (Helm Chart + values)
         uses: actions/checkout@v4
         with:
-          sparse-checkout: infra/k8s
+          sparse-checkout: |
+            infra/charts
+            infra/k3s
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
@@ -356,7 +358,7 @@ jobs:
           TAG="${{ steps.vars.outputs.tag }}"
           NAMESPACE="ecom"
           RELEASE="ecom"
-          CHART="infra/k8s/ecom-chart"
+          CHART="infra/charts/ecom-chart"
           PLATFORM="${{ env.PLATFORM }}"
           HELM_EXTRA_ARGS=()
 

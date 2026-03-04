@@ -1,16 +1,16 @@
-# values-k3s-multi.yaml — k3s 多节点生产环境覆盖值
-# 用法: helm install ecom . -f values-k3s-multi.yaml
+# values.yaml — k3s 单节点生产环境覆盖值（轻量级单节点优化）
+# 用法: helm install ecom ../charts/ecom-chart -f values.yaml
 #
-# 与 values-k3s.yaml（单节点）的区别:
-#   - nodeSelector 按角色分布（data / ingress / app），同 k8s
-#   - PG 实例数 2（主 + 备）、Redis 集群 3 节点
-#   - 各服务 2 副本
-#   - 资源配额介于单节点和 k8s 之间（适配中配 VPS 集群）
+# 与 values.yaml（k8s 生产）的区别:
+#   - 所有 nodeSelector 设为 {}（单节点调度）
+#   - 实例数和副本数降为 1（节省资源）
+#   - CPU/内存资源减半（适配低配 VPS）
+#   - 多节点用户可通过 --set 覆盖 nodeSelector
 
 postgresql:
-  instances: 2
+  instances: 1
   storage:
-    size: 10Gi
+    size: 5Gi
   resources:
     requests:
       cpu: "250m"
@@ -18,13 +18,12 @@ postgresql:
     limits:
       cpu: "500m"
       memory: "512Mi"
-  nodeSelector:
-    role: data
+  nodeSelector: {}
 
 redis:
-  clusterSize: 3
+  clusterSize: 1
   storage:
-    size: 2Gi
+    size: 1Gi
   resources:
     requests:
       cpu: "100m"
@@ -32,64 +31,54 @@ redis:
     limits:
       cpu: "250m"
       memory: "256Mi"
-  nodeSelector:
-    role: data
+  nodeSelector: {}
 
 apiGateway:
-  replicas: 2
+  replicas: 1
   resources:
     requests:
       cpu: "100m"
       memory: "256Mi"
     limits:
       memory: "512Mi"
-  nodeSelector:
-    role: app
+  nodeSelector: {}
 
 userService:
-  replicas: 2
+  replicas: 1
   resources:
     requests:
       cpu: "100m"
       memory: "256Mi"
     limits:
       memory: "512Mi"
-  nodeSelector:
-    role: app
+  nodeSelector: {}
 
 productService:
-  replicas: 2
+  replicas: 1
   resources:
     requests:
       cpu: "100m"
       memory: "256Mi"
     limits:
       memory: "512Mi"
-  nodeSelector:
-    role: app
+  nodeSelector: {}
 
 cartService:
-  replicas: 2
+  replicas: 1
   resources:
     requests:
       cpu: "100m"
       memory: "256Mi"
     limits:
       memory: "512Mi"
-  nodeSelector:
-    role: app
+  nodeSelector: {}
 
 orderService:
-  replicas: 2
+  replicas: 1
   resources:
     requests:
       cpu: "100m"
       memory: "256Mi"
     limits:
       memory: "512Mi"
-  nodeSelector:
-    role: app
-
-ingress:
-  tls:
-    enabled: true
+  nodeSelector: {}

@@ -7,7 +7,7 @@ set -euo pipefail
 # ============ 配置 ============
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-CHART_DIR="${SCRIPT_DIR}/ecom-chart"
+CHART_DIR="${PROJECT_ROOT}/infra/charts/ecom-chart"
 NAMESPACE="ecom"
 RELEASE_NAME="ecom"
 

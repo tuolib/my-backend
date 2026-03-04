@@ -12,10 +12,12 @@
 #   Grafana:  100m/128Mi → 250m/256Mi
 #   合计:     250m/320Mi → 600m/640Mi
 #
-# 访问方式（不暴露到公网）:
-#   kubectl -n monitoring port-forward svc/grafana 3001:80
+# 访问方式:
+#   公网: https://log.find345.site (Ingress + cert-manager 自动 HTTPS)
+#   本地: kubectl -n monitoring port-forward svc/grafana 3001:80
 #
 # 环境变量:
+#   GRAFANA_HOST          — Grafana 域名 (默认 log.find345.site)
 #   LOKI_STORAGE_SIZE     — Loki PVC 大小 (默认 5Gi)
 #   GRAFANA_STORAGE_SIZE  — Grafana PVC 大小 (默认 1Gi)
 #   GRAFANA_ADMIN_PASS    — Grafana admin 密码 (默认 admin)
@@ -48,6 +50,7 @@ if ! command -v helm &>/dev/null; then
 fi
 
 # ============ 参数 ============
+GRAFANA_HOST="${GRAFANA_HOST:-log.find345.site}"
 LOKI_STORAGE_SIZE="${LOKI_STORAGE_SIZE:-5Gi}"
 GRAFANA_STORAGE_SIZE="${GRAFANA_STORAGE_SIZE:-1Gi}"
 GRAFANA_ADMIN_PASS="${GRAFANA_ADMIN_PASS:-admin}"
@@ -55,17 +58,18 @@ NAMESPACE="monitoring"
 
 echo "=========================================="
 echo " Loki 日志栈安装"
-echo "  Loki PVC:    ${LOKI_STORAGE_SIZE}"
-echo "  Grafana PVC: ${GRAFANA_STORAGE_SIZE}"
-echo "  命名空间:    ${NAMESPACE}"
+echo "  Grafana 域名: ${GRAFANA_HOST}"
+echo "  Loki PVC:     ${LOKI_STORAGE_SIZE}"
+echo "  Grafana PVC:  ${GRAFANA_STORAGE_SIZE}"
+echo "  命名空间:     ${NAMESPACE}"
 echo "=========================================="
 
-# ============ [1/4] 创建命名空间 ============
-echo "=== [1/4] 创建命名空间 ${NAMESPACE} ==="
+# ============ [1/5] 创建命名空间 ============
+echo "=== [1/5] 创建命名空间 ${NAMESPACE} ==="
 ${KUBECTL} create namespace "${NAMESPACE}" --dry-run=client -o yaml | ${KUBECTL} apply -f -
 
-# ============ [2/4] 安装 Loki ============
-echo "=== [2/4] 安装 Loki ==="
+# ============ [2/5] 安装 Loki ============
+echo "=== [2/5] 安装 Loki ==="
 
 helm repo add grafana https://grafana.github.io/helm-charts || true
 helm repo update grafana
@@ -101,8 +105,8 @@ helm upgrade --install loki grafana/loki \
 
 echo "Loki 已安装"
 
-# ============ [3/4] 安装 Promtail ============
-echo "=== [3/4] 安装 Promtail ==="
+# ============ [3/5] 安装 Promtail ============
+echo "=== [3/5] 安装 Promtail ==="
 
 PROMTAIL_VALUES="${LOKI_STACK_DIR}/promtail-values.yaml"
 
@@ -130,8 +134,8 @@ fi
 
 echo "Promtail 已安装"
 
-# ============ [4/4] 安装 Grafana ============
-echo "=== [4/4] 安装 Grafana ==="
+# ============ [4/5] 安装 Grafana ============
+echo "=== [4/5] 安装 Grafana ==="
 
 helm upgrade --install grafana grafana/grafana \
   --namespace "${NAMESPACE}" \
@@ -152,6 +156,83 @@ helm upgrade --install grafana grafana/grafana \
 
 echo "Grafana 已安装"
 
+# ============ [5/5] 创建 Ingress（HTTPS 域名访问） ============
+echo "=== [5/5] 创建 Grafana Ingress ==="
+
+# 复用 ecom 的 ClusterIssuer（letsencrypt-prod）
+# 如果 ClusterIssuer 不存在，跳过 TLS（仅 HTTP）
+TLS_ENABLED=false
+if ${KUBECTL} get clusterissuer letsencrypt-prod &>/dev/null; then
+  TLS_ENABLED=true
+  echo "检测到 ClusterIssuer letsencrypt-prod，启用自动 HTTPS"
+else
+  echo "警告: 未检测到 ClusterIssuer letsencrypt-prod，仅使用 HTTP"
+fi
+
+# 构建 Ingress YAML
+INGRESS_YAML="apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  namespace: ${NAMESPACE}
+  annotations:"
+
+if [[ "${TLS_ENABLED}" == "true" ]]; then
+  INGRESS_YAML="${INGRESS_YAML}
+    cert-manager.io/cluster-issuer: \"letsencrypt-prod\"
+    nginx.ingress.kubernetes.io/ssl-redirect: \"true\""
+else
+  INGRESS_YAML="${INGRESS_YAML}
+    nginx.ingress.kubernetes.io/ssl-redirect: \"false\""
+fi
+
+INGRESS_YAML="${INGRESS_YAML}
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers \"X-Content-Type-Options: nosniff\";
+      more_set_headers \"X-Frame-Options: DENY\";
+spec:
+  ingressClassName: nginx"
+
+if [[ "${TLS_ENABLED}" == "true" ]]; then
+  INGRESS_YAML="${INGRESS_YAML}
+  tls:
+    - hosts:
+        - ${GRAFANA_HOST}
+      secretName: grafana-tls"
+fi
+
+INGRESS_YAML="${INGRESS_YAML}
+  rules:
+    - host: ${GRAFANA_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 80"
+
+echo "${INGRESS_YAML}" | ${KUBECTL} apply -f -
+
+echo "Grafana Ingress 已创建: ${GRAFANA_HOST}"
+
+if [[ "${TLS_ENABLED}" == "true" ]]; then
+  echo "等待 TLS 证书签发..."
+  for i in $(seq 1 12); do
+    if ${KUBECTL} get secret grafana-tls -n "${NAMESPACE}" &>/dev/null; then
+      echo "TLS 证书已就绪"
+      break
+    fi
+    if [[ ${i} -eq 12 ]]; then
+      echo "提示: 证书签发可能需要 1-2 分钟，可稍后检查:"
+      echo "  ${KUBECTL} get certificate -n ${NAMESPACE}"
+    fi
+    sleep 10
+  done
+fi
+
 # ============ 完成 ============
 echo ""
 echo "=========================================="
@@ -159,11 +240,19 @@ echo " Loki 日志栈安装完成！"
 echo ""
 echo " 验证："
 echo "   ${KUBECTL} get pods -n ${NAMESPACE}"
+echo "   ${KUBECTL} get ingress -n ${NAMESPACE}"
 echo ""
-echo " 访问 Grafana（不暴露到公网）："
-echo "   ${KUBECTL} -n ${NAMESPACE} port-forward svc/grafana 3001:80"
-echo "   浏览器打开: http://localhost:3001"
+if [[ "${TLS_ENABLED}" == "true" ]]; then
+echo " 访问 Grafana："
+echo "   https://${GRAFANA_HOST}"
+else
+echo " 访问 Grafana："
+echo "   http://${GRAFANA_HOST}"
+fi
 echo "   账号: admin / ${GRAFANA_ADMIN_PASS}"
+echo ""
+echo " 备用（本地 port-forward）："
+echo "   ${KUBECTL} -n ${NAMESPACE} port-forward svc/grafana 3001:80"
 echo ""
 echo " 测试日志查询（Grafana Explore → Loki）："
 echo "   {namespace=\"ecom\"} | json"

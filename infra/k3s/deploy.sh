@@ -67,34 +67,6 @@ check_helm() {
   fi
 }
 
-wait_ingress_admission() {
-  if [[ "${K3S_MODE}" != "multi" && "${K3S_MODE}" != "single" ]]; then
-    return 0
-  fi
-
-  if kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-    log_info "等待 ingress-nginx controller deployment 就绪..."
-    kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
-  elif kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-    log_info "等待 ingress-nginx controller daemonset 就绪..."
-    kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
-  else
-    log_warn "未发现 ingress-nginx-controller（Deployment/DaemonSet）"
-  fi
-
-  log_info "等待 ingress-nginx admission endpoints..."
-  for i in $(seq 1 36); do
-    EP_READY=$(kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)
-    if [[ -n "${EP_READY}" ]]; then
-      log_ok "ingress-nginx admission endpoint 就绪: ${EP_READY}"
-      return 0
-    fi
-    sleep 5
-  done
-
-  log_warn "ingress-nginx admission endpoint 180s 内未就绪"
-}
-
 ensure_ingress_webhook_fail_open() {
   log_info "删除 ingress-nginx admission webhook（避免 k3s 下 webhook 访问超时阻塞发布）..."
   kubectl delete validatingwebhookconfiguration ingress-nginx-admission --ignore-not-found=true >/dev/null || true
@@ -167,34 +139,10 @@ check_core_dependencies() {
 }
 
 preflight_cluster() {
-  log_info "执行集群预检（Node/CoreDNS/DNS）..."
+  log_info "执行集群预检（Node/CoreDNS）..."
   kubectl get nodes -o wide || true
-  kubectl wait --for=condition=Ready node --all --timeout=180s || true
-  kubectl -n kube-system rollout status deployment/coredns --timeout=180s || true
-
-  DNS_POD="dns-probe-$(date +%s)"
-  kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
-  kubectl -n "${NAMESPACE}" run "${DNS_POD}" \
-    --image=busybox:1.36 \
-    --restart=Never \
-    --command -- sh -c 'nslookup kubernetes.default.svc.cluster.local && nslookup acme-v02.api.letsencrypt.org' >/dev/null
-
-  for i in $(seq 1 30); do
-    PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-    if [[ "${PHASE}" == "Succeeded" || "${PHASE}" == "Failed" ]]; then
-      break
-    fi
-    sleep 2
-  done
-
-  kubectl -n "${NAMESPACE}" logs "${DNS_POD}" || true
-  PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-  kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
-
-  if [[ "${PHASE}" != "Succeeded" ]]; then
-    log_warn "检测到集群 DNS 外网解析异常，当前发布自动关闭 ingress TLS（仅本次）"
-    HELM_DYNAMIC_ARGS+=(--set "ingress.tls.enabled=false")
-  fi
+  kubectl wait --for=condition=Ready node --all --timeout=120s || true
+  kubectl -n kube-system rollout status deployment/coredns --timeout=120s || true
 }
 
 dump_debug_state() {
@@ -381,7 +329,6 @@ cmd_deploy() {
   check_core_dependencies
   ensure_hairpin_nat_fix
   preflight_cluster
-  wait_ingress_admission
   ensure_ingress_webhook_fail_open
 
   # 清理 cert-manager 资源，避免 Ingress 字段所有权冲突导致 Helm upgrade 失败

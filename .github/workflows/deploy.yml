@@ -369,40 +369,6 @@ jobs:
           echo "Deploying ${RELEASE} to ${PLATFORM} (tag: ${TAG})"
           echo "══════════════════════════════════════════"
 
-          # k3s 环境下，Ingress admission webhook 常见短时未就绪，先显式等待
-          wait_ingress_admission() {
-            if [[ "${PLATFORM}" != k3s* ]]; then
-              return 0
-            fi
-
-            if kubectl -n ingress-nginx get deployment ingress-nginx-controller >/dev/null 2>&1; then
-              echo "Waiting for ingress-nginx controller deployment..."
-              kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
-            elif kubectl -n ingress-nginx get daemonset ingress-nginx-controller >/dev/null 2>&1; then
-              echo "Waiting for ingress-nginx controller daemonset..."
-              kubectl -n ingress-nginx rollout status daemonset/ingress-nginx-controller --timeout=180s
-            else
-              echo "::warning::ingress-nginx-controller not found as Deployment/DaemonSet in namespace ingress-nginx"
-            fi
-
-            echo "Waiting for ingress-nginx admission endpoints..."
-            for i in $(seq 1 36); do
-              EP_READY=$(kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)
-              if [[ -n "${EP_READY}" ]]; then
-                echo "ingress-nginx admission endpoint is ready: ${EP_READY}"
-                return 0
-              fi
-              echo "  attempt ${i}/36: admission endpoint not ready, retry in 5s..."
-              sleep 5
-            done
-
-            echo "::error::ingress-nginx admission endpoints not ready after 180s"
-            kubectl -n ingress-nginx get pods -o wide || true
-            kubectl -n ingress-nginx get svc ingress-nginx-controller-admission -o wide || true
-            kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission -o yaml || true
-            return 1
-          }
-
           ensure_ingress_webhook_fail_open() {
             if [[ "${PLATFORM}" != k3s* ]]; then
               return 0
@@ -456,37 +422,8 @@ jobs:
           preflight_cluster() {
             echo "Running cluster preflight checks..."
             kubectl get nodes -o wide
-
-            # 节点与 CoreDNS 是 k3s 发布的硬前置条件
-            kubectl wait --for=condition=Ready node --all --timeout=180s || true
-            kubectl -n kube-system rollout status deployment/coredns --timeout=180s || true
-
-            if [[ "${PLATFORM}" == k3s* ]]; then
-              echo "Probing in-cluster DNS resolution (kubernetes.default + Let's Encrypt)..."
-              DNS_POD="dns-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-              kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
-              kubectl -n "${NAMESPACE}" run "${DNS_POD}" \
-                --image=busybox:1.36 \
-                --restart=Never \
-                --command -- sh -c 'nslookup kubernetes.default.svc.cluster.local && nslookup acme-v02.api.letsencrypt.org'
-
-              for i in $(seq 1 30); do
-                PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-                if [[ "${PHASE}" == "Succeeded" || "${PHASE}" == "Failed" ]]; then
-                  break
-                fi
-                sleep 2
-              done
-
-              kubectl -n "${NAMESPACE}" logs "${DNS_POD}" || true
-              PHASE=$(kubectl -n "${NAMESPACE}" get pod "${DNS_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-              kubectl -n "${NAMESPACE}" delete pod "${DNS_POD}" --ignore-not-found=true >/dev/null 2>&1 || true
-
-              if [[ "${PHASE}" != "Succeeded" ]]; then
-                echo "::warning::Cluster DNS cannot resolve external domains. Force disable ingress TLS for this deploy."
-                HELM_EXTRA_ARGS+=(--set "ingress.tls.enabled=false")
-              fi
-            fi
+            kubectl wait --for=condition=Ready node --all --timeout=120s || true
+            kubectl -n kube-system rollout status deployment/coredns --timeout=120s || true
           }
 
           start_progress_watcher() {
@@ -545,7 +482,6 @@ jobs:
 
           check_core_dependencies
           preflight_cluster
-          wait_ingress_admission
           ensure_ingress_webhook_fail_open
 
           # Clean up cert-manager resources to avoid Ingress field ownership conflicts with Helm
@@ -574,86 +510,6 @@ jobs:
               printf "';\n"
             ) | kubectl exec -i -n "${NAMESPACE}" "${PG_PRIMARY}" -c postgres -- psql -U postgres 2>&1 || true
             echo "Password sync done."
-          fi
-
-          # ── 预检：在 Helm hook 之外直接跑迁移，捕获完整错误输出 ──
-          echo "══════════ Pre-deploy: testing db-migrate ══════════"
-          MIGRATE_IMAGE="${REGISTRY}/ecom-api-gateway:${TAG}"
-          PG_PASS_RAW="$(kubectl get secret -n "${NAMESPACE}" "${PG_SECRET_NAME}" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)"
-          if [[ -n "${PG_PASS_RAW}" ]]; then
-            kubectl delete pod -n "${NAMESPACE}" migrate-debug --ignore-not-found=true >/dev/null 2>&1 || true
-            cat <<EOPOD | kubectl apply -f -
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: migrate-debug
-            namespace: ${NAMESPACE}
-          spec:
-            restartPolicy: Never
-            imagePullSecrets:
-              - name: ghcr-pull-secret
-            initContainers:
-              - name: wait-pg-dns
-                image: busybox:1.36
-                command:
-                  - sh
-                  - -c
-                  - |
-                    echo "Waiting for DNS resolution of ${PG_RW_HOST}..."
-                    for i in \$(seq 1 30); do
-                      if nslookup ${PG_RW_HOST}.${NAMESPACE}.svc.cluster.local >/dev/null 2>&1; then
-                        echo "DNS resolved successfully"
-                        exit 0
-                      fi
-                      echo "  attempt \$i/30: DNS not ready, retry in 2s..."
-                      sleep 2
-                    done
-                    echo "DNS resolution failed after 60s"
-                    exit 1
-            containers:
-              - name: migrate
-                image: ${MIGRATE_IMAGE}
-                command: ["bun", "run", "packages/database/src/migrate.ts"]
-                env:
-                  - name: PGHOST
-                    value: "${PG_RW_HOST}"
-                  - name: PGPORT
-                    value: "5432"
-                  - name: PGDATABASE
-                    value: "ecommerce"
-                  - name: PGUSER
-                    value: "postgres"
-                  - name: PGPASSWORD
-                    valueFrom:
-                      secretKeyRef:
-                        name: ${PG_SECRET_NAME}
-                        key: password
-          EOPOD
-
-            # 等待 Pod 结束（最多 180 秒，含 init container DNS 等待）
-            if kubectl wait -n "${NAMESPACE}" pod/migrate-debug --for=condition=Ready --timeout=10s 2>/dev/null; then
-              true
-            fi
-            kubectl wait -n "${NAMESPACE}" pod/migrate-debug \
-              --for=jsonpath='{.status.phase}'=Succeeded \
-              --timeout=180s 2>/dev/null || true
-
-            PHASE=$(kubectl get pod -n "${NAMESPACE}" migrate-debug -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-            echo "migrate-debug pod phase: ${PHASE}"
-            echo "══════════ migrate-debug init container logs ══════════"
-            kubectl logs -n "${NAMESPACE}" migrate-debug -c wait-pg-dns --tail=50 2>&1 || true
-            echo "══════════ migrate-debug logs ══════════"
-            kubectl logs -n "${NAMESPACE}" migrate-debug --tail=200 2>&1 || true
-            kubectl delete pod -n "${NAMESPACE}" migrate-debug --ignore-not-found=true >/dev/null 2>&1 || true
-
-            if [[ "${PHASE}" == "Succeeded" ]]; then
-              echo "Pre-deploy migration succeeded."
-            else
-              echo "::error::Pre-deploy migration failed! Check logs above."
-              exit 1
-            fi
-          else
-            echo "::warning::Secret ${PG_SECRET_NAME} not found, skipping pre-deploy migration test (first install?)"
           fi
 
           HELM_MAX_RETRIES=3
@@ -696,9 +552,9 @@ jobs:
 
             if echo "${HELM_OUTPUT}" | grep -q 'validate.nginx.ingress.kubernetes.io'; then
               if [ ${HELM_ATTEMPT} -lt ${HELM_MAX_RETRIES} ]; then
-                echo "Detected ingress admission webhook timeout, waiting and retrying..."
-                wait_ingress_admission || true
-                sleep 10
+                echo "Detected ingress admission webhook timeout, deleting webhook and retrying..."
+                ensure_ingress_webhook_fail_open
+                sleep 5
                 HELM_ATTEMPT=$((HELM_ATTEMPT + 1))
                 continue
               fi

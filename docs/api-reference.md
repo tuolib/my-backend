@@ -118,6 +118,8 @@ X-Idempotency-Key: <unique-string>
   }
   accessToken: string
   refreshToken: string
+  accessTokenExpiresAt: string   // ISO 8601，如 "2026-03-05T10:15:00.000Z"
+  refreshTokenExpiresAt: string  // ISO 8601，如 "2026-03-12T10:00:00.000Z"
 }
 ```
 
@@ -154,6 +156,8 @@ X-Idempotency-Key: <unique-string>
 {
   accessToken: string
   refreshToken: string
+  accessTokenExpiresAt: string
+  refreshTokenExpiresAt: string
 }
 ```
 

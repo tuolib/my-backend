@@ -10,6 +10,7 @@ import {
   verifyPassword,
   signAccessToken,
   signRefreshToken,
+  verifyAccessToken,
   verifyRefreshToken,
   sha256,
   generateId,
@@ -48,18 +49,26 @@ async function issueTokens(userId: string, email: string): Promise<TokenPair> {
     signRefreshToken({ sub: userId }),
   ]);
 
-  // 解析 refresh token 获取过期时间
-  const decoded = await verifyRefreshToken(refreshToken);
-  const expiresAt = new Date(decoded.exp * 1000);
+  // 解析双 token 获取过期时间
+  const [accessDecoded, refreshDecoded] = await Promise.all([
+    verifyAccessToken(accessToken),
+    verifyRefreshToken(refreshToken),
+  ]);
+  const refreshExpiresAt = new Date(refreshDecoded.exp * 1000);
 
   // 存储 refresh token hash
   await tokenRepo.create({
     userId,
     tokenHash: sha256(refreshToken),
-    expiresAt,
+    expiresAt: refreshExpiresAt,
   });
 
-  return { accessToken, refreshToken };
+  return {
+    accessToken,
+    refreshToken,
+    accessTokenExpiresAt: new Date(accessDecoded.exp * 1000).toISOString(),
+    refreshTokenExpiresAt: refreshExpiresAt.toISOString(),
+  };
 }
 
 /** 注册 */

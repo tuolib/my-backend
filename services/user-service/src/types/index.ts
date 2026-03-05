@@ -68,10 +68,14 @@ export interface AuthResult {
   user: UserProfile;
   accessToken: string;
   refreshToken: string;
+  accessTokenExpiresAt: string;
+  refreshTokenExpiresAt: string;
 }
 
 /** Token 对（刷新返回） */
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
+  accessTokenExpiresAt: string;
+  refreshTokenExpiresAt: string;
 }

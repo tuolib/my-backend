@@ -1,7 +1,7 @@
 /**
  * 用户数据访问层 — users 表操作
  */
-import { eq, inArray, isNull, and } from 'drizzle-orm';
+import { eq, inArray, isNull, and, ilike, or, desc, count } from 'drizzle-orm';
 import { db, users } from '@repo/database';
 import type { User, NewUser } from '@repo/database';
 
@@ -49,6 +49,44 @@ export async function updateById(
     .where(and(eq(users.id, id), isNull(users.deletedAt)))
     .returning();
   return row ?? null;
+}
+
+/** 管理端分页查询用户列表（含关键词搜索） */
+export async function findAll(params: {
+  page: number;
+  pageSize: number;
+  keyword?: string;
+  status?: string;
+}): Promise<{ items: User[]; total: number }> {
+  const { page, pageSize, keyword, status } = params;
+  const offset = (page - 1) * pageSize;
+
+  const conditions = [isNull(users.deletedAt)];
+  if (status) {
+    conditions.push(eq(users.status, status));
+  }
+  if (keyword) {
+    const pattern = `%${keyword}%`;
+    conditions.push(or(ilike(users.email, pattern), ilike(users.nickname, pattern))!);
+  }
+
+  const where = and(...conditions);
+
+  const [items, [totalRow]] = await Promise.all([
+    db
+      .select()
+      .from(users)
+      .where(where)
+      .orderBy(desc(users.createdAt))
+      .limit(pageSize)
+      .offset(offset),
+    db
+      .select({ value: count() })
+      .from(users)
+      .where(where),
+  ]);
+
+  return { items, total: totalRow?.value ?? 0 };
 }
 
 /** 更新最后登录时间 */

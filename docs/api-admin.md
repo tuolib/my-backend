@@ -734,12 +734,116 @@
 
 ---
 
+## 7. 用户管理
+
+> 以下接口需要管理员认证。
+
+### POST /api/v1/admin/user/list
+
+管理端用户列表（分页，支持按邮箱/昵称搜索）。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 默认 1 |
+| pageSize | number | 否 | 1-100，默认 20 |
+| keyword | string | 否 | 按邮箱或昵称模糊搜索，最长 200 字符 |
+| status | string | 否 | `active` \| `banned` |
+
+**Response Data:** 分页结构。
+
+```typescript
+{
+  items: Array<{
+    id: string
+    email: string
+    nickname: string | null
+    avatarUrl: string | null
+    phone: string | null
+    status: string
+    lastLogin: string | null
+    createdAt: string
+    updatedAt: string
+  }>
+  pagination: { page, pageSize, total, totalPages }
+}
+```
+
+---
+
+### POST /api/v1/admin/user/detail
+
+用户详情（含地址列表、订单统计）。订单统计通过跨服务调用 order-service 获取。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | 是 | 用户 ID |
+
+**Response Data:**
+
+```typescript
+{
+  user: {
+    id: string
+    email: string
+    nickname: string | null
+    avatarUrl: string | null
+    phone: string | null
+    status: string
+    lastLogin: string | null
+    createdAt: string
+    updatedAt: string
+  }
+  addresses: Array<{
+    id: string
+    label: string | null
+    recipient: string
+    phone: string
+    province: string
+    city: string
+    district: string
+    address: string
+    postalCode: string | null
+    isDefault: boolean
+  }>
+  orderStats: {
+    totalOrders: number       // 总订单数
+    totalPaid: number         // 已付款订单数（含 paid/shipped/delivered/completed）
+    totalAmount: string       // 已付款订单总金额
+  }
+}
+```
+
+---
+
+### POST /api/v1/admin/user/toggle-status
+
+封禁 / 解封用户。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | 是 | 用户 ID |
+| status | string | 是 | `active` \| `banned` |
+
+**Response Data:** `null`
+
+**错误码：**
+- `USER_1001` — 用户不存在
+
+---
+
 ## 路由转发表
 
 | 前缀 | 下游服务 |
 |------|---------|
 | `/api/v1/admin/auth` | user-service |
 | `/api/v1/admin/manage` | user-service |
+| `/api/v1/admin/user` | user-service |
 | `/api/v1/admin/product` | product-service |
 | `/api/v1/admin/category` | product-service |
 | `/api/v1/admin/stock` | product-service |

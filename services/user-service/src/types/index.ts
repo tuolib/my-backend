@@ -138,3 +138,39 @@ export interface TokenPair {
   accessTokenExpiresAt: string;
   refreshTokenExpiresAt: string;
 }
+
+// ── Admin User Management Types ──
+
+/** 管理端用户列表查询输入 */
+export interface AdminUserListInput {
+  page: number;
+  pageSize: number;
+  keyword?: string;
+  status?: string;
+}
+
+/** 管理端用户详情结果（含地址列表 + 订单统计） */
+export interface AdminUserDetailResult {
+  user: UserProfile;
+  addresses: AdminUserAddress[];
+  orderStats: AdminUserOrderStats;
+}
+
+export interface AdminUserAddress {
+  id: string;
+  label: string | null;
+  recipient: string;
+  phone: string;
+  province: string;
+  city: string;
+  district: string;
+  address: string;
+  postalCode: string | null;
+  isDefault: boolean;
+}
+
+export interface AdminUserOrderStats {
+  totalOrders: number;
+  totalPaid: number;
+  totalAmount: string;
+}

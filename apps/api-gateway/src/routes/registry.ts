@@ -25,6 +25,7 @@ function buildRegistry(): ServiceRoute[] {
     { prefix: '/api/v1/admin/stock', target: productUrl },
     { prefix: '/api/v1/admin/user', target: userUrl },
     { prefix: '/api/v1/admin/order', target: orderUrl },
+    { prefix: '/api/v1/admin/dashboard', target: orderUrl },
 
     // User Service
     { prefix: '/api/v1/auth', target: userUrl },

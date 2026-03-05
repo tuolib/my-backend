@@ -37,6 +37,29 @@ export async function fetchUserInfo(userId: string): Promise<AdminOrderUserInfo 
   };
 }
 
+/** 获取用户概览统计（dashboard 使用） */
+export async function fetchUserStats(): Promise<{
+  totalUsers: number;
+  newToday: number;
+  activeToday: number;
+}> {
+  const res = await internalFetch(`${USER_SERVICE_URL}/internal/user/stats`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+
+  if (!res.ok) {
+    log.error('user stats fetch failed', { status: res.status });
+    return { totalUsers: 0, newToday: 0, activeToday: 0 };
+  }
+
+  const json = (await res.json()) as {
+    success: boolean;
+    data: { totalUsers: number; newToday: number; activeToday: number };
+  };
+  return json.data ?? { totalUsers: 0, newToday: 0, activeToday: 0 };
+}
+
 /** 根据地址 ID 和用户 ID 获取收货地址详情 */
 export async function fetchAddress(
   addressId: string,

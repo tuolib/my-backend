@@ -171,6 +171,51 @@ export interface PaymentStatusResult {
   }>;
 }
 
+// ────────────────────────────── Dashboard DTO ──────────────────────────────
+
+export interface DashboardOverview {
+  todayOrders: number;
+  todaySales: string;
+  newUsers: number;
+  activeUsers: number;
+}
+
+export interface OrderStatsInput {
+  range: 'day' | 'week' | 'month';
+  days?: number;
+}
+
+export interface OrderStatsResult {
+  trend: Array<{
+    date: string;
+    count: number;
+    amount: string;
+  }>;
+  statusDistribution: Array<{
+    status: string;
+    count: number;
+  }>;
+}
+
+export interface SalesStatsInput {
+  range: 'day' | 'week' | 'month';
+  days?: number;
+}
+
+export interface SalesStatsResult {
+  trend: Array<{
+    date: string;
+    amount: string;
+    count: number;
+  }>;
+  topProducts: Array<{
+    productTitle: string;
+    skuId: string;
+    quantity: number;
+    amount: string;
+  }>;
+}
+
 // ────────────────────────────── 跨服务类型 ──────────────────────────────
 
 /** product-service /internal/product/sku/batch 返回的 SKU 详情 */

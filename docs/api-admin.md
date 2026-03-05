@@ -837,6 +837,89 @@
 
 ---
 
+## 8. 数据概览
+
+> 以下接口需要管理员认证。
+
+### POST /api/v1/admin/dashboard/overview
+
+今日概览数据。跨服务聚合订单数据和用户统计。
+
+**Request Body:** 空 `{}`
+
+**Response Data:**
+
+```typescript
+{
+  todayOrders: number       // 今日订单数
+  todaySales: string        // 今日销售额（仅已付款订单）
+  newUsers: number          // 今日新增用户数
+  activeUsers: number       // 今日活跃用户数（有登录记录）
+}
+```
+
+---
+
+### POST /api/v1/admin/dashboard/order-stats
+
+订单趋势（按天/周/月聚合）及各状态分布。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| range | string | 否 | `day` \| `week` \| `month`，默认 `day` |
+| days | number | 否 | 查询天数范围，1-90，默认 7 |
+
+**Response Data:**
+
+```typescript
+{
+  trend: Array<{
+    date: string            // 日期 YYYY-MM-DD
+    count: number           // 订单数
+    amount: string          // 已付款订单金额
+  }>
+  statusDistribution: Array<{
+    status: string          // 订单状态
+    count: number           // 数量
+  }>
+}
+```
+
+---
+
+### POST /api/v1/admin/dashboard/sales-stats
+
+销售额趋势（按天/周/月聚合）及 TOP 商品排行。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| range | string | 否 | `day` \| `week` \| `month`，默认 `day` |
+| days | number | 否 | 查询天数范围，1-90，默认 7 |
+
+**Response Data:**
+
+```typescript
+{
+  trend: Array<{
+    date: string            // 日期 YYYY-MM-DD
+    amount: string          // 销售额
+    count: number           // 已付款订单数
+  }>
+  topProducts: Array<{      // TOP 10 商品
+    productTitle: string
+    skuId: string
+    quantity: number        // 总销量
+    amount: string          // 总销售额
+  }>
+}
+```
+
+---
+
 ## 路由转发表
 
 | 前缀 | 下游服务 |
@@ -848,3 +931,4 @@
 | `/api/v1/admin/category` | product-service |
 | `/api/v1/admin/stock` | product-service |
 | `/api/v1/admin/order` | order-service |
+| `/api/v1/admin/dashboard` | order-service |

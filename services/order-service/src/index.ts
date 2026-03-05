@@ -8,6 +8,7 @@ import type { AppEnv } from '@repo/shared';
 import orderRoutes from './routes/order';
 import paymentRoutes from './routes/payment';
 import adminRoutes from './routes/admin';
+import dashboardRoutes from './routes/dashboard';
 import internalRoutes from './routes/internal';
 import { OrderTimeoutChecker } from './services/timeout.service';
 
@@ -23,6 +24,7 @@ app.onError(errorHandler);
 app.route('/api/v1/order', orderRoutes);
 app.route('/api/v1/payment', paymentRoutes);
 app.route('/api/v1/admin/order', adminRoutes);
+app.route('/api/v1/admin/dashboard', dashboardRoutes);
 app.route('/internal/order', internalRoutes);
 
 // ── 健康检查（GET + POST 双支持）──

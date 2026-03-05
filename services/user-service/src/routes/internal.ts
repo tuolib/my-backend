@@ -6,6 +6,8 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '@repo/shared';
 import { success } from '@repo/shared';
+import { db, users } from '@repo/database';
+import { sql, isNull } from 'drizzle-orm';
 import * as userService from '../services/user.service';
 import * as userRepo from '../repositories/user.repo';
 import * as addressRepo from '../repositories/address.repo';
@@ -47,6 +49,27 @@ internal.post('/address/detail', async (c) => {
     return c.json(success(null));
   }
   return c.json(success(address));
+});
+
+// POST /internal/user/stats — 用户概览统计（dashboard 使用）
+internal.post('/stats', async (c) => {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const [row] = await db
+    .select({
+      totalUsers: sql<number>`count(*)::int`,
+      newToday: sql<number>`count(*) filter (where ${users.createdAt} >= ${todayStart})::int`,
+      activeToday: sql<number>`count(*) filter (where ${users.lastLogin} >= ${todayStart})::int`,
+    })
+    .from(users)
+    .where(isNull(users.deletedAt));
+
+  return c.json(success({
+    totalUsers: row?.totalUsers ?? 0,
+    newToday: row?.newToday ?? 0,
+    activeToday: row?.activeToday ?? 0,
+  }));
 });
 
 export default internal;

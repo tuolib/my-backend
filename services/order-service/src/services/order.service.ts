@@ -30,6 +30,8 @@ import * as cartClient from './cart-client';
 import * as userClient from './user-client';
 import { OrderStatus, assertTransition } from '../state-machine/order-status';
 
+import * as paymentRepo from '../repositories/payment.repo';
+
 import type {
   CreateOrderInput,
   CreateOrderResult,
@@ -38,6 +40,7 @@ import type {
   OrderDetailResult,
   OrderItemDetail,
   OrderAddressDetail,
+  AdminOrderDetailResult,
 } from '../types';
 import type { PaginatedData, PaginationMeta } from '@repo/shared';
 
@@ -458,4 +461,158 @@ export async function ship(
       ErrorCode.ORDER_STATUS_INVALID,
     );
   }
+}
+
+// ═══════════════════════════════════════════════════
+// adminDetail — 管理端订单详情（含用户信息、支付记录）
+// ═══════════════════════════════════════════════════
+
+export async function adminDetail(orderId: string): Promise<AdminOrderDetailResult> {
+  const order = await orderRepo.findById(orderId);
+  if (!order) {
+    throw new NotFoundError('订单不存在', ErrorCode.ORDER_NOT_FOUND);
+  }
+
+  const [items, address, payments, user] = await Promise.all([
+    orderItemRepo.findByOrderId(orderId),
+    orderAddressRepo.findByOrderId(orderId),
+    paymentRepo.findByOrderId(orderId),
+    userClient.fetchUserInfo(order.userId),
+  ]);
+
+  const itemDetails: OrderItemDetail[] = items.map((i) => ({
+    id: i.id,
+    productId: i.productId,
+    skuId: i.skuId,
+    productTitle: i.productTitle,
+    skuAttrs: i.skuAttrs,
+    imageUrl: i.imageUrl,
+    unitPrice: i.unitPrice,
+    quantity: i.quantity,
+    subtotal: i.subtotal,
+  }));
+
+  const addressDetail: OrderAddressDetail | null = address
+    ? {
+        recipient: address.recipient,
+        phone: address.phone,
+        province: address.province,
+        city: address.city,
+        district: address.district,
+        address: address.address,
+        postalCode: address.postalCode,
+      }
+    : null;
+
+  return {
+    orderId: order.id,
+    orderNo: order.orderNo,
+    status: order.status,
+    totalAmount: order.totalAmount,
+    discountAmount: order.discountAmount,
+    payAmount: order.payAmount,
+    remark: order.remark,
+    expiresAt: order.expiresAt,
+    paidAt: order.paidAt,
+    shippedAt: order.shippedAt,
+    deliveredAt: order.deliveredAt,
+    completedAt: order.completedAt,
+    cancelledAt: order.cancelledAt,
+    cancelReason: order.cancelReason,
+    createdAt: order.createdAt,
+    items: itemDetails,
+    address: addressDetail,
+    userId: order.userId,
+    user,
+    payments: payments.map((p) => ({
+      id: p.id,
+      method: p.paymentMethod,
+      amount: p.amount,
+      status: p.status,
+      transactionId: p.transactionId,
+      createdAt: p.createdAt,
+    })),
+  };
+}
+
+// ═══════════════════════════════════════════════════
+// adminCancel — 管理员取消订单（无需校验用户归属）
+// ═══════════════════════════════════════════════════
+
+export async function adminCancel(
+  orderId: string,
+  reason?: string,
+): Promise<void> {
+  const order = await orderRepo.findById(orderId);
+  if (!order) {
+    throw new NotFoundError('订单不存在', ErrorCode.ORDER_NOT_FOUND);
+  }
+
+  assertTransition(order.status as OrderStatus, OrderStatus.CANCELLED);
+
+  const updated = await orderRepo.updateStatus(
+    orderId,
+    OrderStatus.CANCELLED,
+    order.version,
+    {
+      cancelledAt: new Date(),
+      cancelReason: reason ?? null,
+    },
+  );
+
+  if (!updated) {
+    throw new ValidationError(
+      '订单状态已变更，请刷新后重试',
+      ErrorCode.ORDER_STATUS_INVALID,
+    );
+  }
+
+  // 释放库存
+  const items = await orderItemRepo.findByOrderId(orderId);
+  const stockItems = items.map((i) => ({ skuId: i.skuId, quantity: i.quantity }));
+  await productClient.releaseStock(stockItems, orderId);
+
+  // 移除超时 ZSET
+  await redis.zrem(TIMEOUT_ZSET_KEY, orderId);
+}
+
+// ═══════════════════════════════════════════════════
+// adminRefund — 管理员退款（paid → refunded，释放库存）
+// ═══════════════════════════════════════════════════
+
+export async function adminRefund(
+  orderId: string,
+  reason?: string,
+): Promise<void> {
+  const order = await orderRepo.findById(orderId);
+  if (!order) {
+    throw new NotFoundError('订单不存在', ErrorCode.ORDER_NOT_FOUND);
+  }
+
+  // 状态检查：只有 paid 可以退款
+  assertTransition(order.status as OrderStatus, OrderStatus.REFUNDED);
+
+  const updated = await orderRepo.updateStatus(
+    orderId,
+    OrderStatus.REFUNDED,
+    order.version,
+    {
+      cancelledAt: new Date(),
+      cancelReason: reason ?? null,
+    },
+  );
+
+  if (!updated) {
+    throw new ValidationError(
+      '订单状态已变更，请刷新后重试',
+      ErrorCode.ORDER_STATUS_INVALID,
+    );
+  }
+
+  // 释放库存（退还到 Redis，stock sync 会同步到 PG）
+  const items = await orderItemRepo.findByOrderId(orderId);
+  const stockItems = items.map((i) => ({ skuId: i.skuId, quantity: i.quantity }));
+  await productClient.releaseStock(stockItems, orderId);
+
+  log.info('order refunded', { orderId, reason });
 }

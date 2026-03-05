@@ -626,6 +626,114 @@
 
 ---
 
+### POST /api/v1/admin/order/detail
+
+管理端订单详情（含用户信息、收货地址、商品明细、支付记录）。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| orderId | string | 是 | 订单 ID |
+
+**Response Data:**
+
+```typescript
+{
+  orderId: string
+  orderNo: string
+  status: string
+  totalAmount: string
+  discountAmount: string
+  payAmount: string
+  remark: string | null
+  expiresAt: string
+  paidAt: string | null
+  shippedAt: string | null
+  deliveredAt: string | null
+  completedAt: string | null
+  cancelledAt: string | null
+  cancelReason: string | null
+  createdAt: string
+  userId: string
+  user: {                          // 用户基本信息（跨服务获取）
+    id: string
+    email: string
+    nickname: string | null
+    phone: string | null
+    status: string
+  } | null
+  items: Array<{                   // 商品明细（快照）
+    id: string
+    productId: string
+    skuId: string
+    productTitle: string
+    skuAttrs: object
+    imageUrl: string | null
+    unitPrice: string
+    quantity: number
+    subtotal: string
+  }>
+  address: {                       // 收货地址（快照）
+    recipient: string
+    phone: string
+    province: string
+    city: string
+    district: string
+    address: string
+    postalCode: string | null
+  } | null
+  payments: Array<{                // 支付记录
+    id: string
+    method: string
+    amount: string
+    status: string
+    transactionId: string | null
+    createdAt: string
+  }>
+}
+```
+
+---
+
+### POST /api/v1/admin/order/cancel
+
+管理员取消订单（自动释放库存）。仅 `pending` 状态订单可取消。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| orderId | string | 是 | 订单 ID |
+| reason | string | 否 | 取消原因，最长 500 字 |
+
+**Response Data:** `null`，message: `"订单已取消"`
+
+**错误码：**
+- `ORDER_4001` — 订单不存在
+- `ORDER_4002` — 订单状态不允许取消
+
+---
+
+### POST /api/v1/admin/order/refund
+
+管理员退款处理。仅 `paid` 状态订单可退款，退款后自动释放库存。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| orderId | string | 是 | 订单 ID |
+| reason | string | 否 | 退款原因，最长 500 字 |
+
+**Response Data:** `null`，message: `"退款成功"`
+
+**错误码：**
+- `ORDER_4001` — 订单不存在
+- `ORDER_4002` — 订单状态不允许退款（仅 paid → refunded）
+
+---
+
 ## 路由转发表
 
 | 前缀 | 下游服务 |

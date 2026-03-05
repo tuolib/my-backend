@@ -35,6 +35,11 @@ export interface ShipOrderInput {
   trackingNo?: string;
 }
 
+export interface AdminRefundInput {
+  orderId: string;
+  reason?: string;
+}
+
 // ────────────────────────────── 响应 DTO ──────────────────────────────
 
 export interface CreateOrderResult {
@@ -98,6 +103,32 @@ export interface OrderAddressDetail {
   district: string;
   address: string;
   postalCode: string | null;
+}
+
+// ────────────────────────────── 管理端 DTO ──────────────────────────────
+
+/** 管理端订单详情（含用户信息 + 支付记录） */
+export interface AdminOrderDetailResult extends OrderDetailResult {
+  userId: string;
+  user: AdminOrderUserInfo | null;
+  payments: AdminOrderPayment[];
+}
+
+export interface AdminOrderUserInfo {
+  id: string;
+  email: string;
+  nickname: string | null;
+  phone: string | null;
+  status: string;
+}
+
+export interface AdminOrderPayment {
+  id: string;
+  method: string;
+  amount: string;
+  status: string;
+  transactionId: string | null;
+  createdAt: Date;
 }
 
 // ────────────────────────────── 支付 DTO ──────────────────────────────

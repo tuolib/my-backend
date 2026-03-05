@@ -46,3 +46,8 @@ export const shipOrderSchema = z.object({
   orderId: z.string().min(1, '订单 ID 不能为空'),
   trackingNo: z.string().max(100, '物流单号不超过 100 字').optional(),
 });
+
+export const adminRefundSchema = z.object({
+  orderId: z.string().min(1, '订单 ID 不能为空'),
+  reason: z.string().max(500, '退款原因不超过 500 字').optional(),
+});

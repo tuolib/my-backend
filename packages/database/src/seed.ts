@@ -9,6 +9,7 @@ import { redis } from './redis';
 import { generateId } from '@repo/shared';
 import { hashPassword } from '@repo/shared';
 import { setStock } from './lua';
+import { bulkCatalog } from './seed-prod-catalog';
 import {
   users,
   userAddresses,
@@ -1018,7 +1019,872 @@ async function seed() {
     ],
   });
 
-  const totalProducts = 42;
+  // ══════════════════════════════════════════════════════════════
+  // 新增商品 — 补充各分类至 3~4 个
+  // ══════════════════════════════════════════════════════════════
+
+  // ── 手机数码 · 耳机 ──
+  await insertProduct({
+    title: '华为 FreeBuds Pro 3 真无线耳机',
+    slug: 'huawei-freebuds-pro-3',
+    description: '华为 FreeBuds Pro 3，星闪连接，智慧降噪3.0，LDAC高清音质',
+    brand: '华为',
+    categoryId: catEarphone,
+    minPrice: '1199.00', maxPrice: '1199.00',
+    totalSales: randInt(1500, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('mobile-accessories/amazon-echo-dot-5th-generation/1.webp'), cdnImg('mobile-accessories/amazon-echo-dot-5th-generation/2.webp')],
+    skuList: [
+      { code: 'HW-FBP3-WHT', price: '1199.00', comparePrice: '1499.00', stock: 200, attributes: { color: '陶瓷白' } },
+      { code: 'HW-FBP3-GRN', price: '1199.00', comparePrice: '1499.00', stock: 150, attributes: { color: '雅川青' } },
+    ],
+  });
+
+  // ── 手机数码 · 智能手表 ──
+  await insertProduct({
+    title: '华为 Watch GT 4 46mm',
+    slug: 'huawei-watch-gt4-46',
+    description: '华为 Watch GT 4，八角形设计，14天超长续航，心率血氧监测',
+    brand: '华为',
+    categoryId: catSmartWatch,
+    minPrice: '1488.00', maxPrice: '1688.00',
+    totalSales: randInt(1000, 3000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('mens-watches/brown-leather-belt-watch/1.webp'), cdnImg('mens-watches/brown-leather-belt-watch/2.webp')],
+    skuList: [
+      { code: 'HWGT4-46-BLK', price: '1488.00', comparePrice: '1688.00', stock: 150, attributes: { size: '46mm', band: '黑色氟橡胶' } },
+      { code: 'HWGT4-46-BRN', price: '1688.00', comparePrice: '1888.00', stock: 100, attributes: { size: '46mm', band: '棕色真皮' } },
+    ],
+  });
+
+  await insertProduct({
+    title: 'Samsung Galaxy Watch6 Classic',
+    slug: 'samsung-galaxy-watch6-classic',
+    description: '三星 Galaxy Watch6 Classic，旋转表圈，BioActive传感器，WearOS',
+    brand: 'Samsung',
+    categoryId: catSmartWatch,
+    minPrice: '2199.00', maxPrice: '2799.00',
+    totalSales: randInt(500, 2000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('mens-watches/long-moonlight-necklace/1.webp'), cdnImg('mens-watches/round-silver-analog-watch/1.webp')],
+    skuList: [
+      { code: 'GW6C-43-SLV', price: '2199.00', comparePrice: '2599.00', stock: 100, attributes: { size: '43mm', color: '银色' } },
+      { code: 'GW6C-47-BLK', price: '2799.00', comparePrice: '3199.00', stock: 80, attributes: { size: '47mm', color: '黑色' } },
+    ],
+  });
+
+  // ── 电脑办公 · 笔记本 ──
+  await insertProduct({
+    title: '华硕 ROG 幻16 游戏本',
+    slug: 'asus-rog-zephyrus-g16',
+    description: '华硕 ROG 幻16，i9-13900H + RTX4070，16英寸2K 240Hz电竞屏',
+    brand: 'ASUS',
+    categoryId: catLaptop,
+    minPrice: '11999.00', maxPrice: '14999.00',
+    totalSales: randInt(500, 2000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('laptops/asus-zenbook-pro-dual-screen-laptop/1.webp'), cdnImg('laptops/asus-zenbook-pro-dual-screen-laptop/2.webp'), cdnImg('laptops/asus-zenbook-pro-dual-screen-laptop/3.webp')],
+    skuList: [
+      { code: 'ROG-G16-4060', price: '11999.00', comparePrice: '13499.00', stock: 80, attributes: { gpu: 'RTX4060', memory: '16GB', storage: '512GB' } },
+      { code: 'ROG-G16-4070', price: '14999.00', comparePrice: '16999.00', stock: 50, lowStock: 10, attributes: { gpu: 'RTX4070', memory: '32GB', storage: '1TB' } },
+    ],
+  });
+
+  // ── 电脑办公 · 平板 ──
+  await insertProduct({
+    title: 'Samsung Galaxy Tab S9 Ultra',
+    slug: 'samsung-galaxy-tab-s9-ultra',
+    description: '三星 Galaxy Tab S9 Ultra，14.6英寸 AMOLED，骁龙8 Gen2，S Pen',
+    brand: 'Samsung',
+    categoryId: catTablet,
+    minPrice: '8999.00', maxPrice: '10999.00',
+    totalSales: randInt(300, 1500),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('tablets/samsung-galaxy-tab-s7-plus-midnight-black/1.webp'), cdnImg('tablets/samsung-galaxy-tab-s7-plus-midnight-black/2.webp')],
+    skuList: [
+      { code: 'TABS9U-256-GRY', price: '8999.00', comparePrice: '9999.00', stock: 60, attributes: { storage: '256GB', color: '石墨灰' } },
+      { code: 'TABS9U-512-BEG', price: '10999.00', comparePrice: '11999.00', stock: 40, lowStock: 10, attributes: { storage: '512GB', color: '奶油白' } },
+    ],
+  });
+
+  // ── 电脑办公 · 键盘鼠标 ──
+  await insertProduct({
+    title: '罗技 MX Keys S 无线键盘',
+    slug: 'logitech-mx-keys-s',
+    description: '罗技 MX Keys S，智能背光，多设备切换，低噪静音输入',
+    brand: 'Logitech',
+    categoryId: catKeyboard,
+    minPrice: '699.00', maxPrice: '699.00',
+    totalSales: randInt(1000, 3000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('MX+Keys+S', '1F2937', 'F3F4F6'), placeholderImg('Logitech+MX', '111827', 'E5E7EB')],
+    skuList: [
+      { code: 'MXKEYS-S-BLK', price: '699.00', comparePrice: '849.00', stock: 200, attributes: { color: '石墨', layout: '全尺寸' } },
+    ],
+  });
+
+  await insertProduct({
+    title: 'Keychron K3 Pro 超薄机械键盘',
+    slug: 'keychron-k3-pro',
+    description: 'Keychron K3 Pro，75%布局，Gateron矮轴，蓝牙/有线双模',
+    brand: 'Keychron',
+    categoryId: catKeyboard,
+    minPrice: '549.00', maxPrice: '549.00',
+    totalSales: randInt(500, 2000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('K3+Pro', '374151', 'F9FAFB'), placeholderImg('Keychron', '1F2937', 'F3F4F6')],
+    skuList: [
+      { code: 'KC-K3P-RED', price: '549.00', comparePrice: '649.00', stock: 120, attributes: { switch: '红轴', backlight: 'RGB' } },
+      { code: 'KC-K3P-BRN', price: '549.00', comparePrice: '649.00', stock: 100, attributes: { switch: '茶轴', backlight: 'RGB' } },
+    ],
+  });
+
+  // ── 家用电器 · 冰箱洗衣机 ──
+  await insertProduct({
+    title: '西门子 10公斤滚筒洗衣机 WG54B2X00W',
+    slug: 'siemens-washer-wg54b2',
+    description: '西门子10kg滚筒洗衣机，1400转变频，智能除渍，15分钟快洗',
+    brand: '西门子',
+    categoryId: catBigAppliance,
+    minPrice: '4999.00', maxPrice: '4999.00',
+    totalSales: randInt(500, 1500),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Siemens+Washer', '60A5FA', 'FFF'), placeholderImg('10kg+Drum', '3B82F6', 'FFF')],
+    skuList: [
+      { code: 'SIEM-WG54B-WHT', price: '4999.00', comparePrice: '5999.00', stock: 40, lowStock: 10, attributes: { color: '白色', capacity: '10kg' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '美的 1.5匹一级变频空调 KFR-35GW',
+    slug: 'midea-ac-kfr35gw',
+    description: '美的新一级能效变频空调，急速冷暖，智能WiFi控制，静音运行',
+    brand: '美的',
+    categoryId: catBigAppliance,
+    minPrice: '2699.00', maxPrice: '2699.00',
+    totalSales: randInt(1000, 3000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Midea+AC', '38BDF8', 'FFF'), placeholderImg('1.5P+AC', '0EA5E9', 'FFF')],
+    skuList: [
+      { code: 'MIDEA-AC-35-WHT', price: '2699.00', comparePrice: '3299.00', stock: 80, attributes: { power: '1.5匹', energy: '一级能效' } },
+    ],
+  });
+
+  // ── 家用电器 · 小家电 ──
+  await insertProduct({
+    title: '石头 G20 扫拖机器人',
+    slug: 'roborock-g20',
+    description: '石头 G20，全能基站，自清洁拖布，6000Pa大吸力，LDS激光导航',
+    brand: '石头',
+    categoryId: catSmallAppliance,
+    minPrice: '3999.00', maxPrice: '3999.00',
+    totalSales: randInt(800, 2500),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Roborock+G20', '4B5563', 'F9FAFB'), placeholderImg('Robot+Vacuum', '374151', 'F3F4F6')],
+    skuList: [
+      { code: 'ROBO-G20-WHT', price: '3999.00', comparePrice: '4799.00', stock: 60, attributes: { color: '曙光白' } },
+    ],
+  });
+
+  // ── 家用电器 · 厨房电器 ──
+  await insertProduct({
+    title: '九阳 破壁豆浆机 Y1 Plus',
+    slug: 'joyoung-y1-plus',
+    description: '九阳破壁豆浆机，自清洗免手洗，不用泡豆，8大功能',
+    brand: '九阳',
+    categoryId: catKitchen,
+    minPrice: '1299.00', maxPrice: '1299.00',
+    totalSales: randInt(1500, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('kitchen-accessories/electric-stove/2.webp'), cdnImg('kitchen-accessories/electric-stove/3.webp')],
+    skuList: [
+      { code: 'JY-Y1P-WHT', price: '1299.00', comparePrice: '1599.00', stock: 100, attributes: { color: '白色', capacity: '1.2L' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '松下 变频微波炉 NN-DS59MB',
+    slug: 'panasonic-microwave-ds59',
+    description: '松下变频微波炉，27L容量，蒸烤炸一体，一级能效',
+    brand: '松下',
+    categoryId: catKitchen,
+    minPrice: '1699.00', maxPrice: '1699.00',
+    totalSales: randInt(500, 2000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('kitchen-accessories/silver-pot-with-glass-cap/2.webp'), cdnImg('kitchen-accessories/silver-pot-with-glass-cap/3.webp')],
+    skuList: [
+      { code: 'PANA-MW-59-BLK', price: '1699.00', comparePrice: '1999.00', stock: 60, attributes: { color: '黑色', capacity: '27L' } },
+    ],
+  });
+
+  // ── 服饰鞋包 · 男装 ──
+  await insertProduct({
+    title: 'Ralph Lauren 经典Polo衫 男款',
+    slug: 'ralph-lauren-polo-shirt-men',
+    description: 'Ralph Lauren 经典小马标Polo衫，网眼棉面料，休闲商务两穿',
+    brand: 'Ralph Lauren',
+    categoryId: catMenswear,
+    minPrice: '799.00', maxPrice: '799.00',
+    totalSales: randInt(1000, 3000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('mens-shirts/man-plaid-shirt/1.webp'), cdnImg('mens-shirts/man-plaid-shirt/2.webp')],
+    skuList: [
+      { code: 'RL-POLO-M-NVY', price: '799.00', comparePrice: '990.00', stock: 150, attributes: { size: 'M', color: '藏青' } },
+      { code: 'RL-POLO-L-WHT', price: '799.00', comparePrice: '990.00', stock: 120, attributes: { size: 'L', color: '白色' } },
+      { code: 'RL-POLO-XL-RED', price: '799.00', comparePrice: '990.00', stock: 100, attributes: { size: 'XL', color: '红色' } },
+    ],
+  });
+
+  // ── 服饰鞋包 · 女装 ──
+  await insertProduct({
+    title: '太平鸟 女式西装外套 通勤款',
+    slug: 'peacebird-blazer-women',
+    description: '太平鸟西装外套，垂坠感面料，修身剪裁，通勤穿搭必备',
+    brand: '太平鸟',
+    categoryId: catWomenswear,
+    minPrice: '599.00', maxPrice: '599.00',
+    totalSales: randInt(1000, 3000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('tops/womans-black-top/1.webp'), cdnImg('tops/womans-black-top/2.webp')],
+    skuList: [
+      { code: 'PB-BLZ-W-S-BLK', price: '599.00', comparePrice: '799.00', stock: 120, attributes: { size: 'S', color: '黑色' } },
+      { code: 'PB-BLZ-W-M-KHK', price: '599.00', comparePrice: '799.00', stock: 150, attributes: { size: 'M', color: '卡其' } },
+      { code: 'PB-BLZ-W-L-BLK', price: '599.00', comparePrice: '799.00', stock: 100, attributes: { size: 'L', color: '黑色' } },
+    ],
+  });
+
+  // ── 服饰鞋包 · 鞋靴 ──
+  await insertProduct({
+    title: 'New Balance 574 经典复古跑鞋',
+    slug: 'new-balance-574-classic',
+    description: 'New Balance 574，经典复古鞋型，ENCAP中底缓震，百搭不过时',
+    brand: 'New Balance',
+    categoryId: catShoes,
+    minPrice: '769.00', maxPrice: '769.00',
+    totalSales: randInt(1500, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('mens-shoes/nike-baseball-cleats/1.webp'), cdnImg('mens-shoes/nike-baseball-cleats/2.webp')],
+    skuList: [
+      { code: 'NB574-40-GRY', price: '769.00', comparePrice: '899.00', stock: 120, attributes: { size: '40', color: '元祖灰' } },
+      { code: 'NB574-42-GRY', price: '769.00', comparePrice: '899.00', stock: 150, attributes: { size: '42', color: '元祖灰' } },
+      { code: 'NB574-43-NVY', price: '769.00', comparePrice: '899.00', stock: 100, attributes: { size: '43', color: '藏青' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '匡威 Chuck Taylor All Star 经典帆布鞋',
+    slug: 'converse-chuck-taylor-classic',
+    description: '匡威 Chuck Taylor All Star，经典高帮帆布鞋，时尚百搭',
+    brand: 'Converse',
+    categoryId: catShoes,
+    minPrice: '499.00', maxPrice: '499.00',
+    totalSales: randInt(2000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('mens-shoes/lace-up-boots/1.webp'), cdnImg('mens-shoes/lace-up-boots/2.webp')],
+    skuList: [
+      { code: 'CVS-CT-38-BLK', price: '499.00', comparePrice: '599.00', stock: 200, attributes: { size: '38', color: '黑色' } },
+      { code: 'CVS-CT-40-WHT', price: '499.00', comparePrice: '599.00', stock: 250, attributes: { size: '40', color: '白色' } },
+      { code: 'CVS-CT-42-RED', price: '499.00', comparePrice: '599.00', stock: 180, attributes: { size: '42', color: '红色' } },
+    ],
+  });
+
+  // ── 食品生鲜 · 零食 ──
+  await insertProduct({
+    title: '良品铺子 鸭脖鸭锁骨 卤味零食大礼包',
+    slug: 'bestore-duck-neck-gift-box',
+    description: '良品铺子卤味零食大礼包，鸭脖鸭锁骨鸭翅组合，麻辣鲜香',
+    brand: '良品铺子',
+    categoryId: catSnacks,
+    minPrice: '59.90', maxPrice: '99.90',
+    totalSales: randInt(2000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('groceries/beef-steak/1.webp'), cdnImg('groceries/chicken-meat/1.webp')],
+    skuList: [
+      { code: 'LPPZ-DUCK-S', price: '59.90', comparePrice: '79.90', stock: 300, attributes: { spec: '小份装 400g' } },
+      { code: 'LPPZ-DUCK-L', price: '99.90', comparePrice: '129.90', stock: 200, attributes: { spec: '大礼包 800g' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '百草味 芒果干 蜜饯果脯 500g',
+    slug: 'baicaowei-dried-mango-500',
+    description: '百草味芒果干，精选泰国芒果，软糯香甜，独立小包装',
+    brand: '百草味',
+    categoryId: catSnacks,
+    minPrice: '29.90', maxPrice: '49.90',
+    totalSales: randInt(3000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('groceries/apple/1.webp'), cdnImg('groceries/cat-food/1.webp')],
+    skuList: [
+      { code: 'BCW-MANGO-250', price: '29.90', comparePrice: '39.90', stock: 400, attributes: { spec: '250g' } },
+      { code: 'BCW-MANGO-500', price: '49.90', comparePrice: '69.90', stock: 300, attributes: { spec: '500g' } },
+    ],
+  });
+
+  // ── 食品生鲜 · 饮料 ──
+  await insertProduct({
+    title: '元气森林 苏打气泡水 白桃味 480ml×15瓶',
+    slug: 'genki-forest-sparkling-peach-15',
+    description: '元气森林气泡水，0糖0脂0卡，白桃风味，清爽畅饮',
+    brand: '元气森林',
+    categoryId: catDrinks,
+    minPrice: '59.90', maxPrice: '59.90',
+    totalSales: randInt(3000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('groceries/juice/2.webp'), cdnImg('groceries/water/2.webp')],
+    skuList: [
+      { code: 'GKF-PEACH-15', price: '59.90', comparePrice: '74.90', stock: 400, attributes: { flavor: '白桃味', spec: '480ml×15瓶' } },
+    ],
+  });
+
+  // ── 食品生鲜 · 生鲜 ──
+  await insertProduct({
+    title: '丹东99草莓 新鲜水果 3斤装',
+    slug: 'dandong-strawberry-3lb',
+    description: '丹东99红颜草莓，当季新鲜采摘，个大饱满，香甜多汁',
+    brand: '鲜果时光',
+    categoryId: catFresh,
+    minPrice: '89.00', maxPrice: '89.00',
+    totalSales: randInt(2000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('groceries/strawberry/2.webp'), cdnImg('groceries/strawberry/3.webp')],
+    skuList: [
+      { code: 'DD99-SB-3LB', price: '89.00', comparePrice: '119.00', stock: 100, lowStock: 15, attributes: { spec: '3斤装', grade: '精选大果' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '厄瓜多尔白虾 冷冻大虾 净重4斤',
+    slug: 'ecuador-white-shrimp-4lb',
+    description: '厄瓜多尔进口白虾，30-40只/斤，肉质紧实弹牙，急冻锁鲜',
+    brand: '海鲜汇',
+    categoryId: catFresh,
+    minPrice: '149.00', maxPrice: '149.00',
+    totalSales: randInt(1000, 3000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('groceries/salmon/1.webp'), cdnImg('groceries/fish-steak/1.webp')],
+    skuList: [
+      { code: 'EC-SHRIMP-4LB', price: '149.00', comparePrice: '199.00', stock: 80, lowStock: 10, attributes: { spec: '净重4斤', size: '30-40只/斤' } },
+    ],
+  });
+
+  // ── 美妆个护 · 护肤 ──
+  await insertProduct({
+    title: '兰蔻 小黑瓶精华肌底液 100ml',
+    slug: 'lancome-advanced-genifique-100',
+    description: '兰蔻小黑瓶，微生态护肤，修护肌肤屏障，焕亮好气色',
+    brand: '兰蔻',
+    categoryId: catSkincare,
+    minPrice: '1080.00', maxPrice: '1080.00',
+    totalSales: randInt(2000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('skin-care/dove-body-care-nourishing-body-wash/1.webp'), cdnImg('skin-care/hemani-tea-tree-oil/1.webp')],
+    skuList: [
+      { code: 'LC-AGF-50', price: '760.00', comparePrice: '890.00', stock: 200, attributes: { spec: '50ml' } },
+      { code: 'LC-AGF-100', price: '1080.00', comparePrice: '1260.00', stock: 150, attributes: { spec: '100ml' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '雅诗兰黛 小棕瓶眼霜 15ml',
+    slug: 'estee-lauder-eye-cream-15',
+    description: '雅诗兰黛小棕瓶眼霜，淡化细纹，提亮眼周，抗初老必备',
+    brand: '雅诗兰黛',
+    categoryId: catSkincare,
+    minPrice: '520.00', maxPrice: '520.00',
+    totalSales: randInt(1500, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('skin-care/elf-skin-super-hydrate-moisturizer/1.webp'), cdnImg('skin-care/elf-skin-super-hydrate-moisturizer/2.webp')],
+    skuList: [
+      { code: 'EL-ANR-EYE-15', price: '520.00', comparePrice: '620.00', stock: 250, attributes: { spec: '15ml' } },
+    ],
+  });
+
+  // ── 美妆个护 · 彩妆 ──
+  await insertProduct({
+    title: '完美日记 动物眼影盘 小猫盘',
+    slug: 'perfect-diary-cat-eyeshadow',
+    description: '完美日记动物系列眼影盘，12色搭配，粉质细腻，持妆不飞粉',
+    brand: '完美日记',
+    categoryId: catMakeup,
+    minPrice: '89.90', maxPrice: '89.90',
+    totalSales: randInt(3000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('beauty/eyeshadow-palette-with-mirror/2.webp'), cdnImg('beauty/makeup-remover/1.webp')],
+    skuList: [
+      { code: 'PD-CAT-12', price: '89.90', comparePrice: '129.90', stock: 300, attributes: { palette: '小猫盘', colors: '12色' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '花西子 空气蜜粉 定妆散粉',
+    slug: 'florasis-air-powder',
+    description: '花西子空气蜜粉，超细粉质，控油定妆，轻薄透气如无物',
+    brand: '花西子',
+    categoryId: catMakeup,
+    minPrice: '149.00', maxPrice: '149.00',
+    totalSales: randInt(2000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('beauty/powder-canister/1.webp'), cdnImg('beauty/powder-canister/2.webp')],
+    skuList: [
+      { code: 'FLR-AP-01', price: '149.00', comparePrice: '199.00', stock: 250, attributes: { shade: '01 自然色' } },
+      { code: 'FLR-AP-02', price: '149.00', comparePrice: '199.00', stock: 200, attributes: { shade: '02 嫩肤色' } },
+    ],
+  });
+
+  // ── 美妆个护 · 洗护 ──
+  await insertProduct({
+    title: '潘婷 3分钟奇迹发膜 护发素 270ml',
+    slug: 'pantene-3min-miracle-conditioner',
+    description: '潘婷3分钟奇迹发膜，氨基酸修护，丝滑顺发，深层滋养',
+    brand: '潘婷',
+    categoryId: catWashCare,
+    minPrice: '39.90', maxPrice: '39.90',
+    totalSales: randInt(2500, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('skin-care/vaseline-men-body-and-face-lotion/2.webp'), cdnImg('skin-care/attitude-super-leaves-hand-soap/2.webp')],
+    skuList: [
+      { code: 'PANT-3MM-270', price: '39.90', comparePrice: '59.90', stock: 400, attributes: { spec: '270ml', type: '丝质顺滑型' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '舒肤佳 纯白清香沐浴露 1L',
+    slug: 'safeguard-body-wash-1l',
+    description: '舒肤佳沐浴露，12小时长效抑菌，温和配方，全家可用',
+    brand: '舒肤佳',
+    categoryId: catWashCare,
+    minPrice: '39.90', maxPrice: '39.90',
+    totalSales: randInt(3000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('skin-care/neutrogena-norwegian-formula-hand-cream/1.webp'), cdnImg('skin-care/neutrogena-norwegian-formula-hand-cream/2.webp')],
+    skuList: [
+      { code: 'SFJ-BW-1L', price: '39.90', comparePrice: '59.90', stock: 500, attributes: { spec: '1L', fragrance: '纯白清香' } },
+    ],
+  });
+
+  // ── 图书音像 · 文学 ──
+  await insertProduct({
+    title: '活着（余华）',
+    slug: 'to-live-yu-hua',
+    description: '余华代表作，讲述人在苦难中的坚韧与温情，销量超2000万册',
+    brand: '作家出版社',
+    categoryId: catLiterature,
+    minPrice: '29.00', maxPrice: '29.00',
+    totalSales: randInt(4000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('To+Live', '1E3A5F', 'DBEAFE'), placeholderImg('Yu+Hua', '1E40AF', 'BFDBFE')],
+    skuList: [
+      { code: 'HUOZHE-PB', price: '29.00', comparePrice: '45.00', stock: 500, attributes: { format: '平装', version: '最新版' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '百年孤独（加西亚·马尔克斯）',
+    slug: 'one-hundred-years-of-solitude',
+    description: '马尔克斯代表作，魔幻现实主义文学巅峰，诺贝尔文学奖作品',
+    brand: '南海出版公司',
+    categoryId: catLiterature,
+    minPrice: '55.00', maxPrice: '55.00',
+    totalSales: randInt(2000, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Solitude', '5B21B6', 'F5F3FF'), placeholderImg('Marquez', '6D28D9', 'EDE9FE')],
+    skuList: [
+      { code: 'BNGD-50TH', price: '55.00', comparePrice: '69.80', stock: 400, attributes: { format: '精装', version: '50周年纪念版' } },
+    ],
+  });
+
+  // ── 图书音像 · 教育 ──
+  await insertProduct({
+    title: 'Python编程 从入门到实践 第3版',
+    slug: 'python-crash-course-3rd',
+    description: 'Python入门经典教材，项目驱动式学习，适合零基础读者',
+    brand: '人民邮电出版社',
+    categoryId: catEducation,
+    minPrice: '79.80', maxPrice: '79.80',
+    totalSales: randInt(2000, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Python', '3B82F6', 'DBEAFE'), placeholderImg('Crash+Course', '2563EB', 'BFDBFE')],
+    skuList: [
+      { code: 'PYCC-3RD', price: '79.80', comparePrice: '109.80', stock: 300, attributes: { format: '纸质书', edition: '第3版' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '高等数学（同济第七版）上下册',
+    slug: 'advanced-math-tongji-7th',
+    description: '同济大学数学系经典教材，高等院校通用，工科学生必备',
+    brand: '高等教育出版社',
+    categoryId: catEducation,
+    minPrice: '68.00', maxPrice: '68.00',
+    totalSales: randInt(3000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Math', '059669', 'D1FAE5'), placeholderImg('Calculus', '047857', 'A7F3D0')],
+    skuList: [
+      { code: 'GDSX-7-SET', price: '68.00', comparePrice: '96.60', stock: 500, attributes: { format: '纸质书', spec: '上下册套装' } },
+    ],
+  });
+
+  // ── 图书音像 · 漫画 ──
+  await insertProduct({
+    title: '鬼灭之刃 漫画全套 1-23卷',
+    slug: 'demon-slayer-manga-1-23',
+    description: '吾峠呼世晴著，累计发行超1.5亿册，热血战斗漫画',
+    brand: '浙江人民美术出版社',
+    categoryId: catComic,
+    minPrice: '6.90', maxPrice: '299.00',
+    totalSales: randInt(1500, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Demon+Slayer', '166534', 'F0FDF4'), placeholderImg('Tanjiro', '15803D', 'DCFCE7')],
+    skuList: [
+      { code: 'GMMZR-SINGLE', price: '6.90', comparePrice: '9.90', stock: 500, attributes: { spec: '单册', format: '漫画' } },
+      { code: 'GMMZR-BOX-1-23', price: '299.00', comparePrice: '399.00', stock: 80, lowStock: 10, attributes: { spec: '全套1-23卷', format: '漫画' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '进击的巨人 漫画全套 1-34卷',
+    slug: 'attack-on-titan-manga-1-34',
+    description: '谏山创著，暗黑奇幻巨作，揭开墙外世界的真相',
+    brand: '新星出版社',
+    categoryId: catComic,
+    minPrice: '6.90', maxPrice: '399.00',
+    totalSales: randInt(1000, 3000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('AoT', '78350F', 'FEF9C3'), placeholderImg('Titan', '854D0E', 'FEF08A')],
+    skuList: [
+      { code: 'AOT-SINGLE', price: '6.90', comparePrice: '9.90', stock: 500, attributes: { spec: '单册', format: '漫画' } },
+      { code: 'AOT-BOX-1-34', price: '399.00', comparePrice: '499.00', stock: 50, lowStock: 10, attributes: { spec: '全套1-34卷', format: '漫画' } },
+    ],
+  });
+
+  // ── 运动户外 · 健身器材 ──
+  await insertProduct({
+    title: '小莫 包胶哑铃 可调节 20kg一对',
+    slug: 'xiaomo-adjustable-dumbbell-20kg',
+    description: '小莫可调节哑铃，环保包胶，防滑手柄，10档重量自由切换',
+    brand: '小莫',
+    categoryId: catFitness,
+    minPrice: '299.00', maxPrice: '499.00',
+    totalSales: randInt(1000, 3000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('sports-accessories/football/1.webp'), cdnImg('sports-accessories/metal-bat/1.webp')],
+    skuList: [
+      { code: 'XM-DB-10KG', price: '299.00', comparePrice: '399.00', stock: 150, attributes: { weight: '10kg×2', material: '包胶' } },
+      { code: 'XM-DB-20KG', price: '499.00', comparePrice: '599.00', stock: 100, attributes: { weight: '20kg×2', material: '包胶' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '悦步 瑜伽垫 加宽加厚 185×80cm',
+    slug: 'yuebu-yoga-mat-185x80',
+    description: '悦步TPE瑜伽垫，双面防滑，高回弹缓震，环保无味',
+    brand: '悦步',
+    categoryId: catFitness,
+    minPrice: '89.00', maxPrice: '129.00',
+    totalSales: randInt(2000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('sports-accessories/tennis-ball/1.webp'), cdnImg('sports-accessories/cricket-helmet/1.webp')],
+    skuList: [
+      { code: 'YB-YOGA-6MM', price: '89.00', comparePrice: '119.00', stock: 300, attributes: { thickness: '6mm', color: '藕粉' } },
+      { code: 'YB-YOGA-8MM', price: '129.00', comparePrice: '159.00', stock: 200, attributes: { thickness: '8mm', color: '深紫' } },
+    ],
+  });
+
+  // ── 运动户外 · 户外装备 ──
+  await insertProduct({
+    title: '始祖鸟 Mantis 26 户外双肩包',
+    slug: 'arcteryx-mantis-26-backpack',
+    description: "Arc'teryx Mantis 26L，城市户外两用，轻量耐磨，多隔层收纳",
+    brand: "Arc'teryx",
+    categoryId: catOutdoor,
+    minPrice: '1350.00', maxPrice: '1350.00',
+    totalSales: randInt(500, 2000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('womens-bags/women-handbag-black/1.webp'), cdnImg('womens-bags/women-handbag-black/2.webp')],
+    skuList: [
+      { code: 'ARC-M26-BLK', price: '1350.00', comparePrice: '1600.00', stock: 80, lowStock: 10, attributes: { color: '黑色', capacity: '26L' } },
+    ],
+  });
+
+  await insertProduct({
+    title: 'Columbia 哥伦比亚 防水冲锋裤 男款',
+    slug: 'columbia-waterproof-pants-men',
+    description: 'Columbia Omni-Tech 防水冲锋裤，三层压胶，透气速干，登山徒步',
+    brand: 'Columbia',
+    categoryId: catOutdoor,
+    minPrice: '799.00', maxPrice: '799.00',
+    totalSales: randInt(500, 2000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Columbia+Pants', '065F46', 'ECFDF5'), placeholderImg('Waterproof', '047857', 'D1FAE5')],
+    skuList: [
+      { code: 'COL-WP-M-M', price: '799.00', comparePrice: '999.00', stock: 100, attributes: { size: 'M', color: '黑色' } },
+      { code: 'COL-WP-M-L', price: '799.00', comparePrice: '999.00', stock: 120, attributes: { size: 'L', color: '黑色' } },
+      { code: 'COL-WP-M-XL', price: '799.00', comparePrice: '999.00', stock: 80, attributes: { size: 'XL', color: '军绿' } },
+    ],
+  });
+
+  // ── 运动户外 · 运动服饰 ──
+  await insertProduct({
+    title: 'Under Armour 紧身压缩衣 男款',
+    slug: 'under-armour-compression-shirt',
+    description: 'Under Armour HeatGear 压缩衣，四向弹力，速干排汗，贴合运动',
+    brand: 'Under Armour',
+    categoryId: catSportswear,
+    minPrice: '299.00', maxPrice: '299.00',
+    totalSales: randInt(1500, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('mens-shirts/man-transition-jacket/1.webp'), cdnImg('mens-shirts/man-transition-jacket/2.webp')],
+    skuList: [
+      { code: 'UA-CMP-M-BLK', price: '299.00', comparePrice: '399.00', stock: 200, attributes: { size: 'M', color: '黑色' } },
+      { code: 'UA-CMP-L-BLK', price: '299.00', comparePrice: '399.00', stock: 250, attributes: { size: 'L', color: '黑色' } },
+      { code: 'UA-CMP-XL-NVY', price: '299.00', comparePrice: '399.00', stock: 150, attributes: { size: 'XL', color: '藏青' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '安踏 KT8 汤普森篮球鞋',
+    slug: 'anta-kt8-basketball-shoes',
+    description: '安踏 KT8 克莱·汤普森签名篮球鞋，氮科技中底，实战缓震',
+    brand: '安踏',
+    categoryId: catSportswear,
+    minPrice: '899.00', maxPrice: '899.00',
+    totalSales: randInt(1000, 3000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('mens-shoes/puma-future-rider-trainers/1.webp'), cdnImg('mens-shoes/puma-future-rider-trainers/2.webp')],
+    skuList: [
+      { code: 'ANTA-KT8-41-WHT', price: '899.00', comparePrice: '1099.00', stock: 100, attributes: { size: '41', color: '白蓝' } },
+      { code: 'ANTA-KT8-43-BLK', price: '899.00', comparePrice: '1099.00', stock: 120, attributes: { size: '43', color: '黑金' } },
+    ],
+  });
+
+  // ── 家居家装 · 家具 ──
+  await insertProduct({
+    title: '全友家居 布艺沙发 现代简约三人位',
+    slug: 'quanyou-fabric-sofa-3seat',
+    description: '全友布艺沙发，科技布面料，高回弹海绵，可拆洗设计',
+    brand: '全友',
+    categoryId: catFurniture,
+    minPrice: '3299.00', maxPrice: '4299.00',
+    totalSales: randInt(500, 1500),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('furniture/wooden-bathroom-sink-with-mirror/1.webp'), cdnImg('furniture/wooden-bathroom-sink-with-mirror/2.webp')],
+    skuList: [
+      { code: 'QY-SOFA-3-GRY', price: '3299.00', comparePrice: '4199.00', stock: 30, lowStock: 5, attributes: { type: '三人位', color: '浅灰' } },
+      { code: 'QY-SOFA-L-GRY', price: '4299.00', comparePrice: '5199.00', stock: 20, lowStock: 5, attributes: { type: 'L型转角', color: '浅灰' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '林氏家居 电视柜 现代简约 可伸缩',
+    slug: 'linshi-tv-cabinet-retractable',
+    description: '林氏家居电视柜，可伸缩设计，适配多种客厅尺寸，板材环保E0级',
+    brand: '林氏家居',
+    categoryId: catFurniture,
+    minPrice: '899.00', maxPrice: '1299.00',
+    totalSales: randInt(800, 2500),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('furniture/bedside-table-african-cherry/4.webp'), cdnImg('home-decoration/decoration-swing/1.webp')],
+    skuList: [
+      { code: 'LS-TV-180-WHT', price: '899.00', comparePrice: '1199.00', stock: 50, attributes: { length: '180cm', color: '暖白' } },
+      { code: 'LS-TV-240-WNT', price: '1299.00', comparePrice: '1599.00', stock: 30, attributes: { length: '240cm', color: '胡桃色' } },
+    ],
+  });
+
+  // ── 家居家装 · 床上用品 ──
+  await insertProduct({
+    title: '罗莱 桑蚕丝被 春秋被 200×230cm',
+    slug: 'luolai-silk-quilt-200x230',
+    description: '罗莱100%桑蚕丝被，亲肤透气，恒温舒适，四季可用',
+    brand: '罗莱',
+    categoryId: catBedding,
+    minPrice: '999.00', maxPrice: '1599.00',
+    totalSales: randInt(500, 2000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('furniture/annibale-colombo-bed/3.webp'), cdnImg('furniture/annibale-colombo-bed/4.webp')],
+    skuList: [
+      { code: 'LL-SILK-S', price: '999.00', comparePrice: '1399.00', stock: 80, attributes: { weight: '春秋款 1斤', size: '200×230cm' } },
+      { code: 'LL-SILK-W', price: '1599.00', comparePrice: '1999.00', stock: 50, attributes: { weight: '冬季款 2斤', size: '200×230cm' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '水星家纺 天然乳胶枕 泰国进口',
+    slug: 'mercury-latex-pillow-thailand',
+    description: '水星家纺泰国进口天然乳胶枕，波浪曲线，护颈支撑，抗菌防螨',
+    brand: '水星家纺',
+    categoryId: catBedding,
+    minPrice: '199.00', maxPrice: '359.00',
+    totalSales: randInt(2000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Latex+Pillow', 'FCD34D', '78350F'), placeholderImg('Thailand+Latex', 'FBBF24', '92400E')],
+    skuList: [
+      { code: 'SX-LTX-STD', price: '199.00', comparePrice: '299.00', stock: 300, attributes: { type: '标准款', size: '60×40cm' } },
+      { code: 'SX-LTX-PAIR', price: '359.00', comparePrice: '499.00', stock: 200, attributes: { type: '一对装', size: '60×40cm' } },
+    ],
+  });
+
+  // ── 家居家装 · 收纳 ──
+  await insertProduct({
+    title: '禧天龙 透明鞋盒 加厚 6个装',
+    slug: 'citylong-shoe-box-6pack',
+    description: '禧天龙透明鞋盒，磁吸开门，加厚PP材质，可叠加，节省空间',
+    brand: '禧天龙',
+    categoryId: catStorage,
+    minPrice: '59.90', maxPrice: '99.90',
+    totalSales: randInt(3000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('home-decoration/room-spray/1.webp'), cdnImg('home-decoration/room-spray/2.webp')],
+    skuList: [
+      { code: 'CTL-SHOE-6', price: '59.90', comparePrice: '79.90', stock: 400, attributes: { spec: '6个装', size: '标准款' } },
+      { code: 'CTL-SHOE-12', price: '99.90', comparePrice: '139.90', stock: 250, attributes: { spec: '12个装', size: '标准款' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '太力 真空压缩收纳袋 电泵套装',
+    slug: 'taili-vacuum-storage-bags-set',
+    description: '太力真空压缩袋，食品级PA+PE材质，配电动抽气泵，换季收纳神器',
+    brand: '太力',
+    categoryId: catStorage,
+    minPrice: '49.90', maxPrice: '89.90',
+    totalSales: randInt(2000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('home-decoration/plant-pot/2.webp'), cdnImg('home-decoration/house-showpiece-plant/2.webp')],
+    skuList: [
+      { code: 'TL-VAC-8', price: '49.90', comparePrice: '69.90', stock: 300, attributes: { spec: '8袋+手泵' } },
+      { code: 'TL-VAC-15P', price: '89.90', comparePrice: '119.90', stock: 200, attributes: { spec: '15袋+电泵' } },
+    ],
+  });
+
+  // ── 母婴玩具 · 奶粉 ──
+  await insertProduct({
+    title: '爱他美 卓萃白金版 3段 900g',
+    slug: 'aptamil-profutura-stage3-900',
+    description: '爱他美卓萃白金版3段，天然乳脂，精萃天然营养小分子，1-3岁',
+    brand: '爱他美',
+    categoryId: catMilkPowder,
+    minPrice: '338.00', maxPrice: '618.00',
+    totalSales: randInt(2000, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('groceries/protein-powder/2.webp'), cdnImg('groceries/milk/2.webp')],
+    skuList: [
+      { code: 'APT-PRO-S3-900', price: '338.00', comparePrice: '398.00', stock: 200, attributes: { spec: '900g', stage: '3段' } },
+      { code: 'APT-PRO-S3-900x2', price: '618.00', comparePrice: '796.00', stock: 150, attributes: { spec: '900g×2罐', stage: '3段' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '美赞臣 蓝臻 婴幼儿配方奶粉 2段 900g',
+    slug: 'enfamil-enspire-stage2-900',
+    description: '美赞臣蓝臻2段，含乳铁蛋白+MFGM乳脂球膜，接近母乳营养',
+    brand: '美赞臣',
+    categoryId: catMilkPowder,
+    minPrice: '378.00', maxPrice: '378.00',
+    totalSales: randInt(1500, 3500),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [cdnImg('groceries/protein-powder/3.webp'), cdnImg('groceries/milk/3.webp')],
+    skuList: [
+      { code: 'MJC-LZ-S2-900', price: '378.00', comparePrice: '438.00', stock: 200, attributes: { spec: '900g', stage: '2段' } },
+    ],
+  });
+
+  // ── 母婴玩具 · 纸尿裤 ──
+  await insertProduct({
+    title: '好奇 铂金装 纸尿裤 L58片',
+    slug: 'huggies-platinum-diaper-l58',
+    description: '好奇铂金装纸尿裤，丝柔亲肤，3D悬浮芯体，12小时干爽',
+    brand: '好奇',
+    categoryId: catDiaper,
+    minPrice: '139.00', maxPrice: '249.00',
+    totalSales: randInt(2000, 5000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Huggies+L', 'BFDBFE', '5B21B6'), placeholderImg('Huggies+XL', 'DDD6FE', '7C3AED')],
+    skuList: [
+      { code: 'HGS-PLT-L-58', price: '139.00', comparePrice: '169.00', stock: 300, attributes: { size: 'L', spec: '58片' } },
+      { code: 'HGS-PLT-L-116', price: '249.00', comparePrice: '319.00', stock: 200, attributes: { size: 'L', spec: '116片(2包)' } },
+    ],
+  });
+
+  await insertProduct({
+    title: '帮宝适 一级帮 拉拉裤 XL42片',
+    slug: 'pampers-premium-pants-xl42',
+    description: '帮宝适一级帮拉拉裤，日本进口，10倍透气，纱布般柔软',
+    brand: '帮宝适',
+    categoryId: catDiaper,
+    minPrice: '119.00', maxPrice: '219.00',
+    totalSales: randInt(1500, 4000),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Pampers+XL', 'FED7AA', 'C2410C'), placeholderImg('Premium', 'FDBA74', '9A3412')],
+    skuList: [
+      { code: 'PMP-1-XL-42', price: '119.00', comparePrice: '149.00', stock: 350, attributes: { size: 'XL', spec: '42片' } },
+      { code: 'PMP-1-XL-84', price: '219.00', comparePrice: '279.00', stock: 200, attributes: { size: 'XL', spec: '84片(2包)' } },
+    ],
+  });
+
+  // ── 母婴玩具 · 玩具 ──
+  await insertProduct({
+    title: 'Fisher-Price 费雪 学步车 多功能',
+    slug: 'fisher-price-learn-walker',
+    description: 'Fisher-Price 学步车，坐玩站走四合一，早教音乐游戏面板',
+    brand: 'Fisher-Price',
+    categoryId: catToys,
+    minPrice: '269.00', maxPrice: '269.00',
+    totalSales: randInt(1500, 3500),
+    avgRating: randRating(), reviewCount: randReviews(),
+    imageUrls: [placeholderImg('Fisher+Walker', '0EA5E9', 'F0F9FF'), placeholderImg('Learn+Walk', '0284C7', 'E0F2FE')],
+    skuList: [
+      { code: 'FP-WALKER-BLU', price: '269.00', comparePrice: '349.00', stock: 150, attributes: { color: '蓝色', ageRange: '6-36个月' } },
+      { code: 'FP-WALKER-PNK', price: '269.00', comparePrice: '349.00', stock: 120, attributes: { color: '粉色', ageRange: '6-36个月' } },
+    ],
+  });
+
+  // ── Bulk catalog: 批量插入 ~500 个商品覆盖所有30个二级分类 ──
+  const catSlugMap: Record<string, string> = {
+    phones: catPhone, earphones: catEarphone, 'smart-watches': catSmartWatch,
+    laptops: catLaptop, tablets: catTablet, keyboards: catKeyboard,
+    'big-appliance': catBigAppliance, 'small-appliance': catSmallAppliance, 'kitchen-appliance': catKitchen,
+    menswear: catMenswear, womenswear: catWomenswear, shoes: catShoes,
+    snacks: catSnacks, drinks: catDrinks, fresh: catFresh,
+    skincare: catSkincare, makeup: catMakeup, 'wash-care': catWashCare,
+    literature: catLiterature, education: catEducation, comic: catComic,
+    fitness: catFitness, outdoor: catOutdoor, sportswear: catSportswear,
+    furniture: catFurniture, bedding: catBedding, storage: catStorage,
+    'milk-powder': catMilkPowder, diapers: catDiaper, toys: catToys,
+  };
+
+  console.log('Bulk inserting catalog products...');
+  let bulkCount = 0;
+  for (const cat of bulkCatalog) {
+    const categoryId = catSlugMap[cat.catSlug];
+    if (!categoryId) { console.warn(`  ⚠ Unknown catSlug: ${cat.catSlug}, skipping`); continue; }
+    for (const p of cat.products) {
+      const maxP = p.mp ?? p.p;
+      const baseCode = p.s.replace(/-/g, '_').toUpperCase().substring(0, 22);
+      const skuList = p.p === maxP
+        ? [{ code: `${baseCode}_S`, price: p.p.toFixed(2), comparePrice: Math.round(p.p * 1.15).toFixed(2), stock: randInt(50, 400), attributes: { spec: '标准' } }]
+        : [
+            { code: `${baseCode}_V1`, price: p.p.toFixed(2), comparePrice: Math.round(p.p * 1.12).toFixed(2), stock: randInt(80, 350), attributes: { spec: '标准版' } },
+            { code: `${baseCode}_V2`, price: maxP.toFixed(2), comparePrice: Math.round(maxP * 1.1).toFixed(2), stock: randInt(40, 200), attributes: { spec: '升级版' } },
+          ];
+      await insertProduct({
+        title: p.t, slug: p.s, description: p.d, brand: p.b,
+        categoryId,
+        minPrice: p.p.toFixed(2), maxPrice: maxP.toFixed(2),
+        totalSales: randInt(100, 5000),
+        avgRating: randRating(), reviewCount: randReviews(),
+        imageUrls: [
+          placeholderImg(p.b.substring(0, 10), cat.bg, 'FFF'),
+          placeholderImg(p.t.substring(0, 12), cat.bg, 'FFF'),
+        ],
+        skuList,
+      });
+      bulkCount++;
+    }
+  }
+  console.log(`  ${bulkCount} bulk catalog products inserted.\n`);
+
+  const totalProducts = 92 + bulkCount;
   console.log(`  ${totalProducts} products, ${allSkuData.length} SKUs created\n`);
 
   // ══════════════════════════════════════════════════════════════

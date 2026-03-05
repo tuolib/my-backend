@@ -16,6 +16,7 @@ import {
   productCategories,
   productImages,
   skus,
+  banners,
 } from './schema';
 
 // ── 辅助：生成 placehold.co URL ──
@@ -26,6 +27,16 @@ function placeholderImg(text: string, bg = 'EEE', fg = '999'): string {
 // ── 辅助：随机整数 ──
 function randInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// ── 辅助：随机评分 (3.5 ~ 5.0) ──
+function randRating(): string {
+  return (3.5 + Math.random() * 1.5).toFixed(1);
+}
+
+// ── 辅助：随机评论数 ──
+function randReviews(): number {
+  return randInt(50, 5000);
 }
 
 // ── 收集所有 SKU 用于 Redis 初始化 ──
@@ -63,6 +74,8 @@ async function insertProductIfNotExists(opts: {
   minPrice: string;
   maxPrice: string;
   totalSales: number;
+  avgRating?: string;
+  reviewCount?: number;
   imgBg: string;
   imgFg?: string;
   imgTexts: string[];
@@ -96,6 +109,8 @@ async function insertProductIfNotExists(opts: {
     minPrice: opts.minPrice,
     maxPrice: opts.maxPrice,
     totalSales: opts.totalSales,
+    avgRating: opts.avgRating ?? randRating(),
+    reviewCount: opts.reviewCount ?? randReviews(),
   });
 
   const fg = opts.imgFg || 'FFF';
@@ -766,6 +781,40 @@ async function seedProd() {
 
   console.log('  Products done.\n');
 
+  // ══════════════════════════════════════════════════════════════
+  // Banners（首页轮播图）
+  // ══════════════════════════════════════════════════════════════
+  console.log('Upserting banners...');
+  const existingBannerCount = await db.execute(
+    sql`SELECT count(*) as cnt FROM product_service.banners`
+  );
+  const bannerCount = Number((existingBannerCount as any[])[0]?.cnt ?? 0);
+  if (bannerCount > 0) {
+    console.log(`  [skip] ${bannerCount} banners already exist\n`);
+  } else {
+    const bannerData = [
+      { title: 'Spring Digital Sale', subtitle: '数码春季大促 全场低至5折', imageUrl: placeholderImg('Spring+Digital+Sale', '3B82F6', 'FFF'), linkType: 'category' as const, linkValue: 'digital', sortOrder: 1 },
+      { title: 'iPhone 15 Pro Max', subtitle: '钛金属设计 Pro级芯片', imageUrl: placeholderImg('iPhone+15+Pro', '1E40AF', 'FFF'), linkType: 'product' as const, linkValue: 'iphone-15-pro-max', sortOrder: 2 },
+      { title: 'Fashion Week', subtitle: '时尚穿搭精选 新品上市', imageUrl: placeholderImg('Fashion+Week', 'EC4899', 'FFF'), linkType: 'category' as const, linkValue: 'clothing', sortOrder: 3 },
+      { title: 'Dyson V15 Detect', subtitle: '激光探测灰尘 深度清洁', imageUrl: placeholderImg('Dyson+V15', 'F59E0B', 'FFF'), linkType: 'product' as const, linkValue: 'dyson-v15-detect', sortOrder: 4 },
+      { title: 'Best Sellers Books', subtitle: '年度畅销书单 买3免1', imageUrl: placeholderImg('Best+Books', '8B5CF6', 'FFF'), linkType: 'category' as const, linkValue: 'books', sortOrder: 5 },
+      { title: 'Fresh Fruits', subtitle: '进口生鲜直达 新鲜到家', imageUrl: placeholderImg('Fresh+Fruits', '22C55E', 'FFF'), linkType: 'category' as const, linkValue: 'fresh', sortOrder: 6 },
+    ];
+    await db.insert(banners).values(
+      bannerData.map((b) => ({
+        id: generateId(),
+        title: b.title,
+        subtitle: b.subtitle,
+        imageUrl: b.imageUrl,
+        linkType: b.linkType,
+        linkValue: b.linkValue,
+        sortOrder: b.sortOrder,
+        isActive: true,
+      })),
+    );
+    console.log('  6 banners inserted.\n');
+  }
+
   // ── Redis 库存同步（仅新增的 SKU）──
   if (allSkuData.length > 0) {
     console.log('Syncing Redis stock for new SKUs...');
@@ -785,6 +834,7 @@ async function seedProd() {
   console.log('=== Production Seed Summary ===');
   console.log('  Categories: 40 (10 top-level + 30 sub)');
   console.log('  Products:   42 (skipped if already exist)');
+  console.log('  Banners:    6 (skipped if any exist)');
   console.log(`  New SKUs:   ${allSkuData.length}`);
   console.log('===============================\n');
 }

@@ -35,6 +35,8 @@ export async function search(params: SearchInput): Promise<PaginatedData<Product
       minPrice: p.minPrice,
       maxPrice: p.maxPrice,
       totalSales: p.totalSales,
+      avgRating: p.avgRating,
+      reviewCount: p.reviewCount,
       primaryImage: primaryImg?.url ?? null,
       createdAt: p.createdAt,
     };

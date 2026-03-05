@@ -4,7 +4,7 @@
 
 
 项目介绍：企业级高并发电商架构
-对标: Amazon / 阿里巴巴
+对标: Amazon
 技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
 目标：搭建 Monorepo 工程结构、统一配置、统一响应格式、统一错误处理，为后续所有业务域提供基座
 
@@ -28,7 +28,7 @@
 
 
 项目介绍：企业级高并发电商架构
-对标: Amazon / 阿里巴巴
+对标: Amazon
 技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
 目标：搭建 Monorepo 工程结构、统一配置、统一响应格式、统一错误处理，为后续所有业务域提供基座
 
@@ -75,7 +75,7 @@ packages/
 
 
 项目介绍：企业级高并发电商架构
-对标: Amazon / 阿里巴巴
+对标: Amazon
 技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
 目标：搭建 Monorepo 工程结构、统一配置、统一响应格式、统一错误处理，为后续所有业务域提供基座
 
@@ -173,7 +173,7 @@ shared/                   # 通用工具与核心抽象
 
 
 项目介绍：企业级高并发电商架构
-对标: Amazon / 阿里巴巴
+对标: Amazon
 技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
 工程结构：Monorepo
 

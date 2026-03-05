@@ -46,6 +46,8 @@ export interface ProductListItem {
   minPrice: string | null;
   maxPrice: string | null;
   totalSales: number;
+  avgRating: string;
+  reviewCount: number;
   primaryImage: string | null;
   createdAt: Date;
 }
@@ -61,6 +63,8 @@ export interface ProductDetail {
   minPrice: string | null;
   maxPrice: string | null;
   totalSales: number;
+  avgRating: string;
+  reviewCount: number;
   createdAt: Date;
   updatedAt: Date;
   images: ProductImageDTO[];

@@ -30,6 +30,7 @@ function buildRegistry(): ServiceRoute[] {
     // Product Service
     { prefix: '/api/v1/product', target: productUrl },
     { prefix: '/api/v1/category', target: productUrl },
+    { prefix: '/api/v1/banner', target: productUrl },
 
     // Cart Service
     { prefix: '/api/v1/cart', target: cartUrl },

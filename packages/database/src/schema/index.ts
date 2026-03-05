@@ -27,6 +27,7 @@ export {
   productCategories,
   productImages,
   skus,
+  banners,
   categoriesRelations,
   productsRelations,
   productCategoriesRelations,
@@ -38,6 +39,7 @@ export type {
   Product, NewProduct,
   ProductImage, NewProductImage,
   Sku, NewSku,
+  Banner, NewBanner,
 } from './products';
 
 // ── Order Service 域 ──

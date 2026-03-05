@@ -2,7 +2,7 @@
 
 # 企业级高并发电商架构 — 分段标准流程
 
-> **对标**: Amazon / 阿里巴巴
+> **对标**: Amazon
 > **技术栈**: Bun + Hono | PostgreSQL | Redis | Docker | Caddy
 > **核心原则**: 分段设计、逐步交付、降低 token 消耗
 

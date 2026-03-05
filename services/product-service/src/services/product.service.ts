@@ -74,6 +74,8 @@ export async function getDetail(productId: string): Promise<ProductDetail> {
     minPrice: product.minPrice,
     maxPrice: product.maxPrice,
     totalSales: product.totalSales,
+    avgRating: product.avgRating,
+    reviewCount: product.reviewCount,
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
     images: images.map((img) => ({
@@ -125,6 +127,8 @@ export async function getList(params: ProductListInput): Promise<{
       minPrice: p.minPrice,
       maxPrice: p.maxPrice,
       totalSales: p.totalSales,
+      avgRating: p.avgRating,
+      reviewCount: p.reviewCount,
       primaryImage: primaryImg?.url ?? null,
       createdAt: p.createdAt,
     };

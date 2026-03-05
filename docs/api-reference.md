@@ -340,16 +340,15 @@ Array<{
     id: string
     title: string
     slug: string
-    description: string | null
     brand: string | null
     status: string
-    attributes: object | null
-    createdAt: string
-    updatedAt: string
-    // 关联字段
+    minPrice: string | null
+    maxPrice: string | null
+    totalSales: number
+    avgRating: string           // 如 "4.5"
+    reviewCount: number
     primaryImage: string | null
-    minPrice: number | null
-    categories: Array<{ id: string, name: string }>
+    createdAt: string
   }>
   pagination: { page, pageSize, total, totalPages }
 }
@@ -378,6 +377,11 @@ Array<{
   brand: string | null
   status: string
   attributes: object | null
+  minPrice: string | null
+  maxPrice: string | null
+  totalSales: number
+  avgRating: string             // 如 "4.5"
+  reviewCount: number
   createdAt: string
   updatedAt: string
   images: Array<{
@@ -390,8 +394,8 @@ Array<{
   skus: Array<{
     id: string
     skuCode: string
-    price: number
-    comparePrice: number | null
+    price: string
+    comparePrice: string | null
     stock: number
     attributes: object
     status: string
@@ -517,7 +521,36 @@ Array<{
 
 ---
 
-## 6. 购物车 Cart
+## 6. Banner 轮播图
+
+### POST /api/v1/banner/list
+
+获取活跃的首页轮播图列表。**无需认证。**
+
+**Request Body:** 空 `{}`
+
+**Response Data:**
+
+```typescript
+Array<{
+  id: string
+  title: string
+  subtitle: string | null
+  imageUrl: string
+  linkType: string         // "product" | "category"
+  linkValue: string | null // 商品 slug 或分类 slug
+  sortOrder: number
+  isActive: boolean
+  startAt: string | null
+  endAt: string | null
+  createdAt: string
+  updatedAt: string
+}>
+```
+
+---
+
+## 7. 购物车 Cart
 
 > 所有购物车接口均**需要认证**。
 
@@ -646,7 +679,7 @@ Array<{
 
 ---
 
-## 7. 订单 Order
+## 8. 订单 Order
 
 ### POST /api/v1/order/create
 
@@ -756,7 +789,7 @@ X-Idempotency-Key: <unique-string>
 
 ---
 
-## 8. 支付 Payment
+## 9. 支付 Payment
 
 ### POST /api/v1/payment/create
 
@@ -825,7 +858,7 @@ X-Idempotency-Key: <unique-string>
 
 ---
 
-## 9. 管理后台 Admin
+## 10. 管理后台 Admin
 
 ### POST /api/v1/admin/product/create
 
@@ -1017,7 +1050,7 @@ X-Idempotency-Key: <unique-string>
 
 ---
 
-## 10. 内部接口 Internal
+## 11. 内部接口 Internal
 
 > 仅 Docker 内部网络可访问，外部请求会被 Gateway 拦截。
 

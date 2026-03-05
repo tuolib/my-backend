@@ -1,6 +1,6 @@
 /**
  * Product Service 域 — PG Schema: product_service
- * 表: categories, products, product_categories, product_images, skus
+ * 表: categories, products, product_categories, product_images, skus, banners
  */
 import {
   boolean,
@@ -53,6 +53,8 @@ export const products = productServiceSchema.table(
     minPrice: decimal('min_price', { precision: 12, scale: 2 }),
     maxPrice: decimal('max_price', { precision: 12, scale: 2 }),
     totalSales: integer('total_sales').notNull().default(0),
+    avgRating: decimal('avg_rating', { precision: 2, scale: 1 }).notNull().default('0'),
+    reviewCount: integer('review_count').notNull().default(0),
   },
   (t) => [
     index('idx_products_status').on(t.status),
@@ -156,6 +158,26 @@ export const skusRelations = relations(skus, ({ one }) => ({
   }),
 }));
 
+// ── banners 表（首页轮播图）──
+export const banners = productServiceSchema.table(
+  'banners',
+  {
+    ...baseColumns(),
+    title: varchar('title', { length: 200 }).notNull(),
+    subtitle: varchar('subtitle', { length: 200 }),
+    imageUrl: text('image_url').notNull(),
+    linkType: varchar('link_type', { length: 20 }).notNull().default('product'),
+    linkValue: varchar('link_value', { length: 200 }),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    startAt: timestamp('start_at', { withTimezone: true, mode: 'date' }),
+    endAt: timestamp('end_at', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => [
+    index('idx_banners_active_sort').on(t.isActive, t.sortOrder),
+  ],
+);
+
 // ── Types ──
 export type Category = typeof categories.$inferSelect;
 export type NewCategory = typeof categories.$inferInsert;
@@ -165,3 +187,5 @@ export type ProductImage = typeof productImages.$inferSelect;
 export type NewProductImage = typeof productImages.$inferInsert;
 export type Sku = typeof skus.$inferSelect;
 export type NewSku = typeof skus.$inferInsert;
+export type Banner = typeof banners.$inferSelect;
+export type NewBanner = typeof banners.$inferInsert;

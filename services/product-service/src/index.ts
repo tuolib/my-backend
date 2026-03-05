@@ -8,6 +8,7 @@ import type { AppEnv } from '@repo/shared';
 import { redis, registerLuaScripts } from '@repo/database';
 import productRoutes from './routes/product';
 import categoryRoutes from './routes/category';
+import bannerRoutes from './routes/banner';
 import adminProductRoutes from './routes/admin-product';
 import adminCategoryRoutes from './routes/admin-category';
 import adminStockRoutes from './routes/admin-stock';
@@ -54,6 +55,7 @@ app.onError(errorHandler);
 // 挂载路由
 app.route('/api/v1/product', productRoutes);
 app.route('/api/v1/category', categoryRoutes);
+app.route('/api/v1/banner', bannerRoutes);
 app.route('/api/v1/admin/product', adminProductRoutes);
 app.route('/api/v1/admin/category', adminCategoryRoutes);
 app.route('/api/v1/admin/stock', adminStockRoutes);

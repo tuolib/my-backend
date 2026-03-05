@@ -20,6 +20,9 @@ export const PUBLIC_ROUTES: string[] = [
   '/api/v1/category/detail',
   '/api/v1/category/tree',
 
+  // Banner 轮播图（公开）
+  '/api/v1/banner/list',
+
   // 支付回调（三方调用，签名验证而非 JWT）
   '/api/v1/payment/notify',
 

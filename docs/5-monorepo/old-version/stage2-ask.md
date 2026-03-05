@@ -8,7 +8,7 @@
 # stop pre
 
 项目介绍：企业级高并发电商架构
-对标: Amazon / 阿里巴巴
+对标: Amazon
 技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
 工程结构：Monorepo
 
@@ -41,7 +41,7 @@
 # step 1
 
 项目介绍：企业级高并发电商架构
-对标: Amazon / 阿里巴巴
+对标: Amazon
 技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
 工程结构：Monorepo
 
@@ -101,7 +101,7 @@
 
 
 项目介绍：企业级高并发电商架构
-对标: Amazon / 阿里巴巴
+对标: Amazon
 技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
 工程结构：Monorepo
 
@@ -176,7 +176,7 @@
 
 
 项目介绍：企业级高并发电商架构
-对标: Amazon / 阿里巴巴
+对标: Amazon
 技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
 工程结构：Monorepo
 
@@ -264,7 +264,7 @@
 
 
 项目介绍：企业级高并发电商架构
-对标: Amazon / 阿里巴巴
+对标: Amazon
 技术栈: Bun | Hono | PostgreSQL | Redis | Docker | Caddy
 工程结构：Monorepo
 

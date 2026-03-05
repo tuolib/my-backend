@@ -19,6 +19,7 @@ import {
   banners,
 } from './schema';
 import { bulkCatalog } from './seed-prod-catalog';
+import { categoryImagePool } from './seed-images';
 
 // ── 辅助：dummyjson CDN 图片 URL ──
 const CDN = 'https://cdn.dummyjson.com/product-images';
@@ -1452,6 +1453,7 @@ async function seedProd() {
   // 批量补充商品 — 每分类补至 20+
   // ══════════════════════════════════════════════════════════════
   console.log('Bulk inserting catalog products...');
+  let bulkIdx = 0;
   for (const cat of bulkCatalog) {
     for (const p of cat.products) {
       const maxP = p.mp ?? p.p;
@@ -1462,17 +1464,21 @@ async function seedProd() {
             { code: `${baseCode}_V1`, price: p.p.toFixed(2), comparePrice: Math.round(p.p * 1.12).toFixed(2), stock: randInt(80, 350), attributes: { spec: '标准版' } },
             { code: `${baseCode}_V2`, price: maxP.toFixed(2), comparePrice: Math.round(maxP * 1.1).toFixed(2), stock: randInt(40, 200), attributes: { spec: '升级版' } },
           ];
+      // 从图片池按索引取图，每个商品不重复
+      const pool = categoryImagePool[cat.catSlug] ?? [];
+      const imgIdx = bulkIdx % Math.max(pool.length, 1);
+      const imageUrls = pool.length > 0
+        ? [pool[imgIdx], pool[(imgIdx + 1) % pool.length]]
+        : [placeholderImg(p.b.substring(0, 10), cat.bg, 'FFF'), placeholderImg(p.t.substring(0, 12), cat.bg, 'FFF')];
       await insertProductIfNotExists({
         title: p.t, slug: p.s, description: p.d, brand: p.b,
         categoryId: getCatId(cat.catSlug),
         minPrice: p.p.toFixed(2), maxPrice: maxP.toFixed(2),
         totalSales: randInt(100, 5000),
-        imageUrls: [
-          placeholderImg(p.b.substring(0, 10), cat.bg, 'FFF'),
-          placeholderImg(p.t.substring(0, 12), cat.bg, 'FFF'),
-        ],
+        imageUrls,
         skuList,
       });
+      bulkIdx++;
     }
   }
   console.log('  Bulk catalog done.\n');
@@ -1541,6 +1547,9 @@ async function seedProd() {
     }
     console.log(`  ${synced} new SKU stock keys set (${allSkuData.length - synced} already existed)\n`);
   }
+
+  // ── 清除分类树缓存（避免旧 ID 残留）──
+  await redis.del('product:category:tree');
 
   // ── 统计 ──
   console.log('=== Production Seed Summary ===');

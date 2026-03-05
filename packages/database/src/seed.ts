@@ -10,6 +10,7 @@ import { generateId } from '@repo/shared';
 import { hashPassword } from '@repo/shared';
 import { setStock } from './lua';
 import { bulkCatalog } from './seed-prod-catalog';
+import { categoryImagePool } from './seed-images';
 import {
   users,
   userAddresses,
@@ -34,7 +35,7 @@ if (env === 'production') {
   process.exit(1);
 }
 
-// ── 清空所有表（按外键依赖倒序）──
+// ── 清空商品与订单表（保留用户数据）──
 async function truncateAll() {
   // Order Service 域
   await db.execute(sql`TRUNCATE TABLE order_service.stock_operations CASCADE`);
@@ -50,11 +51,6 @@ async function truncateAll() {
   await db.execute(sql`TRUNCATE TABLE product_service.product_categories CASCADE`);
   await db.execute(sql`TRUNCATE TABLE product_service.products CASCADE`);
   await db.execute(sql`TRUNCATE TABLE product_service.categories CASCADE`);
-
-  // User Service 域
-  await db.execute(sql`TRUNCATE TABLE user_service.refresh_tokens CASCADE`);
-  await db.execute(sql`TRUNCATE TABLE user_service.user_addresses CASCADE`);
-  await db.execute(sql`TRUNCATE TABLE user_service.users CASCADE`);
 }
 
 // ── 清空 Redis 库存 key ──
@@ -99,12 +95,14 @@ async function seed() {
   console.log('Truncating all tables...');
   await truncateAll();
   await clearRedisStock();
+  await redis.del('product:category:tree');
   console.log('Done.\n');
 
   // ── 2. 用户 ──
   console.log('Inserting users...');
   const hashedPw = await hashPassword('password123');
 
+  // 测试用户：仅在不存在时插入（ON CONFLICT DO NOTHING）
   const adminId = generateId();
   const aliceId = generateId();
   const bobId = generateId();
@@ -113,46 +111,8 @@ async function seed() {
     { id: adminId, email: 'admin@test.com', password: hashedPw, nickname: 'Admin', status: 'active' },
     { id: aliceId, email: 'alice@test.com', password: hashedPw, nickname: 'Alice', status: 'active' },
     { id: bobId, email: 'bob@test.com', password: hashedPw, nickname: 'Bob', status: 'active' },
-  ]);
-  console.log('  3 users created (admin, alice, bob)\n');
-
-  // ── 3. 用户地址 ──
-  console.log('Inserting user addresses...');
-  await db.insert(userAddresses).values([
-    // Alice - 3 个地址
-    {
-      id: generateId(), userId: aliceId, label: '家',
-      recipient: 'Alice Wang', phone: '13800138001',
-      province: '上海市', city: '上海市', district: '浦东新区',
-      address: '张江高科技园区 xxx 号', postalCode: '201203', isDefault: true,
-    },
-    {
-      id: generateId(), userId: aliceId, label: '公司',
-      recipient: 'Alice Wang', phone: '13800138001',
-      province: '上海市', city: '上海市', district: '黄浦区',
-      address: '南京东路 xxx 号', postalCode: '200001', isDefault: false,
-    },
-    {
-      id: generateId(), userId: aliceId, label: '父母家',
-      recipient: '王先生', phone: '13900139001',
-      province: '北京市', city: '北京市', district: '朝阳区',
-      address: '望京 SOHO xxx 号', postalCode: '100102', isDefault: false,
-    },
-    // Bob - 2 个地址
-    {
-      id: generateId(), userId: bobId, label: '家',
-      recipient: 'Bob Li', phone: '13700137001',
-      province: '广东省', city: '深圳市', district: '南山区',
-      address: '科技园南区 xxx 号', postalCode: '518057', isDefault: true,
-    },
-    {
-      id: generateId(), userId: bobId, label: '公司',
-      recipient: 'Bob Li', phone: '13700137001',
-      province: '广东省', city: '广州市', district: '天河区',
-      address: '珠江新城 xxx 号', postalCode: '510623', isDefault: false,
-    },
-  ]);
-  console.log('  5 addresses created (Alice 3, Bob 2)\n');
+  ]).onConflictDoNothing({ target: users.email });
+  console.log('  Test users ensured (admin, alice, bob)\n');
 
   // ══════════════════════════════════════════════════════════════
   // ── 4. 分类（10 个一级 + 25 个二级 = 35 个）──
@@ -1867,16 +1827,20 @@ async function seed() {
             { code: `${baseCode}_V1`, price: p.p.toFixed(2), comparePrice: Math.round(p.p * 1.12).toFixed(2), stock: randInt(80, 350), attributes: { spec: '标准版' } },
             { code: `${baseCode}_V2`, price: maxP.toFixed(2), comparePrice: Math.round(maxP * 1.1).toFixed(2), stock: randInt(40, 200), attributes: { spec: '升级版' } },
           ];
+      // 从图片池按索引取图，每个商品不重复
+      const pool = categoryImagePool[cat.catSlug] ?? [];
+      const imgIdx = bulkCount % Math.max(pool.length, 1);
+      const imageUrls = pool.length > 0
+        ? [pool[imgIdx], pool[(imgIdx + 1) % pool.length]]
+        : [placeholderImg(p.b.substring(0, 10), cat.bg, 'FFF'), placeholderImg(p.t.substring(0, 12), cat.bg, 'FFF')];
+
       await insertProduct({
         title: p.t, slug: p.s, description: p.d, brand: p.b,
         categoryId,
         minPrice: p.p.toFixed(2), maxPrice: maxP.toFixed(2),
         totalSales: randInt(100, 5000),
         avgRating: randRating(), reviewCount: randReviews(),
-        imageUrls: [
-          placeholderImg(p.b.substring(0, 10), cat.bg, 'FFF'),
-          placeholderImg(p.t.substring(0, 12), cat.bg, 'FFF'),
-        ],
+        imageUrls,
         skuList,
       });
       bulkCount++;

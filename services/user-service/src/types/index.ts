@@ -98,6 +98,32 @@ export interface AdminChangePasswordInput {
   newPassword: string;
 }
 
+/** 创建管理员输入 */
+export interface CreateAdminInput {
+  username: string;
+  password: string;
+  realName?: string;
+  phone?: string;
+  email?: string;
+  role: string;
+}
+
+/** 更新管理员输入 */
+export interface UpdateAdminInput {
+  id: string;
+  realName?: string;
+  phone?: string;
+  email?: string;
+  role?: string;
+}
+
+/** 管理员列表查询输入 */
+export interface AdminListInput {
+  page: number;
+  pageSize: number;
+  keyword?: string;
+}
+
 /** 管理员登录结果 */
 export interface AdminLoginResult {
   admin: AdminProfile;

@@ -33,6 +33,7 @@ export interface AdminAccessTokenPayload {
   sub: string;
   username: string;
   role: string;
+  isSuper: boolean;
   type: 'staff';
   jti: string;
   iat: number;
@@ -52,5 +53,6 @@ export interface AppEnv extends Env {
     adminId: string;
     adminUsername: string;
     adminRole: string;
+    adminIsSuper: boolean;
   };
 }

@@ -75,6 +75,7 @@ export async function login(input: AdminLoginInput): Promise<AdminLoginResult> {
     sub: admin.id,
     username: admin.username,
     role: admin.role,
+    isSuper: admin.isSuper,
   });
 
   // 更新登录成功状态（不阻塞响应）

@@ -78,6 +78,7 @@ export async function signAdminAccessToken(payload: {
   sub: string;
   username: string;
   role: string;
+  isSuper: boolean;
 }): Promise<string> {
   const config = getConfig();
   const jti = generateId();
@@ -85,6 +86,7 @@ export async function signAdminAccessToken(payload: {
   return new jose.SignJWT({
     username: payload.username,
     role: payload.role,
+    isSuper: payload.isSuper,
     type: 'staff',
     jti,
   })
@@ -112,6 +114,7 @@ export async function verifyAdminAccessToken(
       sub: payload.sub!,
       username: payload.username as string,
       role: payload.role as string,
+      isSuper: payload.isSuper as boolean,
       type: 'staff',
       jti: payload.jti!,
       iat: payload.iat!,

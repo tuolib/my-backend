@@ -1,7 +1,7 @@
 /**
  * 管理员数据访问层 — admins 表操作
  */
-import { eq } from 'drizzle-orm';
+import { eq, and, like, sql, desc } from 'drizzle-orm';
 import { db, admins } from '@repo/database';
 import type { Admin, NewAdmin } from '@repo/database';
 
@@ -58,5 +58,59 @@ export async function updatePassword(id: string, hashedPassword: string): Promis
   await db
     .update(admins)
     .set({ password: hashedPassword, mustChangePassword: false })
+    .where(eq(admins.id, id));
+}
+
+/** 管理员列表（分页 + 关键词搜索） */
+export async function list(params: {
+  page: number;
+  pageSize: number;
+  keyword?: string;
+}): Promise<{ items: Admin[]; total: number }> {
+  const { page, pageSize, keyword } = params;
+  const conditions = keyword
+    ? [like(admins.username, `%${keyword}%`)]
+    : [];
+
+  const [items, countResult] = await Promise.all([
+    db
+      .select()
+      .from(admins)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(admins.createdAt))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(admins)
+      .where(conditions.length ? and(...conditions) : undefined),
+  ]);
+
+  return { items, total: countResult[0].count };
+}
+
+/** 更新管理员信息 */
+export async function updateById(
+  id: string,
+  data: Partial<Pick<Admin, 'realName' | 'phone' | 'email' | 'role' | 'status'>>,
+): Promise<Admin | null> {
+  const [row] = await db
+    .update(admins)
+    .set(data)
+    .where(eq(admins.id, id))
+    .returning();
+  return row ?? null;
+}
+
+/** 重置密码（设为临时密码 + 标记首次改密） */
+export async function resetPassword(id: string, hashedPassword: string): Promise<void> {
+  await db
+    .update(admins)
+    .set({
+      password: hashedPassword,
+      mustChangePassword: true,
+      loginFailCount: 0,
+      lockedUntil: null,
+    })
     .where(eq(admins.id, id));
 }

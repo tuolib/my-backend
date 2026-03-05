@@ -75,5 +75,5 @@ export { requestId } from './middleware/request-id';
 export { logger } from './middleware/logger';
 export { errorHandler } from './middleware/error-handler';
 export { validate } from './middleware/validate';
-export { createAuthMiddleware, createAdminAuthMiddleware } from './middleware/auth';
+export { createAuthMiddleware, createAdminAuthMiddleware, requireSuperAdmin } from './middleware/auth';
 export { createIdempotentMiddleware } from './middleware/idempotent';

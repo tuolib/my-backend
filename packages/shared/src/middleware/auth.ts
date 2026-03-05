@@ -7,7 +7,7 @@ import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../types/context';
 import type { Redis } from 'ioredis';
 import { verifyAccessToken, verifyAdminAccessToken } from '../utils/jwt';
-import { UnauthorizedError } from '../errors/http-errors';
+import { UnauthorizedError, ForbiddenError } from '../errors/http-errors';
 import { ErrorCode } from '../errors/error-codes';
 
 /** Admin JWT 鉴权中间件 — 验证 admin access token */
@@ -25,11 +25,20 @@ export function createAdminAuthMiddleware(): MiddlewareHandler<AppEnv> {
     c.set('adminId', payload.sub);
     c.set('adminUsername', payload.username);
     c.set('adminRole', payload.role);
+    c.set('adminIsSuper', payload.isSuper);
     c.set('tokenJti', payload.jti);
 
     await next();
   };
 }
+
+/** 超级管理员权限中间件 — 必须在 adminAuthMiddleware 之后使用 */
+export const requireSuperAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (!c.get('adminIsSuper')) {
+    throw new ForbiddenError('需要超级管理员权限');
+  }
+  await next();
+};
 
 export function createAuthMiddleware(redis: Redis): MiddlewareHandler<AppEnv> {
   return async (c, next) => {

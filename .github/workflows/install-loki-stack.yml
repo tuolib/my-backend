@@ -35,6 +35,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k3s/loki-stack
+
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
@@ -92,38 +97,9 @@ jobs:
 
       - name: Install Promtail
         run: |
-          # 创建 promtail pipeline 配置（提取 ecom 命名空间的 JSON 日志字段为 label）
-          cat > /tmp/promtail-values.yaml << 'EOF'
-          config:
-            snippets:
-              pipelineStages:
-                - match:
-                    selector: '{namespace="ecom"}'
-                    stages:
-                      - json:
-                          expressions:
-                            level: level
-                            service: service
-                            traceId: traceId
-                            msg: msg
-                      - labels:
-                            level:
-                            service:
-                      - json:
-                          expressions:
-                            time: time
-                      - timestamp:
-                          source: time
-                          format: RFC3339Nano
-                          fallback_formats:
-                            - RFC3339
-            positions:
-              filename: /run/promtail/positions.yaml
-          EOF
-
           helm upgrade --install promtail grafana/promtail \
             --namespace monitoring \
-            -f /tmp/promtail-values.yaml \
+            -f infra/k3s/loki-stack/promtail-values.yaml \
             --set "config.clients[0].url=http://loki:3100/loki/api/v1/push" \
             --set resources.requests.cpu=50m \
             --set resources.requests.memory=64Mi \

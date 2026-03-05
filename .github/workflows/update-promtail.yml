@@ -1,0 +1,71 @@
+# 手动触发：更新 Promtail pipeline 配置
+#
+# 当修改 infra/k3s/loki-stack/promtail-values.yaml 后，
+# 通过此 workflow 一键将新配置应用到 k3s 集群，无需 SSH 登录服务器
+
+name: Update Promtail Config
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: Update Promtail
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: infra/k3s/loki-stack
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "${HOME}/.kube"
+          echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Verify cluster connectivity
+        run: kubectl cluster-info
+
+      - name: Helm upgrade Promtail
+        run: |
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update grafana
+
+          helm upgrade promtail grafana/promtail \
+            --namespace monitoring \
+            -f infra/k3s/loki-stack/promtail-values.yaml \
+            --set "config.clients[0].url=http://loki:3100/loki/api/v1/push" \
+            --set resources.requests.cpu=50m \
+            --set resources.requests.memory=64Mi \
+            --set resources.limits.cpu=100m \
+            --set resources.limits.memory=128Mi \
+            --wait --timeout 120s
+
+      - name: Verify rollout
+        run: |
+          echo "Waiting for Promtail DaemonSet rollout..."
+          kubectl rollout status daemonset/promtail -n monitoring --timeout=120s
+
+          echo ""
+          echo "Promtail pods:"
+          kubectl get pods -n monitoring -l app.kubernetes.io/name=promtail
+
+          echo ""
+          echo "Config SHA (all pods should match):"
+          kubectl logs -n monitoring -l app.kubernetes.io/name=promtail --tail=3 | grep sha3sum || true
+
+      - name: Cleanup kubeconfig
+        if: always()
+        run: rm -f "${HOME}/.kube/config"

@@ -44,6 +44,15 @@ export type {
   DataMigration,
 } from './products';
 
+// ── Admin Service 域 ──
+export {
+  adminServiceSchema,
+  admins,
+} from './admins';
+export type {
+  Admin, NewAdmin,
+} from './admins';
+
 // ── Order Service 域 ──
 export {
   orderServiceSchema,

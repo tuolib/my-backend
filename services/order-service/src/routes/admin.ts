@@ -1,11 +1,11 @@
 /**
  * 管理端订单路由 — /api/v1/admin/order/*
- * 需要认证（当前不检查 admin 角色，预留）
+ * 需要后台管理员认证（admin JWT）
  */
 import { Hono } from 'hono';
 import type { AppEnv } from '@repo/shared';
 import { validate, success, paginated } from '@repo/shared';
-import { authMiddleware } from '../middleware';
+import { adminAuthMiddleware } from '../middleware';
 import * as orderService from '../services/order.service';
 import { orderListSchema, shipOrderSchema } from '../schemas/order.schema';
 import type { OrderListInput, ShipOrderInput } from '../types';
@@ -13,7 +13,7 @@ import type { OrderListInput, ShipOrderInput } from '../types';
 const admin = new Hono<AppEnv>();
 
 // 全局认证
-admin.use('/*', authMiddleware);
+admin.use('/*', adminAuthMiddleware);
 
 // POST /api/v1/admin/order/list — 管理端订单列表
 admin.post('/list', validate(orderListSchema), async (c) => {

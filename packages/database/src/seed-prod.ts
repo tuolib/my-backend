@@ -11,6 +11,7 @@ import { redis } from './redis';
 import { generateId } from '@repo/shared';
 import { getStock, setStock } from './lua';
 import {
+  admins,
   categories,
   products,
   productCategories,
@@ -194,6 +195,22 @@ async function insertProductIfNotExists(opts: {
 
 async function seedProd() {
   console.log('Production seed: inserting catalog data...\n');
+
+  // ── 管理员初始化 ──
+  console.log('Ensuring admin account...');
+  const { hashPassword } = await import('@repo/shared');
+  const adminPw = await hashPassword('admin');
+  await db.insert(admins).values({
+    id: generateId(),
+    username: 'admin',
+    password: adminPw,
+    realName: '超级管理员',
+    role: 'admin',
+    isSuper: true,
+    status: 'active',
+    mustChangePassword: true,
+  }).onConflictDoNothing({ target: admins.username });
+  console.log('  Admin ensured (admin/admin)\n');
 
   // ══════════════════════════════════════════════════════════════
   // 分类

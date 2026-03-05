@@ -12,7 +12,7 @@ import postgres from 'postgres';
 
 const MIGRATIONS_DIR = join(import.meta.dirname, 'migrations');
 
-const PG_SCHEMAS = ['user_service', 'product_service', 'order_service'] as const;
+const PG_SCHEMAS = ['user_service', 'product_service', 'order_service', 'admin_service'] as const;
 
 async function ensurePgSchemas(sql: postgres.Sql) {
   for (const schema of PG_SCHEMAS) {

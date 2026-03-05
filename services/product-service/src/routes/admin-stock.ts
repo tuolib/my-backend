@@ -6,12 +6,12 @@ import { Hono } from 'hono';
 import type { AppEnv } from '@repo/shared';
 import { validate, success } from '@repo/shared';
 import { adjustSchema } from '../schemas/stock.schema';
-import { authMiddleware } from '../middleware';
+import { adminAuthMiddleware } from '../middleware';
 import * as stockService from '../services/stock.service';
 
 const adminStock = new Hono<AppEnv>();
 
-adminStock.use('/*', authMiddleware);
+adminStock.use('/*', adminAuthMiddleware);
 
 // POST /api/v1/admin/stock/adjust — 管理员调整库存
 adminStock.post('/adjust', validate(adjustSchema), async (c) => {

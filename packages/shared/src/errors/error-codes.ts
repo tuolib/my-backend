@@ -38,6 +38,14 @@ export const ErrorCode = {
   PAYMENT_FAILED: 'ORDER_4006',
   IDEMPOTENT_CONFLICT: 'ORDER_4007',
 
+  // ── Admin 域 (5xxx) ──
+  ADMIN_NOT_FOUND: 'ADMIN_5001',
+  ADMIN_INVALID_CREDENTIALS: 'ADMIN_5002',
+  ADMIN_ACCOUNT_LOCKED: 'ADMIN_5003',
+  ADMIN_ACCOUNT_DISABLED: 'ADMIN_5004',
+  ADMIN_MUST_CHANGE_PASSWORD: 'ADMIN_5005',
+  ADMIN_PASSWORD_SAME: 'ADMIN_5006',
+
   // ── Gateway (9xxx) ──
   RATE_LIMITED: 'GATEWAY_9001',
   SERVICE_UNAVAILABLE: 'GATEWAY_9002',
@@ -80,6 +88,14 @@ export const errorMessages: Record<ErrorCode, string> = {
   [ErrorCode.ORDER_CANCEL_DENIED]: '已发货订单不可取消',
   [ErrorCode.PAYMENT_FAILED]: '支付失败',
   [ErrorCode.IDEMPOTENT_CONFLICT]: '请勿重复提交',
+
+  // Admin
+  [ErrorCode.ADMIN_NOT_FOUND]: '管理员不存在',
+  [ErrorCode.ADMIN_INVALID_CREDENTIALS]: '用户名或密码错误',
+  [ErrorCode.ADMIN_ACCOUNT_LOCKED]: '账号已锁定，请稍后再试',
+  [ErrorCode.ADMIN_ACCOUNT_DISABLED]: '账号已被禁用',
+  [ErrorCode.ADMIN_MUST_CHANGE_PASSWORD]: '首次登录需修改密码',
+  [ErrorCode.ADMIN_PASSWORD_SAME]: '新密码不能与旧密码相同',
 
   // Gateway
   [ErrorCode.RATE_LIMITED]: '请求过于频繁，请稍后再试',

@@ -72,6 +72,39 @@ export interface AuthResult {
   refreshTokenExpiresAt: string;
 }
 
+// ── Admin Types ──
+
+/** 管理员资料（API 响应用，不含 password） */
+export interface AdminProfile {
+  id: string;
+  username: string;
+  realName: string | null;
+  role: string;
+  isSuper: boolean;
+  status: string;
+  lastLoginAt: Date | null;
+  createdAt: Date;
+}
+
+/** 管理员登录输入 */
+export interface AdminLoginInput {
+  username: string;
+  password: string;
+}
+
+/** 管理员修改密码输入 */
+export interface AdminChangePasswordInput {
+  oldPassword: string;
+  newPassword: string;
+}
+
+/** 管理员登录结果 */
+export interface AdminLoginResult {
+  admin: AdminProfile;
+  accessToken: string;
+  mustChangePassword: boolean;
+}
+
 /** Token 对（刷新返回） */
 export interface TokenPair {
   accessToken: string;

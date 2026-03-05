@@ -18,6 +18,7 @@ function buildRegistry(): ServiceRoute[] {
   // 按前缀长度降序排列，确保最长前缀优先匹配
   return [
     // Admin 二级分发（前缀更长，优先匹配）
+    { prefix: '/api/v1/admin/auth', target: userUrl },
     { prefix: '/api/v1/admin/product', target: productUrl },
     { prefix: '/api/v1/admin/category', target: productUrl },
     { prefix: '/api/v1/admin/stock', target: productUrl },

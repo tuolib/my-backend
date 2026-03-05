@@ -9,6 +9,7 @@ import authRoutes from './routes/auth';
 import userRoutes from './routes/user';
 import addressRoutes from './routes/address';
 import internalRoutes from './routes/internal';
+import adminAuthRoutes from './routes/admin-auth';
 
 const app = new Hono<AppEnv>();
 
@@ -21,6 +22,7 @@ app.onError(errorHandler);
 app.route('/api/v1/auth', authRoutes);
 app.route('/api/v1/user', userRoutes);
 app.route('/api/v1/user/address', addressRoutes);
+app.route('/api/v1/admin/auth', adminAuthRoutes);
 app.route('/internal/user', internalRoutes);
 
 // 健康检查（GET + POST 双支持）

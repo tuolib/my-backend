@@ -49,6 +49,7 @@ export type {
   AuthUser,
   AccessTokenPayload,
   RefreshTokenPayload,
+  AdminAccessTokenPayload,
   AppEnv,
 } from './types/context';
 
@@ -65,6 +66,8 @@ export {
   verifyAccessToken,
   signRefreshToken,
   verifyRefreshToken,
+  signAdminAccessToken,
+  verifyAdminAccessToken,
 } from './utils/jwt';
 
 // ── middleware ──
@@ -72,5 +75,5 @@ export { requestId } from './middleware/request-id';
 export { logger } from './middleware/logger';
 export { errorHandler } from './middleware/error-handler';
 export { validate } from './middleware/validate';
-export { createAuthMiddleware } from './middleware/auth';
+export { createAuthMiddleware, createAdminAuthMiddleware } from './middleware/auth';
 export { createIdempotentMiddleware } from './middleware/idempotent';

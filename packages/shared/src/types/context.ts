@@ -28,6 +28,17 @@ export interface RefreshTokenPayload {
   exp: number;
 }
 
+/** Admin Access Token JWT Payload */
+export interface AdminAccessTokenPayload {
+  sub: string;
+  username: string;
+  role: string;
+  type: 'staff';
+  jti: string;
+  iat: number;
+  exp: number;
+}
+
 /** Hono 变量绑定类型 */
 export interface AppEnv extends Env {
   Variables: {
@@ -37,5 +48,9 @@ export interface AppEnv extends Env {
     userEmail: string;
     tokenJti: string;
     validated: unknown;
+    // Admin context
+    adminId: string;
+    adminUsername: string;
+    adminRole: string;
   };
 }

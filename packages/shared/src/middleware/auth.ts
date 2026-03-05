@@ -6,9 +6,30 @@
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../types/context';
 import type { Redis } from 'ioredis';
-import { verifyAccessToken } from '../utils/jwt';
+import { verifyAccessToken, verifyAdminAccessToken } from '../utils/jwt';
 import { UnauthorizedError } from '../errors/http-errors';
 import { ErrorCode } from '../errors/error-codes';
+
+/** Admin JWT 鉴权中间件 — 验证 admin access token */
+export function createAdminAuthMiddleware(): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const authorization = c.req.header('Authorization');
+
+    if (!authorization?.startsWith('Bearer ')) {
+      throw new UnauthorizedError('Missing authentication token');
+    }
+
+    const token = authorization.slice(7);
+    const payload = await verifyAdminAccessToken(token);
+
+    c.set('adminId', payload.sub);
+    c.set('adminUsername', payload.username);
+    c.set('adminRole', payload.role);
+    c.set('tokenJti', payload.jti);
+
+    await next();
+  };
+}
 
 export function createAuthMiddleware(redis: Redis): MiddlewareHandler<AppEnv> {
   return async (c, next) => {

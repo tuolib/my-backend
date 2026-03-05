@@ -12,6 +12,7 @@ import { setStock } from './lua';
 import { bulkCatalog } from './seed-prod-catalog';
 import { categoryImagePool } from './seed-images';
 import {
+  admins,
   users,
   userAddresses,
   refreshTokens,
@@ -113,6 +114,21 @@ async function seed() {
     { id: bobId, email: 'bob@test.com', password: hashedPw, nickname: 'Bob', status: 'active' },
   ]).onConflictDoNothing({ target: users.email });
   console.log('  Test users ensured (admin, alice, bob)\n');
+
+  // ── 3. 管理员 ──
+  console.log('Inserting admin...');
+  const adminPw = await hashPassword('admin');
+  await db.insert(admins).values({
+    id: generateId(),
+    username: 'admin',
+    password: adminPw,
+    realName: '超级管理员',
+    role: 'admin',
+    isSuper: true,
+    status: 'active',
+    mustChangePassword: true,
+  }).onConflictDoNothing({ target: admins.username });
+  console.log('  Admin ensured (admin/admin, must change password on first login)\n');
 
   // ══════════════════════════════════════════════════════════════
   // ── 4. 分类（10 个一级 + 25 个二级 = 35 个）──

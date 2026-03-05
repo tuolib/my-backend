@@ -1,6 +1,6 @@
 /**
  * 商品管理路由 — /api/v1/admin/product/*
- * 需要认证（当前阶段不做 admin 角色检查，预留）
+ * 需要后台管理员认证（admin JWT）
  */
 import { Hono } from 'hono';
 import type { AppEnv } from '@repo/shared';
@@ -11,7 +11,7 @@ import {
   deleteProductSchema,
 } from '../schemas/product.schema';
 import { createSkuSchema, updateSkuSchema } from '../schemas/sku.schema';
-import { authMiddleware } from '../middleware';
+import { adminAuthMiddleware } from '../middleware';
 import * as productService from '../services/product.service';
 import * as skuService from '../services/sku.service';
 import type { CreateProductInput, UpdateProductInput, CreateSkuInput, UpdateSkuInput } from '../types';
@@ -19,7 +19,7 @@ import type { CreateProductInput, UpdateProductInput, CreateSkuInput, UpdateSkuI
 const adminProduct = new Hono<AppEnv>();
 
 // 全部路由需要认证
-adminProduct.use('/*', authMiddleware);
+adminProduct.use('/*', adminAuthMiddleware);
 
 // POST /api/v1/admin/product/create — 创建商品
 adminProduct.post('/create', validate(createProductSchema), async (c) => {

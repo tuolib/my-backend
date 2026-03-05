@@ -86,6 +86,12 @@ helm upgrade --install loki grafana/loki \
   --set loki.schemaConfig.configs[0].schema=v13 \
   --set loki.schemaConfig.configs[0].index.prefix=loki_index_ \
   --set loki.schemaConfig.configs[0].index.period=24h \
+  --set loki.limits_config.retention_period=168h \
+  --set loki.compactor.retention_enabled=true \
+  --set loki.compactor.delete_request_store=filesystem \
+  --set loki.compactor.compaction_interval=10m \
+  --set loki.compactor.retention_delete_delay=2h \
+  --set loki.compactor.retention_delete_worker_count=150 \
   --set singleBinary.replicas=1 \
   --set singleBinary.persistence.enabled=true \
   --set singleBinary.persistence.size="${LOKI_STORAGE_SIZE}" \

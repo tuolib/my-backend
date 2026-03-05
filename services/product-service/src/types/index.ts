@@ -35,6 +35,14 @@ export interface UpdateCategoryInput {
   isActive?: boolean;
 }
 
+export interface AdminCategoryListInput {
+  page: number;
+  pageSize: number;
+  keyword?: string;
+  isActive?: boolean;
+  parentId?: string | null;
+}
+
 // ── 商品 ──
 
 export interface ProductListItem {

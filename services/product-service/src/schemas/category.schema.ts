@@ -24,3 +24,15 @@ export const updateCategorySchema = z.object({
   sortOrder: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),
 });
+
+export const adminCategoryListSchema = z.object({
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(100).default(20),
+  keyword: z.string().optional(),
+  isActive: z.boolean().optional(),
+  parentId: z.string().nullable().optional(),
+});
+
+export const deleteCategorySchema = z.object({
+  id: z.string().min(1),
+});

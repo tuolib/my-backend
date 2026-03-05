@@ -525,6 +525,52 @@
 
 ---
 
+### POST /api/v1/admin/category/list
+
+管理端分类列表（含已禁用分类），支持分页和筛选。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 默认 1 |
+| pageSize | number | 否 | 1-100，默认 20 |
+| keyword | string | 否 | 按名称模糊搜索 |
+| isActive | boolean | 否 | 筛选启用/禁用状态 |
+| parentId | string \| null | 否 | 按父分类筛选，null 表示顶级分类 |
+
+**Response Data:** 分页结构，包含分类对象数组。
+
+---
+
+### POST /api/v1/admin/category/tree
+
+管理端分类树（含已禁用分类，不走缓存）。
+
+**Request Body:** 无
+
+**Response Data:** 嵌套树形结构，每个节点含 `children` 数组。
+
+---
+
+### POST /api/v1/admin/category/delete
+
+删除分类。当分类下有子分类或关联商品时拒绝删除。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | 是 | 分类 ID |
+
+**Response Data:** `null`
+
+**错误码：**
+- `PRODUCT_2004` — 分类不存在
+- `PRODUCT_2010` — 分类删除被拒绝（有子分类或关联商品）
+
+---
+
 ## 5. 库存管理
 
 > 以下接口需要管理员认证。

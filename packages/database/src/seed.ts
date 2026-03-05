@@ -126,9 +126,9 @@ async function seed() {
     role: 'admin',
     isSuper: true,
     status: 'active',
-    mustChangePassword: true,
+    mustChangePassword: false,
   }).onConflictDoNothing({ target: admins.username });
-  console.log('  Admin ensured (admin/admin, must change password on first login)\n');
+  console.log('  Admin ensured (admin/admin)\n');
 
   // ══════════════════════════════════════════════════════════════
   // ── 4. 分类（10 个一级 + 25 个二级 = 35 个）──

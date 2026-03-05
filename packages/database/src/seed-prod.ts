@@ -208,7 +208,7 @@ async function seedProd() {
     role: 'admin',
     isSuper: true,
     status: 'active',
-    mustChangePassword: true,
+    mustChangePassword: false,
   }).onConflictDoNothing({ target: admins.username });
   console.log('  Admin ensured (admin/admin)\n');
 

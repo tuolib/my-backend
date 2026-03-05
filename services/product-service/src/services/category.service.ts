@@ -4,11 +4,12 @@
 import {
   generateId,
   NotFoundError,
+  BizError,
   ErrorCode,
 } from '@repo/shared';
 import * as categoryRepo from '../repositories/category.repo';
 import * as cacheService from './cache.service';
-import type { CategoryNode, CreateCategoryInput, UpdateCategoryInput } from '../types';
+import type { CategoryNode, CreateCategoryInput, UpdateCategoryInput, AdminCategoryListInput } from '../types';
 import type { Category } from '@repo/database';
 
 /** 递归组装分类树 */
@@ -92,4 +93,41 @@ export async function update(categoryId: string, input: UpdateCategoryInput): Pr
 
   await cacheService.invalidateCategoryTree();
   return updated;
+}
+
+/** Admin：分类列表（含已禁用，分页、筛选） */
+export async function getAdminList(params: AdminCategoryListInput): Promise<{
+  items: Category[];
+  total: number;
+}> {
+  return categoryRepo.findAdminList(params);
+}
+
+/** Admin：分类树（含已禁用，不走缓存） */
+export async function getAdminTree(): Promise<CategoryNode[]> {
+  const all = await categoryRepo.findAll();
+  return buildTree(all);
+}
+
+/** Admin：删除分类（有子分类或关联商品时拒绝） */
+export async function deleteCategory(categoryId: string): Promise<void> {
+  const cat = await categoryRepo.findById(categoryId);
+  if (!cat) {
+    throw new NotFoundError('分类不存在', ErrorCode.CATEGORY_NOT_FOUND);
+  }
+
+  // 检查子分类
+  const childCount = await categoryRepo.countChildren(categoryId);
+  if (childCount > 0) {
+    throw new BizError(409, ErrorCode.CATEGORY_DELETE_DENIED, '该分类下有子分类，无法删除');
+  }
+
+  // 检查关联商品
+  const productCount = await categoryRepo.countProductsByCategoryId(categoryId);
+  if (productCount > 0) {
+    throw new BizError(409, ErrorCode.CATEGORY_DELETE_DENIED, '该分类下有关联商品，无法删除');
+  }
+
+  await categoryRepo.deleteById(categoryId);
+  await cacheService.invalidateCategoryTree();
 }

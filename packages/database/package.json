@@ -10,7 +10,8 @@
   "scripts": {
     "generate": "drizzle-kit generate",
     "migrate": "bun run --env-file ../../.env src/migrate.ts",
-    "seed": "bun run src/seed.ts",
+    "seed": "bun run --env-file ../../.env src/seed.ts",
+    "seed:prod": "bun run --env-file ../../.env src/seed-prod.ts",
     "studio": "drizzle-kit studio"
   },
   "dependencies": {

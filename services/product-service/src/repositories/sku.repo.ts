@@ -34,6 +34,11 @@ export async function create(data: NewSku): Promise<Sku> {
   return row;
 }
 
+/** 删除 SKU */
+export async function deleteById(id: string): Promise<void> {
+  await db.delete(skus).where(eq(skus.id, id));
+}
+
 /** 按 ID 更新 SKU（不包含 stock 字段，stock 通过库存专用接口管理） */
 export async function updateById(
   id: string,

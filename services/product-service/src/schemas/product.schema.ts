@@ -65,3 +65,50 @@ export const updateProductSchema = z.object({
 export const deleteProductSchema = z.object({
   id: z.string().min(1),
 });
+
+// ── Phase 1: Admin 商品管理补全 ──
+
+export const adminProductListSchema = z.object({
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(100).default(20),
+  sort: z.enum(['createdAt', 'price', 'sales']).default('createdAt'),
+  order: z.enum(['asc', 'desc']).default('desc'),
+  keyword: z.string().max(200).optional(),
+  filters: z.object({
+    status: z.enum(['active', 'draft', 'archived']).optional(),
+    categoryId: z.string().optional(),
+    brand: z.string().optional(),
+  }).optional(),
+});
+
+export const adminProductDetailSchema = z.object({
+  id: z.string().min(1),
+});
+
+export const toggleProductStatusSchema = z.object({
+  id: z.string().min(1),
+  status: z.enum(['active', 'draft', 'archived']),
+});
+
+export const deleteSkuSchema = z.object({
+  skuId: z.string().min(1),
+});
+
+export const addProductImageSchema = z.object({
+  productId: z.string().min(1),
+  images: z.array(z.object({
+    url: z.string().url(),
+    altText: z.string().max(200).optional(),
+    isPrimary: z.boolean().optional(),
+    sortOrder: z.number().int().optional(),
+  })).min(1),
+});
+
+export const deleteProductImageSchema = z.object({
+  imageId: z.string().min(1),
+});
+
+export const sortProductImageSchema = z.object({
+  productId: z.string().min(1),
+  imageIds: z.array(z.string().min(1)).min(1),
+});

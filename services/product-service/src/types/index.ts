@@ -182,6 +182,10 @@ export interface ProductListInput {
   };
 }
 
+export interface AdminProductListInput extends ProductListInput {
+  keyword?: string;
+}
+
 // ── 内部接口 ──
 
 export interface SkuBatchItem {

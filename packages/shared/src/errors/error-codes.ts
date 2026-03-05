@@ -22,6 +22,8 @@ export const ErrorCode = {
   DUPLICATE_SKU_CODE: 'PRODUCT_2005',
   INVALID_PRICE: 'PRODUCT_2006',
   PRODUCT_UNAVAILABLE: 'PRODUCT_2007',
+  IMAGE_NOT_FOUND: 'PRODUCT_2008',
+  SKU_DELETE_DENIED: 'PRODUCT_2009',
 
   // ── Cart 域 (3xxx) ──
   CART_ITEM_NOT_FOUND: 'CART_3001',
@@ -73,6 +75,8 @@ export const errorMessages: Record<ErrorCode, string> = {
   [ErrorCode.DUPLICATE_SKU_CODE]: 'SKU 编码已存在',
   [ErrorCode.INVALID_PRICE]: '价格无效',
   [ErrorCode.PRODUCT_UNAVAILABLE]: '商品已下架',
+  [ErrorCode.IMAGE_NOT_FOUND]: '图片不存在',
+  [ErrorCode.SKU_DELETE_DENIED]: 'SKU 删除被拒绝',
 
   // Cart
   [ErrorCode.CART_ITEM_NOT_FOUND]: '购物车商品不存在',

@@ -115,4 +115,40 @@ describe('Auth Gate', () => {
     // 不是 401，说明通过了 auth gate
     expect(res.status).not.toBe(401);
   });
+
+  // Admin 路由跳过 C 端 JWT 鉴权（由下游服务自行验证 admin token）
+  test('admin 路由（/admin/auth/login）无 C 端 token → 跳过 auth gate', async () => {
+    const res = await post('/api/v1/admin/auth/login', {
+      username: 'nonexistent',
+      password: 'test',
+    });
+    // 不是 gateway 层 401，而是下游 user-service 返回的业务 401
+    const json = await res.json();
+    expect(json.meta?.code).toBe('ADMIN_5002');
+  });
+
+  test('admin 路由（/admin/product/create）无 token → 下游服务返回 401', async () => {
+    const res = await post('/api/v1/admin/product/create', {
+      title: 'test',
+      categoryIds: ['xxx'],
+    });
+    // auth gate 跳过了 C 端鉴权，但 product-service 的 adminAuthMiddleware 拒绝
+    expect(res.status).toBe(401);
+  });
+
+  test('admin 路由 admin token → 正常转发到下游服务', async () => {
+    const { signAdminAccessToken } = await import('@repo/shared');
+    const adminToken = await signAdminAccessToken({
+      sub: 'test-admin',
+      username: 'admin',
+      role: 'admin',
+      isSuper: true,
+    });
+    const res = await post('/api/v1/admin/auth/profile', undefined, {
+      Authorization: `Bearer ${adminToken}`,
+    });
+    // 通过了 auth gate，到达了 user-service，可能返回 404（test-admin 不存在于 DB）
+    // 但不是 gateway 层的 401
+    expect(res.status).not.toBe(401);
+  });
 });

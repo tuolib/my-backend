@@ -1,6 +1,7 @@
 /**
  * Admin API 集成测试
  * 商品/分类/SKU CRUD + 缓存失效 + 库存初始化
+ * Phase 1: 商品管理补全（列表/详情/状态切换/SKU删除/图片管理）
  */
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { app } from '../index';
@@ -8,13 +9,12 @@ import { redis } from '@repo/database';
 
 const BASE = 'http://localhost';
 
-// 使用种子数据的 admin 用户获取 token
+// 签发测试用 admin token（type:'staff'）
 let accessToken = '';
 
 async function login(): Promise<string> {
-  // 直接调 user-service 获取 token 不现实，我们直接签发一个测试用的
-  const { signAccessToken } = await import('@repo/shared');
-  return signAccessToken({ sub: 'test-admin-id', email: 'admin@test.com' });
+  const { signAdminAccessToken } = await import('@repo/shared');
+  return signAdminAccessToken({ sub: 'test-admin-id', username: 'admin', role: 'admin', isSuper: true });
 }
 
 function req(path: string, body?: unknown, headers?: Record<string, string>) {
@@ -164,7 +164,159 @@ describe('Admin API', () => {
     expect(json.meta.code).toBe('PRODUCT_2005');
   });
 
-  // 9. 删除商品
+  // ── Phase 1: 商品管理补全测试 ──
+
+  // 9. Admin 商品列表（含所有状态）
+  test('POST /api/v1/admin/product/list — 管理端商品列表', async () => {
+    const res = await req('/api/v1/admin/product/list', {});
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.data.items).toBeInstanceOf(Array);
+    expect(json.data.pagination).toBeDefined();
+    expect(json.data.pagination.total).toBeGreaterThanOrEqual(1);
+  });
+
+  // 10. Admin 商品列表 — 关键词搜索
+  test('POST /api/v1/admin/product/list — 关键词搜索', async () => {
+    const res = await req('/api/v1/admin/product/list', {
+      keyword: '更新后',
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.items.length).toBeGreaterThanOrEqual(1);
+    expect(json.data.items[0].title).toContain('更新后');
+  });
+
+  // 11. Admin 商品详情
+  test('POST /api/v1/admin/product/detail — 管理端商品详情', async () => {
+    const res = await req('/api/v1/admin/product/detail', { id: createdProductId });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.id).toBe(createdProductId);
+    expect(json.data.images).toBeInstanceOf(Array);
+    expect(json.data.skus).toBeInstanceOf(Array);
+    expect(json.data.categories).toBeInstanceOf(Array);
+  });
+
+  // 12. 切换商品状态 — 下架
+  test('POST /api/v1/admin/product/toggle-status — 下架商品', async () => {
+    const res = await req('/api/v1/admin/product/toggle-status', {
+      id: createdProductId,
+      status: 'draft',
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.status).toBe('draft');
+  });
+
+  // 13. 切换商品状态 — 重新上架
+  test('POST /api/v1/admin/product/toggle-status — 重新上架', async () => {
+    const res = await req('/api/v1/admin/product/toggle-status', {
+      id: createdProductId,
+      status: 'active',
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.status).toBe('active');
+  });
+
+  // 14. 添加商品图片
+  test('POST /api/v1/admin/product/image/add — 添加图片', async () => {
+    const res = await req('/api/v1/admin/product/image/add', {
+      productId: createdProductId,
+      images: [
+        { url: 'https://placehold.co/800x800?text=Test2', altText: '测试图2' },
+        { url: 'https://placehold.co/800x800?text=Test3', altText: '测试图3' },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // 原有 1 张 + 新增 2 张 = 3 张
+    expect(json.data.images.length).toBe(3);
+  });
+
+  // 15. 图片排序
+  let imageIds: string[] = [];
+  test('POST /api/v1/admin/product/image/sort — 图片排序', async () => {
+    // 先获取当前图片
+    const detailRes = await req('/api/v1/admin/product/detail', { id: createdProductId });
+    const detailJson = await detailRes.json();
+    imageIds = detailJson.data.images.map((img: any) => img.id);
+
+    // 反转排序
+    const reversed = [...imageIds].reverse();
+    const res = await req('/api/v1/admin/product/image/sort', {
+      productId: createdProductId,
+      imageIds: reversed,
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    const sortedIds = json.data.images.map((img: any) => img.id);
+    expect(sortedIds).toEqual(reversed);
+  });
+
+  // 16. 删除商品图片
+  test('POST /api/v1/admin/product/image/delete — 删除图片', async () => {
+    const imageIdToDelete = imageIds[imageIds.length - 1];
+    const res = await req('/api/v1/admin/product/image/delete', {
+      imageId: imageIdToDelete,
+    });
+    expect(res.status).toBe(200);
+
+    // 确认图片数量减少
+    const detailRes = await req('/api/v1/admin/product/detail', { id: createdProductId });
+    const detailJson = await detailRes.json();
+    expect(detailJson.data.images.length).toBe(imageIds.length - 1);
+  });
+
+  // 17. 删除不存在的图片 — 404
+  test('POST /api/v1/admin/product/image/delete — 不存在返回 404', async () => {
+    const res = await req('/api/v1/admin/product/image/delete', {
+      imageId: 'nonexistent-image-id-xx',
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // 18. 创建第二个 SKU，然后删除
+  let secondSkuId = '';
+  test('POST /api/v1/admin/product/sku/delete — 删除 SKU', async () => {
+    // 先创建第二个 SKU
+    const createRes = await req('/api/v1/admin/product/sku/create', {
+      productId: createdProductId,
+      skuCode: `TEST-SKU-DEL-${Date.now()}`,
+      price: 99.99,
+      stock: 20,
+      attributes: { color: '蓝色', size: 'S' },
+    });
+    const createJson = await createRes.json();
+    secondSkuId = createJson.data.id;
+
+    // 删除 SKU
+    const res = await req('/api/v1/admin/product/sku/delete', {
+      skuId: secondSkuId,
+    });
+    expect(res.status).toBe(200);
+
+    // 验证 Redis 库存已清除
+    const stockStr = await redis.get(`stock:${secondSkuId}`);
+    expect(stockStr).toBeNull();
+
+    // 验证价格区间回到只有一个 SKU 的状态
+    const detailRes = await req('/api/v1/admin/product/detail', { id: createdProductId });
+    const detailJson = await detailRes.json();
+    expect(detailJson.data.skus.length).toBe(1);
+  });
+
+  // 19. 删除不存在的 SKU — 404
+  test('POST /api/v1/admin/product/sku/delete — 不存在返回 404', async () => {
+    const res = await req('/api/v1/admin/product/sku/delete', {
+      skuId: 'nonexistent-sku-id-xxxx',
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // 20. 删除商品（放最后）
   test('POST /api/v1/admin/product/delete — 软删除 + 缓存清除', async () => {
     const res = await req('/api/v1/admin/product/delete', { id: createdProductId });
     expect(res.status).toBe(200);
@@ -176,7 +328,7 @@ describe('Admin API', () => {
     expect(detailRes.status).toBe(404);
   });
 
-  // 10. 未认证请求 admin 路由
+  // 21. 未认证请求 admin 路由
   test('POST /api/v1/admin/product/create — 未认证返回 401', async () => {
     const res = await app.request(`${BASE}/api/v1/admin/product/create`, {
       method: 'POST',

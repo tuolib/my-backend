@@ -6,6 +6,7 @@ import {
   generateId,
   NotFoundError,
   ConflictError,
+  BizError,
   ErrorCode,
 } from '@repo/shared';
 import { redis, setStock } from '@repo/database';
@@ -63,6 +64,26 @@ export async function create(input: CreateSkuInput): Promise<Sku> {
   await cacheService.invalidateProductDetail(input.productId);
 
   return sku;
+}
+
+/** Admin：删除 SKU */
+export async function remove(skuId: string): Promise<void> {
+  const existing = await skuRepo.findById(skuId);
+  if (!existing) {
+    throw new NotFoundError('SKU 不存在', ErrorCode.SKU_NOT_FOUND);
+  }
+
+  // 删除 SKU
+  await skuRepo.deleteById(skuId);
+
+  // 清除 Redis 库存
+  await redis.del(`stock:${skuId}`);
+
+  // 更新 product 价格区间
+  await productRepo.updatePriceRange(existing.productId);
+
+  // 清除商品详情缓存
+  await cacheService.invalidateProductDetail(existing.productId);
 }
 
 /** Admin：更新 SKU（不允许直接改 stock） */

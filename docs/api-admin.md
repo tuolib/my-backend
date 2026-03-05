@@ -229,6 +229,82 @@
 
 > 以下接口需要管理员认证。
 
+### POST /api/v1/admin/product/list
+
+管理端商品列表（含 draft/archived，支持筛选排序分页和关键词搜索）。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 默认 1 |
+| pageSize | number | 否 | 1-100，默认 20 |
+| sort | string | 否 | `createdAt` \| `price` \| `sales`，默认 `createdAt` |
+| order | string | 否 | `asc` \| `desc`，默认 `desc` |
+| keyword | string | 否 | 按商品标题模糊搜索，最长 200 字符 |
+| filters | object | 否 | 见下 |
+
+`filters` 对象：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| status | string | 否 | `active` \| `draft` \| `archived` |
+| categoryId | string | 否 | 分类 ID（含子分类） |
+| brand | string | 否 | 品牌精确匹配 |
+
+**Response Data:** 分页结构。
+
+```typescript
+{
+  items: Array<{
+    id: string
+    title: string
+    slug: string
+    brand: string | null
+    status: string
+    minPrice: string | null
+    maxPrice: string | null
+    totalSales: number
+    avgRating: string
+    reviewCount: number
+    primaryImage: string | null
+    createdAt: string
+  }>
+  pagination: { page, pageSize, total, totalPages }
+}
+```
+
+---
+
+### POST /api/v1/admin/product/detail
+
+管理端商品详情（含全部 SKU、图片、分类，不走缓存）。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | 是 | 商品 ID |
+
+**Response Data:** 完整商品对象（含 images、skus、categories 数组）。
+
+---
+
+### POST /api/v1/admin/product/toggle-status
+
+上架 / 下架 / 归档。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| id | string | 是 | 商品 ID |
+| status | string | 是 | `active` \| `draft` \| `archived` |
+
+**Response Data:** 更新后的商品对象。
+
+---
+
 ### POST /api/v1/admin/product/create
 
 创建商品。
@@ -337,6 +413,73 @@
 | status | string | 否 | `active` \| `inactive` |
 
 **Response Data:** 更新后的 SKU 对象。
+
+---
+
+### POST /api/v1/admin/product/sku/delete
+
+删除 SKU（同时清除 Redis 库存，更新商品价格区间）。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| skuId | string | 是 | SKU ID |
+
+**Response Data:** `null`
+
+---
+
+### POST /api/v1/admin/product/image/add
+
+添加商品图片。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| productId | string | 是 | 商品 ID |
+| images | Array | 是 | 至少 1 张，见下 |
+
+`images` 数组元素：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| url | string | 是 | 合法 URL |
+| altText | string | 否 | 最长 200 字符 |
+| isPrimary | boolean | 否 | 是否主图 |
+| sortOrder | number | 否 | 排序，不填则自动递增 |
+
+**Response Data:** 更新后的商品对象。
+
+---
+
+### POST /api/v1/admin/product/image/delete
+
+删除商品图片。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| imageId | string | 是 | 图片 ID |
+
+**Response Data:** `null`
+
+---
+
+### POST /api/v1/admin/product/image/sort
+
+图片排序（按传入的 imageIds 数组顺序重新排列）。
+
+**Request Body:**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| productId | string | 是 | 商品 ID |
+| imageIds | string[] | 是 | 图片 ID 数组，按期望顺序排列 |
+
+**Response Data:** 更新后的商品对象。
 
 ---
 

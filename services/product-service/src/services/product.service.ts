@@ -18,6 +18,7 @@ import type {
   ProductDetail,
   ProductListItem,
   ProductListInput,
+  AdminProductListInput,
   CreateProductInput,
   UpdateProductInput,
 } from '../types';
@@ -135,6 +136,160 @@ export async function getList(params: ProductListInput): Promise<{
   });
 
   return { items, total };
+}
+
+/** Admin：商品列表（含所有状态，支持关键词搜索） */
+export async function getAdminList(params: AdminProductListInput): Promise<{
+  items: ProductListItem[];
+  total: number;
+}> {
+  const { items: rawItems, total } = await productRepo.findAdminList(params);
+
+  const productIds = rawItems.map((p) => p.id);
+  const allImages = await Promise.all(productIds.map((id) => imageRepo.findByProductId(id)));
+
+  const items: ProductListItem[] = rawItems.map((p, i) => {
+    const primaryImg = allImages[i].find((img) => img.isPrimary) ?? allImages[i][0] ?? null;
+    return {
+      id: p.id,
+      title: p.title,
+      slug: p.slug,
+      brand: p.brand,
+      status: p.status,
+      minPrice: p.minPrice,
+      maxPrice: p.maxPrice,
+      totalSales: p.totalSales,
+      avgRating: p.avgRating,
+      reviewCount: p.reviewCount,
+      primaryImage: primaryImg?.url ?? null,
+      createdAt: p.createdAt,
+    };
+  });
+
+  return { items, total };
+}
+
+/** Admin：商品详情（不走缓存，直查 DB） */
+export async function getAdminDetail(productId: string): Promise<ProductDetail> {
+  const product = await productRepo.findById(productId);
+  if (!product) {
+    throw new NotFoundError('商品不存在', ErrorCode.PRODUCT_NOT_FOUND);
+  }
+
+  const [images, skuList, pcRows] = await Promise.all([
+    imageRepo.findByProductId(productId),
+    skuRepo.findByProductId(productId),
+    db.select().from(productCategories).where(eq(productCategories.productId, productId)),
+  ]);
+
+  const categoryIds = pcRows.map((r) => r.categoryId);
+  const cats = await Promise.all(categoryIds.map((id) => categoryRepo.findById(id)));
+
+  return {
+    id: product.id,
+    title: product.title,
+    slug: product.slug,
+    description: product.description,
+    brand: product.brand,
+    status: product.status,
+    attributes: product.attributes,
+    minPrice: product.minPrice,
+    maxPrice: product.maxPrice,
+    totalSales: product.totalSales,
+    avgRating: product.avgRating,
+    reviewCount: product.reviewCount,
+    createdAt: product.createdAt,
+    updatedAt: product.updatedAt,
+    images: images.map((img) => ({
+      id: img.id,
+      url: img.url,
+      altText: img.altText,
+      isPrimary: img.isPrimary,
+      sortOrder: img.sortOrder,
+    })),
+    skus: skuList.map((s) => ({
+      id: s.id,
+      skuCode: s.skuCode,
+      price: s.price,
+      comparePrice: s.comparePrice,
+      stock: s.stock,
+      attributes: s.attributes,
+      status: s.status,
+    })),
+    categories: cats
+      .filter((c): c is NonNullable<typeof c> => c !== null)
+      .map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
+  };
+}
+
+/** Admin：切换商品状态（上架/下架） */
+export async function toggleStatus(productId: string, status: string): Promise<ProductDetail> {
+  const existing = await productRepo.findById(productId);
+  if (!existing) {
+    throw new NotFoundError('商品不存在', ErrorCode.PRODUCT_NOT_FOUND);
+  }
+
+  await productRepo.updateById(productId, { status } as any);
+  await cacheService.invalidateProductDetail(productId);
+
+  return getAdminDetail(productId);
+}
+
+/** Admin：添加商品图片 */
+export async function addImages(
+  productId: string,
+  images: { url: string; altText?: string; isPrimary?: boolean; sortOrder?: number }[],
+): Promise<ProductDetail> {
+  const existing = await productRepo.findById(productId);
+  if (!existing) {
+    throw new NotFoundError('商品不存在', ErrorCode.PRODUCT_NOT_FOUND);
+  }
+
+  // 获取已有图片数来计算默认 sortOrder
+  const existingImages = await imageRepo.findByProductId(productId);
+  const maxSort = existingImages.length > 0
+    ? Math.max(...existingImages.map((img) => img.sortOrder))
+    : -1;
+
+  await imageRepo.createMany(
+    images.map((img, i) => ({
+      id: generateId(),
+      productId,
+      url: img.url,
+      altText: img.altText ?? null,
+      isPrimary: img.isPrimary ?? false,
+      sortOrder: img.sortOrder ?? maxSort + 1 + i,
+    })),
+  );
+
+  await cacheService.invalidateProductDetail(productId);
+  return getAdminDetail(productId);
+}
+
+/** Admin：删除商品图片 */
+export async function deleteImage(imageId: string): Promise<void> {
+  const image = await imageRepo.findById(imageId);
+  if (!image) {
+    throw new NotFoundError('图片不存在', ErrorCode.IMAGE_NOT_FOUND);
+  }
+
+  await imageRepo.deleteById(imageId);
+  await cacheService.invalidateProductDetail(image.productId);
+}
+
+/** Admin：图片排序 */
+export async function sortImages(productId: string, imageIds: string[]): Promise<ProductDetail> {
+  const existing = await productRepo.findById(productId);
+  if (!existing) {
+    throw new NotFoundError('商品不存在', ErrorCode.PRODUCT_NOT_FOUND);
+  }
+
+  await imageRepo.updateSortOrders(
+    imageIds.map((id, i) => ({ id, sortOrder: i })),
+  );
+
+  await cacheService.invalidateProductDetail(productId);
+  return getAdminDetail(productId);
 }
 
 /** Admin：创建商品 */

@@ -20,6 +20,10 @@ export const createSkuSchema = z.object({
   barcode: z.string().max(50).optional(),
 });
 
+export const deleteSkuSchema = z.object({
+  skuId: z.string().min(1),
+});
+
 export const updateSkuSchema = z.object({
   skuId: z.string().min(1),
   price: z.number().positive().optional(),

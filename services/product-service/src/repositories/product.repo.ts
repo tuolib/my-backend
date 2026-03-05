@@ -229,6 +229,92 @@ export async function search(params: {
   return { items, total };
 }
 
+/** Admin 分页列表查询（含关键词搜索，不限状态） */
+export async function findAdminList(params: {
+  page: number;
+  pageSize: number;
+  sort: string;
+  order: 'asc' | 'desc';
+  keyword?: string;
+  filters?: { status?: string; categoryId?: string; brand?: string };
+}): Promise<{ items: Product[]; total: number }> {
+  const { page, pageSize, sort, order, keyword, filters } = params;
+  const offset = (page - 1) * pageSize;
+
+  // Admin 列表不排除软删除 —— 但仍可通过 status=archived 筛选
+  const conditions: SQL[] = [isNull(products.deletedAt)];
+
+  if (filters?.status) {
+    conditions.push(eq(products.status, filters.status));
+  }
+  if (filters?.brand) {
+    conditions.push(eq(products.brand, filters.brand));
+  }
+  if (keyword) {
+    const likePattern = `%${keyword}%`;
+    conditions.push(ilike(products.title, likePattern));
+  }
+
+  let needCategoryJoin = false;
+  let categoryIds: string[] = [];
+  if (filters?.categoryId) {
+    needCategoryJoin = true;
+    categoryIds = await collectCategoryIds(filters.categoryId);
+  }
+
+  const orderFn = order === 'asc' ? asc : desc;
+  let orderBy;
+  switch (sort) {
+    case 'price':
+      orderBy = orderFn(products.minPrice);
+      break;
+    case 'sales':
+      orderBy = orderFn(products.totalSales);
+      break;
+    default:
+      orderBy = orderFn(products.createdAt);
+  }
+
+  if (needCategoryJoin) {
+    conditions.push(inArray(productCategories.categoryId, categoryIds));
+
+    const [countResult] = await db
+      .select({ count: sql<number>`count(DISTINCT ${products.id})` })
+      .from(products)
+      .innerJoin(productCategories, eq(products.id, productCategories.productId))
+      .where(and(...conditions));
+    const total = Number(countResult.count);
+
+    const items = await db
+      .selectDistinctOn([products.id])
+      .from(products)
+      .innerJoin(productCategories, eq(products.id, productCategories.productId))
+      .where(and(...conditions))
+      .orderBy(products.id, orderBy)
+      .limit(pageSize)
+      .offset(offset)
+      .then((rows) => rows.map((r) => r.products));
+
+    return { items, total };
+  }
+
+  const [countResult] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(products)
+    .where(and(...conditions));
+  const total = Number(countResult.count);
+
+  const items = await db
+    .select()
+    .from(products)
+    .where(and(...conditions))
+    .orderBy(orderBy)
+    .limit(pageSize)
+    .offset(offset);
+
+  return { items, total };
+}
+
 /** 创建商品 */
 export async function create(data: NewProduct): Promise<Product> {
   const [row] = await db.insert(products).values(data).returning();

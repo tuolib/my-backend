@@ -199,6 +199,10 @@ request-id → logger → cors → rate-limit → auth → idempotent → error-
 3. 检查已完成阶段的代码，理解现有实现
 4. 只做当前阶段的工作，不越界
 
+### 接口文档同步
+
+每当新增或修改 API 路由后，必须同步更新 `docs/api-reference.md` 中对应的接口文档。
+
 ### 代码生成要求
 
 - 先写类型定义，再写实现

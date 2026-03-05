@@ -6,11 +6,14 @@ config:
   snippets:
     # 自定义 pipeline：仅对 ecom 命名空间的日志进行 JSON 解析
     pipelineStages:
-      # 1. 仅处理 ecom 命名空间的日志
+      # 1. 解析 CRI 容器日志前缀（containerd / k3s 必需）
+      - cri: {}
+
+      # 2. 仅处理 ecom 命名空间的日志
       - match:
           selector: '{namespace="ecom"}'
           stages:
-            # 2. 解析 JSON 日志行
+            # 3. 解析 JSON 日志行
             - json:
                 expressions:
                   level: level
@@ -18,12 +21,12 @@ config:
                   traceId: traceId
                   msg: msg
 
-            # 3. 将 level 和 service 提升为 Loki label（可索引字段）
+            # 4. 将 level 和 service 提升为 Loki label（可索引字段）
             - labels:
                 level:
                 service:
 
-            # 4. 时间戳解析（使用日志中的 time 字段）
+            # 5. 时间戳解析（使用日志中的 time 字段）
             - json:
                 expressions:
                   time: time

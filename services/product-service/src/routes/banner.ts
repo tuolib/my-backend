@@ -25,7 +25,7 @@ app.post('/list', async (c) => {
     )
     .orderBy(asc(banners.sortOrder));
 
-  return c.json(success(rows, c));
+  return c.json(success(rows));
 });
 
 export default app;

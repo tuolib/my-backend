@@ -10,13 +10,29 @@ import { createLogger } from '../utils/logger';
 
 const log = createLogger('error-handler');
 
-export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
+export const errorHandler: ErrorHandler<AppEnv> = async (err, c) => {
   const traceId = c.get('traceId') ?? '';
+
+  // 提取请求上下文，便于定位问题
+  const requestContext: Record<string, unknown> = {
+    method: c.req.method,
+    path: c.req.path,
+    userId: c.get('userId') ?? undefined,
+  };
+  // 安全读取 body（仅 POST/PUT/PATCH）
+  if (['POST', 'PUT', 'PATCH'].includes(c.req.method)) {
+    try {
+      requestContext.body = await c.req.json();
+    } catch {
+      // body 已被消费或非 JSON，忽略
+    }
+  }
 
   if (err instanceof AppError) {
     const errorFields = {
       errorCode: err.errorCode || 'INTERNAL_ERROR',
       statusCode: err.statusCode,
+      ...requestContext,
       stack: err.stack,
     };
 
@@ -46,6 +62,7 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   // 未知错误
   log.error('unhandled error', {
     error: err instanceof Error ? err.message : String(err),
+    ...requestContext,
     stack: err instanceof Error ? err.stack : undefined,
   });
 

@@ -12,6 +12,7 @@
     "migrate": "bun run --env-file ../../.env src/migrate.ts",
     "seed": "bun run --env-file ../../.env src/seed.ts",
     "seed:prod": "bun run --env-file ../../.env src/seed-prod.ts",
+    "data:migrate": "bun run --env-file ../../.env src/data-migrate.ts",
     "studio": "drizzle-kit studio"
   },
   "dependencies": {

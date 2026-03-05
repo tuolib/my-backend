@@ -97,7 +97,18 @@ jobs:
             bun run packages/database/src/seed-prod.ts
 
           echo ""
-          echo "Seed completed successfully!"
+          echo "Running data migrations..."
+          kubectl exec -n "${NAMESPACE}" deploy/${RELEASE}-product-service -c product-service -- \
+            env \
+              NODE_ENV=production \
+              DATABASE_URL="postgresql://postgres:${PG_PASS}@${PG_IP}:5432/ecommerce" \
+              REDIS_URL="${REDIS_URL}" \
+              JWT_ACCESS_SECRET=unused \
+              JWT_REFRESH_SECRET=unused \
+            bun run packages/database/src/data-migrate.ts
+
+          echo ""
+          echo "Seed + data migration completed successfully!"
 
       - name: Cleanup kubeconfig
         if: always()

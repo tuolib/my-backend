@@ -1,6 +1,6 @@
 {
-  "id": "9cddf88b-28a5-4e66-a29d-32a30277c7f0",
-  "prevId": "5e6f7af4-26df-45c9-a055-5b185c7eaa50",
+  "id": "f05dd37e-6c92-4973-bee7-43aee7ae7760",
+  "prevId": "9cddf88b-28a5-4e66-a29d-32a30277c7f0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -45,6 +45,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "data_source": {
+          "name": "data_source",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'seed'"
         },
         "link_type": {
           "name": "link_type",
@@ -222,6 +229,38 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "product_service.data_migrations": {
+      "name": "data_migrations",
+      "schema": "product_service",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(100)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "executed_at": {
+          "name": "executed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1032,6 +1071,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'draft'"
+        },
+        "data_source": {
+          "name": "data_source",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'seed'"
         },
         "attributes": {
           "name": "attributes",

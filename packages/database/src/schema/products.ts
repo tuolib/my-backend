@@ -49,6 +49,7 @@ export const products = productServiceSchema.table(
     description: text('description'),
     brand: varchar('brand', { length: 100 }),
     status: varchar('status', { length: 20 }).notNull().default('draft'),
+    dataSource: varchar('data_source', { length: 20 }).notNull().default('seed'),
     attributes: jsonb('attributes'),
     minPrice: decimal('min_price', { precision: 12, scale: 2 }),
     maxPrice: decimal('max_price', { precision: 12, scale: 2 }),
@@ -166,6 +167,7 @@ export const banners = productServiceSchema.table(
     title: varchar('title', { length: 200 }).notNull(),
     subtitle: varchar('subtitle', { length: 200 }),
     imageUrl: text('image_url').notNull(),
+    dataSource: varchar('data_source', { length: 20 }).notNull().default('seed'),
     linkType: varchar('link_type', { length: 20 }).notNull().default('product'),
     linkValue: varchar('link_value', { length: 200 }),
     sortOrder: integer('sort_order').notNull().default(0),
@@ -176,6 +178,16 @@ export const banners = productServiceSchema.table(
   (t) => [
     index('idx_banners_active_sort').on(t.isActive, t.sortOrder),
   ],
+);
+
+// ── data_migrations 表（数据迁移记录）──
+export const dataMigrations = productServiceSchema.table(
+  'data_migrations',
+  {
+    id: varchar('id', { length: 100 }).primaryKey(),
+    description: varchar('description', { length: 500 }),
+    executedAt: timestamp('executed_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
 );
 
 // ── Types ──
@@ -189,3 +201,4 @@ export type Sku = typeof skus.$inferSelect;
 export type NewSku = typeof skus.$inferInsert;
 export type Banner = typeof banners.$inferSelect;
 export type NewBanner = typeof banners.$inferInsert;
+export type DataMigration = typeof dataMigrations.$inferSelect;

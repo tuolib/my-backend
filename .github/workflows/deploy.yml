@@ -629,10 +629,23 @@ jobs:
           PG_PASS=$(kubectl get secret -n "${NAMESPACE}" "${RELEASE}-pg-superuser" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)
 
           if [[ -n "${PG_IP}" && -n "${PG_PASS}" ]]; then
-            echo "Running database migration (PG ClusterIP: ${PG_IP})..."
+            REDIS_SVC=$(kubectl get svc -n "${NAMESPACE}" -l app.kubernetes.io/name=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "${RELEASE}-redis")
+            REDIS_IP=$(kubectl get svc -n "${NAMESPACE}" "${REDIS_SVC}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+
+            echo "Running schema migration (PG ClusterIP: ${PG_IP})..."
             kubectl exec -n "${NAMESPACE}" deploy/${RELEASE}-api-gateway -c api-gateway -- \
               env PGHOST="${PG_IP}" PGPORT=5432 PGDATABASE=ecommerce PGUSER=postgres PGPASSWORD="${PG_PASS}" \
-              bun run packages/database/src/migrate.ts 2>&1 || echo "::warning::Migration failed (may already be up to date)"
+              bun run packages/database/src/migrate.ts 2>&1 || echo "::warning::Schema migration failed (may already be up to date)"
+
+            echo "Running data migration..."
+            kubectl exec -n "${NAMESPACE}" deploy/${RELEASE}-product-service -c product-service -- \
+              env \
+                NODE_ENV=production \
+                DATABASE_URL="postgresql://postgres:${PG_PASS}@${PG_IP}:5432/ecommerce" \
+                REDIS_URL="redis://${REDIS_IP:-${RELEASE}-redis}:6379" \
+                JWT_ACCESS_SECRET=unused \
+                JWT_REFRESH_SECRET=unused \
+              bun run packages/database/src/data-migrate.ts 2>&1 || echo "::warning::Data migration failed (may already be up to date)"
           else
             echo "::warning::PG service or secret not found, skipping migration"
           fi

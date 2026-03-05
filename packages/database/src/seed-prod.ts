@@ -94,13 +94,57 @@ async function insertProductIfNotExists(opts: {
 }) {
   // 检查商品是否已存在
   const existing = await db.execute(
-    sql`SELECT id FROM product_service.products WHERE slug = ${opts.slug} LIMIT 1`
+    sql`SELECT id, data_source FROM product_service.products WHERE slug = ${opts.slug} LIMIT 1`
   );
+
   if (existing.length > 0) {
-    console.log(`  [skip] "${opts.title}" already exists`);
+    const row = (existing as any[])[0];
+
+    // Admin 修改过的记录不碰
+    if (row.data_source !== 'seed') {
+      console.log(`  [skip] "${opts.title}" (managed by ${row.data_source})`);
+      return;
+    }
+
+    // data_source='seed' → 更新商品信息 + 图片
+    const prodId = row.id;
+    await db.execute(sql`
+      UPDATE product_service.products
+      SET title = ${opts.title}, description = ${opts.description}, brand = ${opts.brand},
+          min_price = ${opts.minPrice}, max_price = ${opts.maxPrice},
+          updated_at = NOW()
+      WHERE id = ${prodId} AND data_source = 'seed'
+    `);
+
+    // 替换图片
+    await db.execute(sql`DELETE FROM product_service.product_images WHERE product_id = ${prodId}`);
+    await db.insert(productImages).values(
+      opts.imageUrls.map((url, i) => ({
+        id: generateId(),
+        productId: prodId,
+        url,
+        altText: `${opts.title} ${i + 1}`,
+        isPrimary: i === 0,
+        sortOrder: i,
+      })),
+    );
+
+    // SKU 幂等插入（不更新已有 SKU）
+    for (const s of opts.skuList) {
+      const skuId = generateId();
+      allSkuData.push({ id: skuId, stock: s.stock });
+      await db.execute(sql`
+        INSERT INTO product_service.skus (id, product_id, sku_code, price, compare_price, stock, low_stock, attributes, status, version, created_at, updated_at)
+        VALUES (${skuId}, ${prodId}, ${s.code}, ${s.price}, ${s.comparePrice ?? null}, ${s.stock}, ${s.lowStock ?? 5}, ${JSON.stringify(s.attributes)}::jsonb, 'active', 0, NOW(), NOW())
+        ON CONFLICT (sku_code) DO NOTHING
+      `);
+    }
+
+    console.log(`  [update] "${opts.title}" (seed-managed, refreshed)`);
     return;
   }
 
+  // 新商品 → 全新插入
   const prodId = generateId();
 
   await db.insert(products).values({
@@ -110,6 +154,7 @@ async function insertProductIfNotExists(opts: {
     description: opts.description,
     brand: opts.brand,
     status: 'active',
+    dataSource: 'seed',
     minPrice: opts.minPrice,
     maxPrice: opts.maxPrice,
     totalSales: opts.totalSales,
@@ -788,35 +833,49 @@ async function seedProd() {
   // Banners（首页轮播图）
   // ══════════════════════════════════════════════════════════════
   console.log('Upserting banners...');
-  const existingBannerCount = await db.execute(
-    sql`SELECT count(*) as cnt FROM product_service.banners`
-  );
-  const bannerCount = Number((existingBannerCount as any[])[0]?.cnt ?? 0);
-  if (bannerCount > 0) {
-    console.log(`  [skip] ${bannerCount} banners already exist\n`);
-  } else {
-    const bannerData = [
-      { title: 'Spring Digital Sale', subtitle: '数码春季大促 全场低至5折', imageUrl: cdnImg('smartphones/iphone-13-pro/1.webp'), linkType: 'category' as const, linkValue: 'digital', sortOrder: 1 },
-      { title: 'iPhone 15 Pro Max', subtitle: '钛金属设计 Pro级芯片', imageUrl: cdnImg('smartphones/iphone-13-pro/2.webp'), linkType: 'product' as const, linkValue: 'iphone-15-pro-max', sortOrder: 2 },
-      { title: 'Fashion Week', subtitle: '时尚穿搭精选 新品上市', imageUrl: cdnImg('womens-dresses/dress-pea/1.webp'), linkType: 'category' as const, linkValue: 'clothing', sortOrder: 3 },
-      { title: 'Dyson V15 Detect', subtitle: '激光探测灰尘 深度清洁', imageUrl: placeholderImg('Dyson+V15+Detect', 'F59E0B', 'FFF'), linkType: 'product' as const, linkValue: 'dyson-v15-detect', sortOrder: 4 },
-      { title: 'Best Sellers Books', subtitle: '年度畅销书单 买3免1', imageUrl: placeholderImg('Best+Sellers', '7C3AED', 'F5F3FF'), linkType: 'category' as const, linkValue: 'books', sortOrder: 5 },
-      { title: 'Fresh Fruits', subtitle: '进口生鲜直达 新鲜到家', imageUrl: cdnImg('groceries/strawberry/1.webp'), linkType: 'category' as const, linkValue: 'fresh', sortOrder: 6 },
-    ];
-    await db.insert(banners).values(
-      bannerData.map((b) => ({
+  const bannerData = [
+    { title: 'Spring Digital Sale', subtitle: '数码春季大促 全场低至5折', imageUrl: cdnImg('smartphones/iphone-13-pro/1.webp'), linkType: 'category' as const, linkValue: 'digital', sortOrder: 1 },
+    { title: 'iPhone 15 Pro Max', subtitle: '钛金属设计 Pro级芯片', imageUrl: cdnImg('smartphones/iphone-13-pro/2.webp'), linkType: 'product' as const, linkValue: 'iphone-15-pro-max', sortOrder: 2 },
+    { title: 'Fashion Week', subtitle: '时尚穿搭精选 新品上市', imageUrl: cdnImg('womens-dresses/dress-pea/1.webp'), linkType: 'category' as const, linkValue: 'clothing', sortOrder: 3 },
+    { title: 'Dyson V15 Detect', subtitle: '激光探测灰尘 深度清洁', imageUrl: placeholderImg('Dyson+V15+Detect', 'F59E0B', 'FFF'), linkType: 'product' as const, linkValue: 'dyson-v15-detect', sortOrder: 4 },
+    { title: 'Best Sellers Books', subtitle: '年度畅销书单 买3免1', imageUrl: placeholderImg('Best+Sellers', '7C3AED', 'F5F3FF'), linkType: 'category' as const, linkValue: 'books', sortOrder: 5 },
+    { title: 'Fresh Fruits', subtitle: '进口生鲜直达 新鲜到家', imageUrl: cdnImg('groceries/strawberry/1.webp'), linkType: 'category' as const, linkValue: 'fresh', sortOrder: 6 },
+  ];
+  for (const b of bannerData) {
+    // 用 title 判断是否已存在
+    const existing = await db.execute(
+      sql`SELECT id, data_source FROM product_service.banners WHERE title = ${b.title} LIMIT 1`
+    );
+    if ((existing as any[]).length > 0) {
+      const row = (existing as any[])[0];
+      if (row.data_source !== 'seed') {
+        console.log(`  [skip] banner "${b.title}" (managed by ${row.data_source})`);
+      } else {
+        // 更新 seed 管理的 banner
+        await db.execute(sql`
+          UPDATE product_service.banners
+          SET subtitle = ${b.subtitle}, image_url = ${b.imageUrl}, link_type = ${b.linkType},
+              link_value = ${b.linkValue}, sort_order = ${b.sortOrder}, updated_at = NOW()
+          WHERE id = ${row.id} AND data_source = 'seed'
+        `);
+        console.log(`  [update] banner "${b.title}"`);
+      }
+    } else {
+      await db.insert(banners).values({
         id: generateId(),
         title: b.title,
         subtitle: b.subtitle,
         imageUrl: b.imageUrl,
+        dataSource: 'seed',
         linkType: b.linkType,
         linkValue: b.linkValue,
         sortOrder: b.sortOrder,
         isActive: true,
-      })),
-    );
-    console.log('  6 banners inserted.\n');
+      });
+      console.log(`  [new] banner "${b.title}"`);
+    }
   }
+  console.log('  Banners done.\n');
 
   // ── Redis 库存同步（仅新增的 SKU）──
   if (allSkuData.length > 0) {

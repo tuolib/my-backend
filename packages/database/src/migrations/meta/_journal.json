@@ -15,6 +15,13 @@
       "when": 1772703858721,
       "tag": "0002_add-banners-and-ratings",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1772707724704,
+      "tag": "0002_add-data-source-and-migrations",
+      "breakpoints": true
     }
   ]
 }

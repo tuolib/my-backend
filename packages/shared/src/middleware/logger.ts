@@ -18,7 +18,14 @@ export function logger(): MiddlewareHandler<AppEnv> {
 
     const durationMs = Math.round(performance.now() - start);
     const status = c.res.status;
+    const fields = { method, path, status, durationMs };
 
-    log.info('request completed', { method, path, status, durationMs });
+    if (status >= 500) {
+      log.error('request completed', fields);
+    } else if (status >= 400) {
+      log.warn('request completed', fields);
+    } else {
+      log.info('request completed', fields);
+    }
   };
 }

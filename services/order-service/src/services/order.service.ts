@@ -59,6 +59,7 @@ export async function create(
   // 第 1 步：幂等检查 — 相同 key 返回原订单
   const existing = await orderRepo.findByIdempotencyKey(idempotencyKey);
   if (existing) {
+    log.info('idempotent hit, returning existing order', { orderId: existing.id });
     return {
       orderId: existing.id,
       orderNo: existing.orderNo,
@@ -66,6 +67,8 @@ export async function create(
       expiresAt: existing.expiresAt,
     };
   }
+
+  log.info('creating order', { userId, itemCount: input.items.length });
 
   // 第 2 步：获取 SKU 实时数据
   const skuIds = input.items.map((i) => i.skuId);
@@ -119,6 +122,7 @@ export async function create(
   const orderId = generateId();
 
   await productClient.reserveStock(stockItems, orderId);
+  log.info('stock reserved', { orderId, items: stockItems });
 
   // 第 6 步：PG 事务 — 创建订单全部数据
   // ⚠️ 如果事务失败，必须释放库存
@@ -199,13 +203,17 @@ export async function create(
     throw err;
   }
 
+  log.info('order created', { orderId, orderNo, payAmount });
+
   // 第 7 步：设置超时 ZSET — score = expiresAt 的 Unix timestamp
   await redis.zadd(TIMEOUT_ZSET_KEY, expiresAt.getTime(), orderId);
 
   // 第 8 步：清理购物车（best effort，失败不影响订单）
   cartClient.clearCartItems(userId, skuIds).catch((err) => {
-    log.warn('cart cleanup failed', { error: (err as Error).message });
+    log.warn('cart cleanup failed', { orderId, error: (err as Error).message });
   });
+
+  log.info('order completed', { orderId, orderNo });
 
   // 第 9 步：返回
   return {

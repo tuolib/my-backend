@@ -13,6 +13,7 @@ import {
   verifyRefreshToken,
   sha256,
   generateId,
+  createLogger,
   ConflictError,
   UnauthorizedError,
   ForbiddenError,
@@ -22,6 +23,8 @@ import { redis } from '@repo/database';
 import * as userRepo from '../repositories/user.repo';
 import * as tokenRepo from '../repositories/token.repo';
 import type { RegisterInput, LoginInput, AuthResult, TokenPair, UserProfile } from '../types';
+
+const log = createLogger('auth');
 
 /** 从 User 行中提取不含密码的 profile */
 function toProfile(user: { id: string; email: string; nickname: string | null; avatarUrl: string | null; phone: string | null; status: string; lastLogin: Date | null; createdAt: Date; updatedAt: Date }): UserProfile {
@@ -82,6 +85,8 @@ export async function register(input: RegisterInput): Promise<AuthResult> {
   // 4. 签发 token
   const tokens = await issueTokens(user.id, user.email);
 
+  log.info('user registered', { userId: user.id, email: user.email });
+
   return {
     user: toProfile(user),
     ...tokens,
@@ -93,25 +98,31 @@ export async function login(input: LoginInput): Promise<AuthResult> {
   // 1. 查用户（邮箱不存在和密码错误返回同一错误码，防止枚举）
   const user = await userRepo.findByEmail(input.email);
   if (!user) {
+    log.warn('login failed: email not found', { email: input.email });
     throw new UnauthorizedError('邮箱或密码错误', ErrorCode.INVALID_CREDENTIALS);
   }
 
   // 2. 验证密码
   const valid = await verifyPassword(input.password, user.password);
   if (!valid) {
+    log.warn('login failed: wrong password', { userId: user.id, email: input.email });
     throw new UnauthorizedError('邮箱或密码错误', ErrorCode.INVALID_CREDENTIALS);
   }
 
   // 3. 检查用户状态
   if (user.status === 'suspended') {
+    log.warn('login blocked: account suspended', { userId: user.id });
     throw new ForbiddenError('账号已被封禁');
   }
   if (user.status === 'deleted') {
+    log.warn('login blocked: account deleted', { userId: user.id });
     throw new ForbiddenError('账号已被注销');
   }
 
   // 4. 签发 token
   const tokens = await issueTokens(user.id, user.email);
+
+  log.info('login success', { userId: user.id });
 
   // 5. 更新最后登录时间（不阻塞响应）
   userRepo.updateLastLogin(user.id).catch(() => {});
@@ -132,11 +143,13 @@ export async function refresh(refreshTokenStr: string): Promise<TokenPair> {
   const tokenRecord = await tokenRepo.findByHash(hash);
 
   if (!tokenRecord) {
+    log.warn('refresh failed: token not found', { userId: payload.sub });
     throw new UnauthorizedError('无效的刷新令牌', ErrorCode.TOKEN_REVOKED);
   }
 
-  // 3. 检查是否已被撤销
+  // 3. 检查是否已被撤销（可能是 token 重放攻击）
   if (tokenRecord.revokedAt) {
+    log.warn('refresh failed: token already revoked (possible replay)', { userId: payload.sub });
     throw new UnauthorizedError('登录凭证已被撤销', ErrorCode.TOKEN_REVOKED);
   }
 

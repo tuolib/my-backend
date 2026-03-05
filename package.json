@@ -16,9 +16,11 @@
     "dev:ps": "docker compose ps",
     "db:migrate": "bun run --filter @repo/database migrate",
     "db:generate": "bun run --filter @repo/database generate",
+    "db:seed": "bun run --filter @repo/database seed",
+    "db:seed:prod": "bun run --filter @repo/database seed:prod",
     "db:studio": "bun run --filter @repo/database studio",
     "db:psql": "docker exec -it $(docker ps -q -f name=my-backend-db) psql -U postgres -d ecommerce",
-    "db:reset": "docker compose down -v && docker compose up -d && sleep 3 && bun run db:migrate",
+    "db:reset": "docker compose down -v && docker compose up -d && sleep 3 && bun run db:migrate && bun run db:seed",
     "dev": "bun run dev:up && sleep 2 && bun run db:migrate && bun run --filter '*' dev --parallel",
     "lint": "prettier check packages/",
     "format": "prettier format --write packages/"

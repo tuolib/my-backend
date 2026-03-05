@@ -1,0 +1,104 @@
+# 生产环境商品数据初始化
+#
+# 手动触发：GitHub Actions → Run workflow
+# 幂等安全：ON CONFLICT DO NOTHING，重复执行不会覆盖已有数据
+
+name: Seed Production Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "目标平台"
+        required: true
+        type: choice
+        default: "k3s-multi"
+        options:
+          - k3s-single
+          - k3s-multi
+          - k8s
+      confirm:
+        description: "输入 SEED 确认执行"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  NAMESPACE: ecom
+  RELEASE: ecom
+
+jobs:
+  seed:
+    name: Seed catalog data
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+
+    steps:
+      - name: Safety check
+        run: |
+          if [[ "${{ inputs.confirm }}" != "SEED" ]]; then
+            echo "::error::Please type SEED to confirm execution"
+            exit 1
+          fi
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p "${HOME}/.kube"
+          PLATFORM="${{ inputs.platform }}"
+          if [[ "${PLATFORM}" == k3s* ]]; then
+            echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
+          else
+            echo "${{ secrets.K8S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
+          fi
+          chmod 600 "${HOME}/.kube/config"
+
+      - name: Verify cluster connectivity
+        run: kubectl cluster-info
+
+      - name: Run seed-prod
+        run: |
+          set -euo pipefail
+
+          # 获取 PG 连接信息（与 deploy.yml 迁移步骤相同的方式）
+          PG_SVC="${RELEASE}-pg-rw"
+          PG_IP=$(kubectl get svc -n "${NAMESPACE}" "${PG_SVC}" -o jsonpath='{.spec.clusterIP}')
+          PG_PASS=$(kubectl get secret -n "${NAMESPACE}" "${RELEASE}-pg-superuser" -o jsonpath='{.data.password}' | base64 -d)
+
+          # 获取 Redis 连接信息
+          REDIS_SVC=$(kubectl get svc -n "${NAMESPACE}" -l app.kubernetes.io/name=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "${RELEASE}-redis")
+          REDIS_IP=$(kubectl get svc -n "${NAMESPACE}" "${REDIS_SVC}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+
+          if [[ -z "${PG_IP}" || -z "${PG_PASS}" ]]; then
+            echo "::error::Cannot resolve PG service or secret"
+            exit 1
+          fi
+
+          REDIS_URL="redis://${REDIS_IP:-${RELEASE}-redis}:6379"
+
+          echo "PG endpoint: ${PG_IP}:5432"
+          echo "Redis endpoint: ${REDIS_URL}"
+          echo ""
+          echo "Running seed-prod.ts via product-service pod..."
+
+          kubectl exec -n "${NAMESPACE}" deploy/${RELEASE}-product-service -c product-service -- \
+            env \
+              NODE_ENV=production \
+              DATABASE_URL="postgresql://postgres:${PG_PASS}@${PG_IP}:5432/ecommerce" \
+              REDIS_URL="${REDIS_URL}" \
+              JWT_ACCESS_SECRET=unused \
+              JWT_REFRESH_SECRET=unused \
+            bun run packages/database/src/seed-prod.ts
+
+          echo ""
+          echo "Seed completed successfully!"
+
+      - name: Cleanup kubeconfig
+        if: always()
+        run: rm -f "${HOME}/.kube/config"

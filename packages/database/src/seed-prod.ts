@@ -19,9 +19,15 @@ import {
   banners,
 } from './schema';
 
-// ── 辅助：生成 placehold.co URL ──
+// ── 辅助：dummyjson CDN 图片 URL ──
+const CDN = 'https://cdn.dummyjson.com/product-images';
+function cdnImg(path: string): string {
+  return `${CDN}/${path}`;
+}
+
+// ── 辅助：placehold.co 占位图（仅用于 dummyjson 缺少的品类）──
 function placeholderImg(text: string, bg = 'EEE', fg = '999'): string {
-  return `https://placehold.co/800x800/${bg}/${fg}?text=${encodeURIComponent(text)}`;
+  return `https://placehold.co/800x800/${bg}/${fg}/webp?text=${encodeURIComponent(text)}&font=roboto`;
 }
 
 // ── 辅助：随机整数 ──
@@ -76,9 +82,7 @@ async function insertProductIfNotExists(opts: {
   totalSales: number;
   avgRating?: string;
   reviewCount?: number;
-  imgBg: string;
-  imgFg?: string;
-  imgTexts: string[];
+  imageUrls: string[];
   skuList: Array<{
     code: string;
     price: string;
@@ -113,12 +117,11 @@ async function insertProductIfNotExists(opts: {
     reviewCount: opts.reviewCount ?? randReviews(),
   });
 
-  const fg = opts.imgFg || 'FFF';
   await db.insert(productImages).values(
-    opts.imgTexts.map((text, i) => ({
+    opts.imageUrls.map((url, i) => ({
       id: generateId(),
       productId: prodId,
-      url: placeholderImg(text, opts.imgBg, fg),
+      url,
       altText: `${opts.title} ${i + 1}`,
       isPrimary: i === 0,
       sortOrder: i,
@@ -283,7 +286,7 @@ async function seedProd() {
     description: 'Apple iPhone 15 Pro Max，A17 Pro 芯片，钛金属边框，超长续航',
     brand: 'Apple', categoryId: getCatId('phones'),
     minPrice: '9999.00', maxPrice: '13999.00', totalSales: randInt(2000, 5000),
-    imgBg: '3B82F6', imgTexts: ['iPhone15PM-1', 'iPhone15PM-2', 'iPhone15PM-3'],
+    imageUrls: [cdnImg('smartphones/iphone-13-pro/1.webp'), cdnImg('smartphones/iphone-13-pro/2.webp'), cdnImg('smartphones/iphone-13-pro/3.webp')],
     skuList: [
       { code: 'IP15PM-256-NAT', price: '9999.00', comparePrice: '10999.00', stock: 200, attributes: { storage: '256GB', color: '原色钛金属' } },
       { code: 'IP15PM-512-NAT', price: '11999.00', comparePrice: '12999.00', stock: 150, attributes: { storage: '512GB', color: '原色钛金属' } },
@@ -296,7 +299,7 @@ async function seedProd() {
     description: '华为 Mate 60 Pro，麒麟芯片回归，卫星通话，昆仑玻璃',
     brand: '华为', categoryId: getCatId('phones'),
     minPrice: '6999.00', maxPrice: '7999.00', totalSales: randInt(3000, 5000),
-    imgBg: '1E40AF', imgTexts: ['Mate60Pro-1', 'Mate60Pro-2'],
+    imageUrls: [cdnImg('smartphones/samsung-galaxy-s8/1.webp'), cdnImg('smartphones/samsung-galaxy-s8/2.webp')],
     skuList: [
       { code: 'MATE60P-256-BLK', price: '6999.00', comparePrice: '7499.00', stock: 300, attributes: { storage: '256GB', color: '雅丹黑' } },
       { code: 'MATE60P-512-WHT', price: '7999.00', comparePrice: '8499.00', stock: 200, attributes: { storage: '512GB', color: '白沙银' } },
@@ -308,7 +311,7 @@ async function seedProd() {
     description: '小米14 Ultra，徕卡光学镜头，骁龙8 Gen3，专业影像旗舰',
     brand: '小米', categoryId: getCatId('phones'),
     minPrice: '5999.00', maxPrice: '6499.00', totalSales: randInt(1500, 4000),
-    imgBg: '2563EB', imgTexts: ['Mi14Ultra-1', 'Mi14Ultra-2'],
+    imageUrls: [cdnImg('smartphones/oppo-f19-pro-plus/1.webp'), cdnImg('smartphones/realme-xt/1.webp')],
     skuList: [
       { code: 'MI14U-256-BLK', price: '5999.00', comparePrice: '6299.00', stock: 250, attributes: { storage: '256GB', color: '黑色' } },
       { code: 'MI14U-512-WHT', price: '6499.00', comparePrice: '6999.00', stock: 180, attributes: { storage: '512GB', color: '白色' } },
@@ -320,7 +323,7 @@ async function seedProd() {
     description: '三星 Galaxy S24 Ultra，钛金属边框，Galaxy AI，2亿像素，S Pen',
     brand: 'Samsung', categoryId: getCatId('phones'),
     minPrice: '9699.00', maxPrice: '13699.00', totalSales: randInt(1500, 4000),
-    imgBg: '1D4ED8', imgTexts: ['S24Ultra-1', 'S24Ultra-2', 'S24Ultra-3'],
+    imageUrls: [cdnImg('smartphones/samsung-galaxy-s10/1.webp'), cdnImg('smartphones/samsung-galaxy-s10/2.webp'), cdnImg('smartphones/samsung-galaxy-s10/3.webp')],
     skuList: [
       { code: 'S24U-256-BLK', price: '9699.00', comparePrice: '10499.00', stock: 180, attributes: { storage: '256GB', color: '钛黑' } },
       { code: 'S24U-512-VIO', price: '11699.00', comparePrice: '12499.00', stock: 120, attributes: { storage: '512GB', color: '钛紫' } },
@@ -333,7 +336,7 @@ async function seedProd() {
     description: 'Apple AirPods Pro 2，自适应降噪，个性化空间音频，USB-C 充电',
     brand: 'Apple', categoryId: getCatId('earphones'),
     minPrice: '1799.00', maxPrice: '1799.00', totalSales: randInt(3000, 5000),
-    imgBg: '60A5FA', imgTexts: ['AirPodsPro2-1', 'AirPodsPro2-2'],
+    imageUrls: [cdnImg('mobile-accessories/apple-airpods/1.webp'), cdnImg('mobile-accessories/apple-airpods/2.webp')],
     skuList: [
       { code: 'APP2-USBC', price: '1799.00', comparePrice: '1999.00', stock: 500, attributes: { version: 'USB-C', color: '白色' } },
     ],
@@ -344,7 +347,7 @@ async function seedProd() {
     description: '索尼旗舰降噪耳机，30小时续航，高解析度音频，佩戴舒适',
     brand: 'Sony', categoryId: getCatId('earphones'),
     minPrice: '2299.00', maxPrice: '2299.00', totalSales: randInt(1000, 3000),
-    imgBg: '3B82F6', imgTexts: ['SonyXM5-1', 'SonyXM5-2'],
+    imageUrls: [cdnImg('mobile-accessories/apple-airpods-max-silver/1.webp'), cdnImg('mobile-accessories/beats-flex-wireless-earphones/1.webp')],
     skuList: [
       { code: 'XM5-BLK', price: '2299.00', comparePrice: '2699.00', stock: 200, attributes: { color: '黑色' } },
       { code: 'XM5-SLV', price: '2299.00', comparePrice: '2699.00', stock: 150, attributes: { color: '铂金银' } },
@@ -356,7 +359,7 @@ async function seedProd() {
     description: 'Apple Watch Ultra 2，钛金属表壳，精准双频GPS，水下深度计',
     brand: 'Apple', categoryId: getCatId('smart-watches'),
     minPrice: '6499.00', maxPrice: '6499.00', totalSales: randInt(500, 2000),
-    imgBg: '2563EB', imgTexts: ['AWUltra2-1', 'AWUltra2-2'],
+    imageUrls: [cdnImg('mobile-accessories/apple-watch-series-4-gold/1.webp'), cdnImg('mobile-accessories/apple-watch-series-4-gold/2.webp')],
     skuList: [
       { code: 'AWU2-49-ORG', price: '6499.00', comparePrice: '6999.00', stock: 100, lowStock: 10, attributes: { size: '49mm', band: '橙色Alpine回环' } },
     ],
@@ -368,7 +371,7 @@ async function seedProd() {
     description: 'Apple MacBook Pro 14 英寸，M3 Pro 芯片，Liquid Retina XDR 显示屏',
     brand: 'Apple', categoryId: getCatId('laptops'),
     minPrice: '14999.00', maxPrice: '19999.00', totalSales: randInt(1000, 3000),
-    imgBg: '6366F1', imgTexts: ['MBP14-1', 'MBP14-2', 'MBP14-3'],
+    imageUrls: [cdnImg('laptops/apple-macbook-pro-14-inch-space-grey/1.webp'), cdnImg('laptops/apple-macbook-pro-14-inch-space-grey/2.webp'), cdnImg('laptops/apple-macbook-pro-14-inch-space-grey/3.webp')],
     skuList: [
       { code: 'MBP14-M3P-18-512', price: '14999.00', comparePrice: '16499.00', stock: 120, attributes: { chip: 'M3 Pro', memory: '18GB', storage: '512GB' } },
       { code: 'MBP14-M3P-36-1T', price: '19999.00', comparePrice: '21999.00', stock: 60, lowStock: 10, attributes: { chip: 'M3 Pro', memory: '36GB', storage: '1TB' } },
@@ -380,7 +383,7 @@ async function seedProd() {
     description: '联想 ThinkPad X1 Carbon，14英寸2.8K OLED屏，轻薄商务本',
     brand: 'Lenovo', categoryId: getCatId('laptops'),
     minPrice: '9999.00', maxPrice: '12999.00', totalSales: randInt(800, 2500),
-    imgBg: '818CF8', imgTexts: ['X1Carbon-1', 'X1Carbon-2'],
+    imageUrls: [cdnImg('laptops/lenovo-yoga-920/1.webp'), cdnImg('laptops/lenovo-yoga-920/2.webp')],
     skuList: [
       { code: 'X1C11-i5-16-512', price: '9999.00', comparePrice: '11499.00', stock: 100, attributes: { cpu: 'i5-1340P', memory: '16GB', storage: '512GB' } },
       { code: 'X1C11-i7-32-1T', price: '12999.00', comparePrice: '14999.00', stock: 80, attributes: { cpu: 'i7-1365H', memory: '32GB', storage: '1TB' } },
@@ -392,7 +395,7 @@ async function seedProd() {
     description: 'Apple iPad Air M2 芯片，11英寸 Liquid Retina 显示屏，支持 Apple Pencil Pro',
     brand: 'Apple', categoryId: getCatId('tablets'),
     minPrice: '4799.00', maxPrice: '6499.00', totalSales: randInt(1500, 4000),
-    imgBg: '6366F1', imgTexts: ['iPadAirM2-1', 'iPadAirM2-2'],
+    imageUrls: [cdnImg('tablets/ipad-mini-2021-starlight/1.webp'), cdnImg('tablets/ipad-mini-2021-starlight/2.webp')],
     skuList: [
       { code: 'IPAM2-128-BLU', price: '4799.00', comparePrice: '5299.00', stock: 200, attributes: { storage: '128GB', color: '蓝色' } },
       { code: 'IPAM2-256-PUR', price: '5499.00', comparePrice: '5999.00', stock: 150, attributes: { storage: '256GB', color: '紫色' } },
@@ -405,7 +408,7 @@ async function seedProd() {
     description: '华为 MatePad Pro 13.2，OLED柔性屏，星闪连接，天生会画',
     brand: '华为', categoryId: getCatId('tablets'),
     minPrice: '5199.00', maxPrice: '5999.00', totalSales: randInt(500, 2000),
-    imgBg: '818CF8', imgTexts: ['MatePadPro-1', 'MatePadPro-2'],
+    imageUrls: [cdnImg('tablets/samsung-galaxy-tab-s8-plus-grey/1.webp'), cdnImg('tablets/samsung-galaxy-tab-s8-plus-grey/2.webp')],
     skuList: [
       { code: 'MPP13-256-BLK', price: '5199.00', comparePrice: '5699.00', stock: 120, attributes: { storage: '256GB', color: '曜金黑' } },
       { code: 'MPP13-512-WHT', price: '5999.00', comparePrice: '6499.00', stock: 80, attributes: { storage: '512GB', color: '晶钻白' } },
@@ -417,7 +420,7 @@ async function seedProd() {
     description: 'HHKB 静电容键盘，蓝牙/USB双模，静音版，程序员神器',
     brand: 'HHKB', categoryId: getCatId('keyboards'),
     minPrice: '2499.00', maxPrice: '2499.00', totalSales: randInt(300, 1500),
-    imgBg: '6366F1', imgTexts: ['HHKB-1', 'HHKB-2'],
+    imageUrls: [placeholderImg('HHKB+Keyboard', '333', 'FFF'), placeholderImg('HHKB+Type-S', '333', 'FFF')],
     skuList: [
       { code: 'HHKB-HTS-WHT', price: '2499.00', comparePrice: '2799.00', stock: 80, lowStock: 10, attributes: { color: '白色', layout: '60键' } },
       { code: 'HHKB-HTS-BLK', price: '2499.00', comparePrice: '2799.00', stock: 60, lowStock: 10, attributes: { color: '墨色', layout: '60键' } },
@@ -430,7 +433,7 @@ async function seedProd() {
     description: '戴森 V15 Detect，激光探测灰尘，整机密封HEPA过滤，60分钟续航',
     brand: 'Dyson', categoryId: getCatId('small-appliance'),
     minPrice: '4590.00', maxPrice: '4590.00', totalSales: randInt(1000, 3000),
-    imgBg: 'F59E0B', imgTexts: ['DysonV15-1', 'DysonV15-2', 'DysonV15-3'],
+    imageUrls: [placeholderImg('Dyson+V15', 'F59E0B', 'FFF'), placeholderImg('Dyson+Detect', 'D97706', 'FFF'), placeholderImg('Dyson+HEPA', 'B45309', 'FFF')],
     skuList: [
       { code: 'V15-DETECT-GLD', price: '4590.00', comparePrice: '5490.00', stock: 100, attributes: { color: '金色', version: '旗舰版' } },
     ],
@@ -441,7 +444,7 @@ async function seedProd() {
     description: '戴森吹风机 HD15，智能温控，防飞翘风嘴，5款造型风嘴',
     brand: 'Dyson', categoryId: getCatId('small-appliance'),
     minPrice: '3199.00', maxPrice: '3199.00', totalSales: randInt(2000, 5000),
-    imgBg: 'D97706', imgTexts: ['DysonHD15-1', 'DysonHD15-2'],
+    imageUrls: [placeholderImg('Dyson+HD15', 'EC4899', 'FFF'), placeholderImg('Dyson+Supersonic', 'DB2777', 'FFF')],
     skuList: [
       { code: 'DYSON-HD15-FUC', price: '3199.00', comparePrice: '3599.00', stock: 150, attributes: { color: '紫红镍色' } },
       { code: 'DYSON-HD15-BLU', price: '3199.00', comparePrice: '3599.00', stock: 120, attributes: { color: '璀璨蓝金' } },
@@ -453,7 +456,7 @@ async function seedProd() {
     description: '海尔510升对开门冰箱，风冷无霜，变频节能，干湿分储',
     brand: '海尔', categoryId: getCatId('big-appliance'),
     minPrice: '3299.00', maxPrice: '3299.00', totalSales: randInt(800, 2000),
-    imgBg: 'D97706', imgTexts: ['HaierFridge-1', 'HaierFridge-2'],
+    imageUrls: [placeholderImg('Haier+Fridge', '60A5FA', 'FFF'), placeholderImg('Haier+510L', '3B82F6', 'FFF')],
     skuList: [
       { code: 'HAIER-510-GLD', price: '3299.00', comparePrice: '3999.00', stock: 50, lowStock: 10, attributes: { color: '金色', capacity: '510L' } },
     ],
@@ -464,7 +467,7 @@ async function seedProd() {
     description: '美的智能电饭煲，4L大容量，24小时预约，多功能菜单',
     brand: '美的', categoryId: getCatId('kitchen-appliance'),
     minPrice: '299.00', maxPrice: '299.00', totalSales: randInt(2000, 5000),
-    imgBg: 'F59E0B', imgTexts: ['MideaRice-1', 'MideaRice-2'],
+    imageUrls: [cdnImg('kitchen-accessories/electric-stove/1.webp'), cdnImg('kitchen-accessories/silver-pot-with-glass-cap/1.webp')],
     skuList: [
       { code: 'MIDEA-FB40-WHT', price: '299.00', comparePrice: '399.00', stock: 300, attributes: { color: '白色', capacity: '4L' } },
     ],
@@ -476,7 +479,7 @@ async function seedProd() {
     description: 'Nike Dri-FIT 科技面料，吸湿排汗，运动休闲百搭款',
     brand: 'Nike', categoryId: getCatId('menswear'),
     minPrice: '229.00', maxPrice: '229.00', totalSales: randInt(2000, 5000),
-    imgBg: 'EC4899', imgTexts: ['NikeTee-1', 'NikeTee-2'],
+    imageUrls: [cdnImg('mens-shirts/man-short-sleeve-shirt/1.webp'), cdnImg('mens-shirts/man-short-sleeve-shirt/2.webp')],
     skuList: [
       { code: 'NIKE-DF-M-S-BLK', price: '229.00', comparePrice: '299.00', stock: 300, attributes: { size: 'S', color: '黑色' } },
       { code: 'NIKE-DF-M-M-BLK', price: '229.00', comparePrice: '299.00', stock: 400, attributes: { size: 'M', color: '黑色' } },
@@ -490,7 +493,7 @@ async function seedProd() {
     description: 'Levi\'s 501 Original，经典直筒剪裁，纯棉牛仔布，百年经典',
     brand: 'Levi\'s', categoryId: getCatId('menswear'),
     minPrice: '599.00', maxPrice: '599.00', totalSales: randInt(1500, 4000),
-    imgBg: 'DB2777', imgTexts: ['Levis501-1', 'Levis501-2'],
+    imageUrls: [cdnImg('mens-shirts/blue-&-black-check-shirt/1.webp'), cdnImg('mens-shirts/blue-&-black-check-shirt/2.webp')],
     skuList: [
       { code: 'LEVI501-30-BLU', price: '599.00', comparePrice: '799.00', stock: 150, attributes: { size: '30', color: '中蓝' } },
       { code: 'LEVI501-32-BLU', price: '599.00', comparePrice: '799.00', stock: 200, attributes: { size: '32', color: '中蓝' } },
@@ -503,7 +506,7 @@ async function seedProd() {
     description: '优衣库 Ultra Light Down，超轻便携，90%优质白鸭绒，可收纳',
     brand: 'UNIQLO', categoryId: getCatId('womenswear'),
     minPrice: '499.00', maxPrice: '499.00', totalSales: randInt(3000, 5000),
-    imgBg: 'EC4899', imgTexts: ['UniqloDown-1', 'UniqloDown-2'],
+    imageUrls: [cdnImg('tops/gray-dress/1.webp'), cdnImg('tops/gray-dress/2.webp')],
     skuList: [
       { code: 'UQ-ULD-W-S-PNK', price: '499.00', comparePrice: '599.00', stock: 200, attributes: { size: 'S', color: '樱花粉' } },
       { code: 'UQ-ULD-W-M-BLK', price: '499.00', comparePrice: '599.00', stock: 250, attributes: { size: 'M', color: '黑色' } },
@@ -516,7 +519,7 @@ async function seedProd() {
     description: '法式复古碎花连衣裙，V领收腰设计，雪纺面料，优雅气质',
     brand: 'ElegantLady', categoryId: getCatId('womenswear'),
     minPrice: '299.00', maxPrice: '299.00', totalSales: randInt(1500, 4000),
-    imgBg: 'EC4899', imgTexts: ['FloralDress-1', 'FloralDress-2', 'FloralDress-3'],
+    imageUrls: [cdnImg('womens-dresses/dress-pea/1.webp'), cdnImg('womens-dresses/dress-pea/2.webp'), cdnImg('womens-dresses/dress-pea/3.webp')],
     skuList: [
       { code: 'FD-FV-S-FLR', price: '299.00', comparePrice: '459.00', stock: 180, attributes: { size: 'S', color: '碎花白' } },
       { code: 'FD-FV-M-FLR', price: '299.00', comparePrice: '459.00', stock: 220, attributes: { size: 'M', color: '碎花白' } },
@@ -529,7 +532,7 @@ async function seedProd() {
     description: 'Adidas Ultraboost Light，轻量化BOOST中底，编织鞋面，缓震舒适',
     brand: 'Adidas', categoryId: getCatId('shoes'),
     minPrice: '1099.00', maxPrice: '1099.00', totalSales: randInt(1000, 3000),
-    imgBg: 'F472B6', imgTexts: ['UBLight-1', 'UBLight-2', 'UBLight-3'],
+    imageUrls: [cdnImg('mens-shoes/sports-sneakers-off-white-&-red/1.webp'), cdnImg('mens-shoes/sports-sneakers-off-white-&-red/2.webp'), cdnImg('mens-shoes/sports-sneakers-off-white-&-red/3.webp')],
     skuList: [
       { code: 'UBL-40-BLK', price: '1099.00', comparePrice: '1299.00', stock: 100, attributes: { size: '40', color: '黑白' } },
       { code: 'UBL-42-BLK', price: '1099.00', comparePrice: '1299.00', stock: 120, attributes: { size: '42', color: '黑白' } },
@@ -543,7 +546,7 @@ async function seedProd() {
     description: '三只松鼠每日坚果，6种坚果+3种果干，独立小包装，锁鲜工艺',
     brand: '三只松鼠', categoryId: getCatId('snacks'),
     minPrice: '69.90', maxPrice: '129.00', totalSales: randInt(3000, 5000),
-    imgBg: '22C55E', imgTexts: ['DailyNuts-1', 'DailyNuts-2'],
+    imageUrls: [cdnImg('groceries/mulberry/1.webp'), cdnImg('groceries/honey-jar/1.webp')],
     skuList: [
       { code: 'SZS-NUTS-15', price: '69.90', comparePrice: '89.90', stock: 500, attributes: { spec: '15包装' } },
       { code: 'SZS-NUTS-30', price: '129.00', comparePrice: '159.00', stock: 400, attributes: { spec: '30包装' } },
@@ -555,7 +558,7 @@ async function seedProd() {
     description: '农夫山泉天然水，优质水源地，不含任何添加剂',
     brand: '农夫山泉', categoryId: getCatId('drinks'),
     minPrice: '29.90', maxPrice: '29.90', totalSales: randInt(4000, 5000),
-    imgBg: '16A34A', imgTexts: ['NongfuWater-1', 'NongfuWater-2'],
+    imageUrls: [cdnImg('groceries/water/1.webp'), cdnImg('groceries/juice/1.webp')],
     skuList: [
       { code: 'NFS-550-24', price: '29.90', comparePrice: '39.90', stock: 500, attributes: { spec: '550ml×24瓶' } },
     ],
@@ -566,7 +569,7 @@ async function seedProd() {
     description: '哥伦比亚单一产区精品咖啡豆，中深烘焙，坚果巧克力风味',
     brand: 'BeanMaster', categoryId: getCatId('drinks'),
     minPrice: '68.00', maxPrice: '128.00', totalSales: randInt(800, 2500),
-    imgBg: '22C55E', imgTexts: ['Coffee-1', 'Coffee-2'],
+    imageUrls: [cdnImg('groceries/nescafe-coffee/1.webp'), cdnImg('groceries/ice-cream/1.webp')],
     skuList: [
       { code: 'COFFEE-200G', price: '68.00', comparePrice: '88.00', stock: 200, attributes: { weight: '200g', roast: '中深烘焙' } },
       { code: 'COFFEE-500G', price: '128.00', comparePrice: '158.00', stock: 150, attributes: { weight: '500g', roast: '中深烘焙' } },
@@ -578,7 +581,7 @@ async function seedProd() {
     description: '智利进口车厘子，JJ级大果，果径28-30mm，新鲜空运直达',
     brand: '鲜果时光', categoryId: getCatId('fresh'),
     minPrice: '129.00', maxPrice: '129.00', totalSales: randInt(1500, 3000),
-    imgBg: '15803D', imgTexts: ['Cherry-1', 'Cherry-2'],
+    imageUrls: [cdnImg('groceries/strawberry/1.webp'), cdnImg('groceries/kiwi/1.webp')],
     skuList: [
       { code: 'CHERRY-JJ-2LB', price: '129.00', comparePrice: '169.00', stock: 80, lowStock: 10, attributes: { spec: '2斤装', grade: 'JJ级' } },
     ],
@@ -590,7 +593,7 @@ async function seedProd() {
     description: 'SK-II 神仙水，93.4% PITERA精华，改善肤质，提亮肤色',
     brand: 'SK-II', categoryId: getCatId('skincare'),
     minPrice: '1370.00', maxPrice: '1370.00', totalSales: randInt(2000, 5000),
-    imgBg: 'F472B6', imgTexts: ['SKII-1', 'SKII-2'],
+    imageUrls: [cdnImg('skin-care/olay-ultra-moisture-shea-butter-body-wash/1.webp'), cdnImg('skin-care/olay-ultra-moisture-shea-butter-body-wash/2.webp')],
     skuList: [
       { code: 'SKII-FTE-230', price: '1370.00', comparePrice: '1590.00', stock: 200, attributes: { spec: '230ml' } },
     ],
@@ -601,7 +604,7 @@ async function seedProd() {
     description: 'MAC 经典子弹头口红，高饱和色彩，丝缎质地，持久不脱色',
     brand: 'MAC', categoryId: getCatId('makeup'),
     minPrice: '230.00', maxPrice: '230.00', totalSales: randInt(2500, 5000),
-    imgBg: 'EC4899', imgTexts: ['MACLip-1', 'MACLip-2'],
+    imageUrls: [cdnImg('beauty/red-lipstick/1.webp'), cdnImg('beauty/eyeshadow-palette-with-mirror/1.webp')],
     skuList: [
       { code: 'MAC-LS-RUBY', price: '230.00', comparePrice: '270.00', stock: 300, attributes: { color: 'Ruby Woo', finish: '哑光' } },
       { code: 'MAC-LS-CHILI', price: '230.00', comparePrice: '270.00', stock: 250, attributes: { color: 'Chili', finish: '哑光' } },
@@ -614,7 +617,7 @@ async function seedProd() {
     description: '欧莱雅透明质酸洗发水，深层补水，柔顺亮泽，无硅油配方',
     brand: "L'Oreal", categoryId: getCatId('wash-care'),
     minPrice: '69.90', maxPrice: '69.90', totalSales: randInt(3000, 5000),
-    imgBg: 'F9A8D4', imgTexts: ['LorealShampoo-1', 'LorealShampoo-2'],
+    imageUrls: [cdnImg('skin-care/vaseline-men-body-and-face-lotion/1.webp'), cdnImg('skin-care/attitude-super-leaves-hand-soap/1.webp')],
     skuList: [
       { code: 'LOREAL-HA-SH-700', price: '69.90', comparePrice: '89.90', stock: 400, attributes: { spec: '700ml', type: '柔顺型' } },
     ],
@@ -626,7 +629,7 @@ async function seedProd() {
     description: '刘慈欣科幻巨著，雨果奖获奖作品，中国科幻里程碑',
     brand: '重庆出版社', categoryId: getCatId('literature'),
     minPrice: '93.00', maxPrice: '93.00', totalSales: randInt(4000, 5000),
-    imgBg: '8B5CF6', imgTexts: ['SanTi-1', 'SanTi-2'],
+    imageUrls: [placeholderImg('Three+Body', '1E1B4B', 'E0E7FF'), placeholderImg('Dark+Forest', '312E81', 'C7D2FE')],
     skuList: [
       { code: 'SANTI-3BOOK', price: '93.00', comparePrice: '168.00', stock: 500, attributes: { version: '典藏版', format: '纸质书' } },
     ],
@@ -637,7 +640,7 @@ async function seedProd() {
     description: '红宝书，前端开发必读经典，全面覆盖ES6+特性',
     brand: '人民邮电出版社', categoryId: getCatId('education'),
     minPrice: '99.00', maxPrice: '99.00', totalSales: randInt(1500, 3000),
-    imgBg: 'A78BFA', imgTexts: ['JSBook-1', 'JSBook-2'],
+    imageUrls: [placeholderImg('JavaScript', 'FEF08A', '854D0E'), placeholderImg('ES6+', 'FDE047', '713F12')],
     skuList: [
       { code: 'PROJS-4TH', price: '99.00', comparePrice: '129.00', stock: 300, attributes: { version: '第4版', format: '纸质书' } },
     ],
@@ -648,7 +651,7 @@ async function seedProd() {
     description: '尾田荣一郎经典漫画，全球累计发行超5亿册',
     brand: '浙江人民美术出版社', categoryId: getCatId('comic'),
     minPrice: '5.90', maxPrice: '1999.00', totalSales: randInt(2000, 5000),
-    imgBg: '7C3AED', imgTexts: ['OnePiece-1', 'OnePiece-2'],
+    imageUrls: [placeholderImg('One+Piece', 'DC2626', 'FEF2F2'), placeholderImg('Luffy', 'B91C1C', 'FEE2E2')],
     skuList: [
       { code: 'OP-SINGLE', price: '5.90', comparePrice: '7.90', stock: 500, attributes: { spec: '单册', format: '漫画' } },
       { code: 'OP-BOX-1-106', price: '1999.00', comparePrice: '2499.00', stock: 50, lowStock: 10, attributes: { spec: '全套1-106卷', format: '漫画' } },
@@ -661,7 +664,7 @@ async function seedProd() {
     description: 'Keep 智能动感单车，磁控阻力，AI私教课程，静音飞轮',
     brand: 'Keep', categoryId: getCatId('fitness'),
     minPrice: '1999.00', maxPrice: '1999.00', totalSales: randInt(500, 2000),
-    imgBg: '14B8A6', imgTexts: ['KeepBike-1', 'KeepBike-2', 'KeepBike-3'],
+    imageUrls: [placeholderImg('Keep+Bike', '0D9488', 'F0FDFA'), placeholderImg('Smart+Bike', '115E59', 'CCFBF1'), placeholderImg('AI+Coach', '134E4A', 'D1FAE5')],
     skuList: [
       { code: 'KEEP-C1-WHT', price: '1999.00', comparePrice: '2499.00', stock: 80, attributes: { color: '白色' } },
     ],
@@ -672,7 +675,7 @@ async function seedProd() {
     description: 'The North Face GORE-TEX 冲锋衣，防水防风透气，户外徒步必备',
     brand: 'The North Face', categoryId: getCatId('outdoor'),
     minPrice: '1999.00', maxPrice: '1999.00', totalSales: randInt(800, 2500),
-    imgBg: '0D9488', imgTexts: ['TNFJacket-1', 'TNFJacket-2'],
+    imageUrls: [placeholderImg('GORE-TEX', '166534', 'F0FDF4'), placeholderImg('TNF+Jacket', '14532D', 'DCFCE7')],
     skuList: [
       { code: 'TNF-GTX-M-M-BLK', price: '1999.00', comparePrice: '2599.00', stock: 100, attributes: { size: 'M', color: '黑色' } },
       { code: 'TNF-GTX-M-L-BLK', price: '1999.00', comparePrice: '2599.00', stock: 120, attributes: { size: 'L', color: '黑色' } },
@@ -685,7 +688,7 @@ async function seedProd() {
     description: 'Nike 飞马40，Air Zoom 气垫，React 泡棉，日常训练跑鞋',
     brand: 'Nike', categoryId: getCatId('sportswear'),
     minPrice: '699.00', maxPrice: '699.00', totalSales: randInt(2000, 4500),
-    imgBg: '14B8A6', imgTexts: ['Pegasus40-1', 'Pegasus40-2'],
+    imageUrls: [cdnImg('mens-shoes/nike-air-jordan-1-red-and-black/1.webp'), cdnImg('mens-shoes/nike-air-jordan-1-red-and-black/2.webp')],
     skuList: [
       { code: 'PEG40-41-BLK', price: '699.00', comparePrice: '899.00', stock: 150, attributes: { size: '41', color: '黑白' } },
       { code: 'PEG40-42-BLK', price: '699.00', comparePrice: '899.00', stock: 200, attributes: { size: '42', color: '黑白' } },
@@ -699,7 +702,7 @@ async function seedProd() {
     description: '北美白橡木实木书桌，简约日式风格，榫卯工艺，环保水性漆',
     brand: '源氏木语', categoryId: getCatId('furniture'),
     minPrice: '1599.00', maxPrice: '1999.00', totalSales: randInt(500, 1500),
-    imgBg: 'F97316', imgTexts: ['WoodDesk-1', 'WoodDesk-2', 'WoodDesk-3'],
+    imageUrls: [cdnImg('furniture/bedside-table-african-cherry/1.webp'), cdnImg('furniture/bedside-table-african-cherry/2.webp'), cdnImg('furniture/bedside-table-african-cherry/3.webp')],
     skuList: [
       { code: 'GENJI-DESK-120', price: '1599.00', comparePrice: '1999.00', stock: 60, attributes: { size: '120x60cm', material: '白橡木' } },
       { code: 'GENJI-DESK-140', price: '1999.00', comparePrice: '2399.00', stock: 50, attributes: { size: '140x70cm', material: '白橡木' } },
@@ -711,7 +714,7 @@ async function seedProd() {
     description: '富安娜100支新疆长绒棉四件套，丝滑亲肤，高端轻奢床品',
     brand: '富安娜', categoryId: getCatId('bedding'),
     minPrice: '899.00', maxPrice: '899.00', totalSales: randInt(1000, 3000),
-    imgBg: 'EA580C', imgTexts: ['Fuanna-1', 'Fuanna-2'],
+    imageUrls: [cdnImg('furniture/annibale-colombo-bed/1.webp'), cdnImg('furniture/annibale-colombo-bed/2.webp')],
     skuList: [
       { code: 'FUANNA-4PC-1.5-WHT', price: '899.00', comparePrice: '1299.00', stock: 100, attributes: { size: '1.5m床', color: '珍珠白' } },
       { code: 'FUANNA-4PC-1.8-GRY', price: '899.00', comparePrice: '1299.00', stock: 120, attributes: { size: '1.8m床', color: '高级灰' } },
@@ -723,7 +726,7 @@ async function seedProd() {
     description: '天马收纳箱，PP材质，透明可视，可叠加，衣物换季收纳',
     brand: '天马', categoryId: getCatId('storage'),
     minPrice: '99.00', maxPrice: '159.00', totalSales: randInt(2000, 5000),
-    imgBg: 'FB923C', imgTexts: ['Tenma-1', 'Tenma-2'],
+    imageUrls: [cdnImg('home-decoration/house-showpiece-plant/1.webp'), cdnImg('home-decoration/plant-pot/1.webp')],
     skuList: [
       { code: 'TENMA-56L-3PK', price: '99.00', comparePrice: '129.00', stock: 300, attributes: { spec: '56L×3个', color: '透明' } },
       { code: 'TENMA-78L-3PK', price: '159.00', comparePrice: '199.00', stock: 200, attributes: { spec: '78L×3个', color: '透明' } },
@@ -736,7 +739,7 @@ async function seedProd() {
     description: '飞鹤星飞帆3段，适合1-3岁宝宝，新鲜生牛乳一次成粉',
     brand: '飞鹤', categoryId: getCatId('milk-powder'),
     minPrice: '236.00', maxPrice: '436.00', totalSales: randInt(3000, 5000),
-    imgBg: 'FB923C', imgTexts: ['Firmus-1', 'Firmus-2'],
+    imageUrls: [cdnImg('groceries/milk/1.webp'), cdnImg('groceries/protein-powder/1.webp')],
     skuList: [
       { code: 'FIRMUS-S3-700', price: '236.00', comparePrice: '278.00', stock: 300, attributes: { spec: '700g', stage: '3段' } },
       { code: 'FIRMUS-S3-700x2', price: '436.00', comparePrice: '556.00', stock: 200, attributes: { spec: '700g×2罐', stage: '3段' } },
@@ -748,7 +751,7 @@ async function seedProd() {
     description: '花王妙而舒纸尿裤，三层透气设计，柔软触感，干爽不闷',
     brand: '花王', categoryId: getCatId('diapers'),
     minPrice: '109.00', maxPrice: '199.00', totalSales: randInt(2000, 5000),
-    imgBg: 'F59E0B', imgTexts: ['Merries-1', 'Merries-2'],
+    imageUrls: [placeholderImg('Merries+L', 'FEF3C7', 'B45309'), placeholderImg('Merries+XL', 'FDE68A', '92400E')],
     skuList: [
       { code: 'MERRIES-L-54', price: '109.00', comparePrice: '139.00', stock: 400, attributes: { size: 'L', spec: '54片' } },
       { code: 'MERRIES-XL-44', price: '109.00', comparePrice: '139.00', stock: 350, attributes: { size: 'XL', spec: '44片' } },
@@ -761,7 +764,7 @@ async function seedProd() {
     description: '乐高机械组布加迪跑车，905片零件，可动引擎和变速箱',
     brand: 'LEGO', categoryId: getCatId('toys'),
     minPrice: '349.00', maxPrice: '349.00', totalSales: randInt(800, 2500),
-    imgBg: 'FBBF24', imgTexts: ['LEGO42151-1', 'LEGO42151-2', 'LEGO42151-3'],
+    imageUrls: [placeholderImg('LEGO+Bugatti', 'DC2626', 'FEF2F2'), placeholderImg('LEGO+42151', 'B91C1C', 'FEE2E2'), placeholderImg('905+Pieces', '991B1B', 'FECACA')],
     skuList: [
       { code: 'LEGO-42151', price: '349.00', comparePrice: '449.00', stock: 150, lowStock: 10, attributes: { pieces: '905', age: '9+' } },
     ],
@@ -772,7 +775,7 @@ async function seedProd() {
     description: 'B.Duck 小黄鸭儿童三轮滑板车，可折叠，可调节高度，闪光轮',
     brand: 'B.Duck', categoryId: getCatId('toys'),
     minPrice: '199.00', maxPrice: '199.00', totalSales: randInt(1000, 3000),
-    imgBg: 'FBBF24', imgTexts: ['BDuck-1', 'BDuck-2'],
+    imageUrls: [placeholderImg('B.Duck+Scooter', 'FACC15', '422006'), placeholderImg('Kids+Scooter', 'EAB308', '3F3700')],
     skuList: [
       { code: 'BDUCK-SCOOT-YLW', price: '199.00', comparePrice: '269.00', stock: 200, attributes: { color: '黄色', ageRange: '3-8岁' } },
       { code: 'BDUCK-SCOOT-PNK', price: '199.00', comparePrice: '269.00', stock: 150, attributes: { color: '粉色', ageRange: '3-8岁' } },
@@ -793,12 +796,12 @@ async function seedProd() {
     console.log(`  [skip] ${bannerCount} banners already exist\n`);
   } else {
     const bannerData = [
-      { title: 'Spring Digital Sale', subtitle: '数码春季大促 全场低至5折', imageUrl: placeholderImg('Spring+Digital+Sale', '3B82F6', 'FFF'), linkType: 'category' as const, linkValue: 'digital', sortOrder: 1 },
-      { title: 'iPhone 15 Pro Max', subtitle: '钛金属设计 Pro级芯片', imageUrl: placeholderImg('iPhone+15+Pro', '1E40AF', 'FFF'), linkType: 'product' as const, linkValue: 'iphone-15-pro-max', sortOrder: 2 },
-      { title: 'Fashion Week', subtitle: '时尚穿搭精选 新品上市', imageUrl: placeholderImg('Fashion+Week', 'EC4899', 'FFF'), linkType: 'category' as const, linkValue: 'clothing', sortOrder: 3 },
-      { title: 'Dyson V15 Detect', subtitle: '激光探测灰尘 深度清洁', imageUrl: placeholderImg('Dyson+V15', 'F59E0B', 'FFF'), linkType: 'product' as const, linkValue: 'dyson-v15-detect', sortOrder: 4 },
-      { title: 'Best Sellers Books', subtitle: '年度畅销书单 买3免1', imageUrl: placeholderImg('Best+Books', '8B5CF6', 'FFF'), linkType: 'category' as const, linkValue: 'books', sortOrder: 5 },
-      { title: 'Fresh Fruits', subtitle: '进口生鲜直达 新鲜到家', imageUrl: placeholderImg('Fresh+Fruits', '22C55E', 'FFF'), linkType: 'category' as const, linkValue: 'fresh', sortOrder: 6 },
+      { title: 'Spring Digital Sale', subtitle: '数码春季大促 全场低至5折', imageUrl: cdnImg('smartphones/iphone-13-pro/1.webp'), linkType: 'category' as const, linkValue: 'digital', sortOrder: 1 },
+      { title: 'iPhone 15 Pro Max', subtitle: '钛金属设计 Pro级芯片', imageUrl: cdnImg('smartphones/iphone-13-pro/2.webp'), linkType: 'product' as const, linkValue: 'iphone-15-pro-max', sortOrder: 2 },
+      { title: 'Fashion Week', subtitle: '时尚穿搭精选 新品上市', imageUrl: cdnImg('womens-dresses/dress-pea/1.webp'), linkType: 'category' as const, linkValue: 'clothing', sortOrder: 3 },
+      { title: 'Dyson V15 Detect', subtitle: '激光探测灰尘 深度清洁', imageUrl: placeholderImg('Dyson+V15+Detect', 'F59E0B', 'FFF'), linkType: 'product' as const, linkValue: 'dyson-v15-detect', sortOrder: 4 },
+      { title: 'Best Sellers Books', subtitle: '年度畅销书单 买3免1', imageUrl: placeholderImg('Best+Sellers', '7C3AED', 'F5F3FF'), linkType: 'category' as const, linkValue: 'books', sortOrder: 5 },
+      { title: 'Fresh Fruits', subtitle: '进口生鲜直达 新鲜到家', imageUrl: cdnImg('groceries/strawberry/1.webp'), linkType: 'category' as const, linkValue: 'fresh', sortOrder: 6 },
     ];
     await db.insert(banners).values(
       bannerData.map((b) => ({

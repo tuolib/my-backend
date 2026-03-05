@@ -9,8 +9,26 @@ import {
   productCategories,
   productImages,
   skus,
+  categories,
 } from '@repo/database';
 import type { Product, NewProduct } from '@repo/database';
+
+/**
+ * 递归收集分类及其所有后代分类 ID
+ * 用于父分类筛选时包含子分类下的商品
+ */
+async function collectCategoryIds(categoryId: string): Promise<string[]> {
+  const result = [categoryId];
+  const children = await db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(eq(categories.parentId, categoryId));
+  for (const child of children) {
+    const descendantIds = await collectCategoryIds(child.id);
+    result.push(...descendantIds);
+  }
+  return result;
+}
 
 /** 按 ID 查找（排除软删除） */
 export async function findById(id: string): Promise<Product | null> {
@@ -51,10 +69,12 @@ export async function findList(params: {
     conditions.push(eq(products.brand, filters.brand));
   }
 
-  // 分类筛选需要 JOIN product_categories
+  // 分类筛选需要 JOIN product_categories（包含子分类）
   let needCategoryJoin = false;
+  let categoryIds: string[] = [];
   if (filters?.categoryId) {
     needCategoryJoin = true;
+    categoryIds = await collectCategoryIds(filters.categoryId);
   }
 
   // 构建排序
@@ -72,7 +92,7 @@ export async function findList(params: {
   }
 
   if (needCategoryJoin) {
-    conditions.push(eq(productCategories.categoryId, filters!.categoryId!));
+    conditions.push(inArray(productCategories.categoryId, categoryIds));
 
     // 查总数
     const [countResult] = await db
@@ -114,7 +134,11 @@ export async function findList(params: {
   return { items, total };
 }
 
-/** 全文搜索 */
+/**
+ * 全文搜索
+ * FTS (simple) 用于英文/空格分词，ILIKE 兜底中文子串匹配，
+ * 同时搜索关联的分类名称（如搜"手机"匹配手机分类下的所有商品）
+ */
 export async function search(params: {
   keyword: string;
   categoryId?: string;
@@ -126,12 +150,22 @@ export async function search(params: {
 }): Promise<{ items: Product[]; total: number }> {
   const { keyword, categoryId, priceMin, priceMax, sort, page, pageSize } = params;
   const offset = (page - 1) * pageSize;
+  const likePattern = `%${keyword}%`;
+
+  // FTS + ILIKE 兜底 + 分类名匹配
+  const textMatch = sql`(
+    to_tsvector('simple', ${products.title} || ' ' || coalesce(${products.description}, '') || ' ' || coalesce(${products.brand}, ''))
+      @@ plainto_tsquery('simple', ${keyword})
+    OR ${products.title} ILIKE ${likePattern}
+    OR coalesce(${products.description}, '') ILIKE ${likePattern}
+    OR coalesce(${products.brand}, '') ILIKE ${likePattern}
+    OR ${categories.name} ILIKE ${likePattern}
+  )`;
 
   const conditions: SQL[] = [
     isNull(products.deletedAt),
     eq(products.status, 'active'),
-    sql`to_tsvector('simple', ${products.title} || ' ' || coalesce(${products.description}, '') || ' ' || coalesce(${products.brand}, ''))
-        @@ plainto_tsquery('simple', ${keyword})`,
+    textMatch,
   ];
 
   if (priceMin !== undefined) {
@@ -140,11 +174,9 @@ export async function search(params: {
   if (priceMax !== undefined) {
     conditions.push(sql`CAST(${products.maxPrice} AS numeric) <= ${priceMax}`);
   }
-
-  let needCategoryJoin = false;
   if (categoryId) {
-    needCategoryJoin = true;
-    conditions.push(eq(productCategories.categoryId, categoryId));
+    const allCategoryIds = await collectCategoryIds(categoryId);
+    conditions.push(inArray(productCategories.categoryId, allCategoryIds));
   }
 
   // 排序
@@ -163,47 +195,36 @@ export async function search(params: {
       orderBy = desc(products.createdAt);
       break;
     default:
-      // relevance — 按全文搜索排名
-      orderBy = sql`ts_rank(
-        to_tsvector('simple', ${products.title} || ' ' || coalesce(${products.description}, '') || ' ' || coalesce(${products.brand}, '')),
-        plainto_tsquery('simple', ${keyword})
+      // relevance — FTS 排名优先，ILIKE 匹配次之
+      orderBy = sql`(
+        ts_rank(
+          to_tsvector('simple', ${products.title} || ' ' || coalesce(${products.description}, '') || ' ' || coalesce(${products.brand}, '')),
+          plainto_tsquery('simple', ${keyword})
+        )
+        + CASE WHEN ${products.title} ILIKE ${likePattern} THEN 0.5 ELSE 0 END
+        + CASE WHEN ${categories.name} ILIKE ${likePattern} THEN 0.3 ELSE 0 END
       ) DESC`;
   }
 
-  if (needCategoryJoin) {
-    const [countResult] = await db
-      .select({ count: sql<number>`count(DISTINCT ${products.id})` })
-      .from(products)
-      .innerJoin(productCategories, eq(products.id, productCategories.productId))
-      .where(and(...conditions));
-    const total = Number(countResult.count);
-
-    const items = await db
-      .selectDistinctOn([products.id])
-      .from(products)
-      .innerJoin(productCategories, eq(products.id, productCategories.productId))
-      .where(and(...conditions))
-      .orderBy(products.id, orderBy)
-      .limit(pageSize)
-      .offset(offset)
-      .then((rows) => rows.map((r) => r.products));
-
-    return { items, total };
-  }
-
+  // 始终 LEFT JOIN 分类表以支持分类名搜索
   const [countResult] = await db
-    .select({ count: sql<number>`count(*)` })
+    .select({ count: sql<number>`count(DISTINCT ${products.id})` })
     .from(products)
+    .leftJoin(productCategories, eq(products.id, productCategories.productId))
+    .leftJoin(categories, eq(productCategories.categoryId, categories.id))
     .where(and(...conditions));
   const total = Number(countResult.count);
 
   const items = await db
-    .select()
+    .selectDistinctOn([products.id])
     .from(products)
+    .leftJoin(productCategories, eq(products.id, productCategories.productId))
+    .leftJoin(categories, eq(productCategories.categoryId, categories.id))
     .where(and(...conditions))
-    .orderBy(orderBy)
+    .orderBy(products.id, orderBy)
     .limit(pageSize)
-    .offset(offset);
+    .offset(offset)
+    .then((rows) => rows.map((r) => r.products));
 
   return { items, total };
 }

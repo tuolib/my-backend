@@ -14,12 +14,16 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   const traceId = c.get('traceId') ?? '';
 
   if (err instanceof AppError) {
+    const errorFields = {
+      errorCode: err.errorCode || 'INTERNAL_ERROR',
+      statusCode: err.statusCode,
+      stack: err.stack,
+    };
+
     if (err.statusCode >= 500) {
-      log.error(err.message, {
-        errorCode: err.errorCode || 'INTERNAL_ERROR',
-        statusCode: err.statusCode,
-        stack: err.stack,
-      });
+      log.error(err.message, errorFields);
+    } else if (err.statusCode >= 400) {
+      log.warn(err.message, errorFields);
     }
 
     return c.json(

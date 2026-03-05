@@ -15,7 +15,7 @@ jobs:
   update:
     name: Update Promtail
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -50,13 +50,12 @@ jobs:
             --set resources.requests.cpu=50m \
             --set resources.requests.memory=64Mi \
             --set resources.limits.cpu=100m \
-            --set resources.limits.memory=128Mi \
-            --wait --timeout 120s
+            --set resources.limits.memory=128Mi
 
-      - name: Verify rollout
+      - name: Wait for rollout
         run: |
-          echo "Waiting for Promtail DaemonSet rollout..."
-          kubectl rollout status daemonset/promtail -n monitoring --timeout=120s
+          echo "Waiting for Promtail DaemonSet rollout to complete..."
+          kubectl rollout status daemonset/promtail -n monitoring
 
           echo ""
           echo "Promtail pods:"

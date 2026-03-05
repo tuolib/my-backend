@@ -104,8 +104,10 @@ jobs:
             --set resources.requests.cpu=50m \
             --set resources.requests.memory=64Mi \
             --set resources.limits.cpu=100m \
-            --set resources.limits.memory=128Mi \
-            --wait --timeout 120s
+            --set resources.limits.memory=128Mi
+
+          echo "Waiting for Promtail DaemonSet rollout..."
+          kubectl rollout status daemonset/promtail -n monitoring
 
       - name: Install Grafana
         run: |

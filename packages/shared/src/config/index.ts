@@ -30,9 +30,6 @@ const envSchema = z.object({
 
   // ── Redis ──
   REDIS_URL: z.string().min(1, 'REDIS_URL is required'),
-  // Sentinel 模式（逗号分隔的 host:port 列表，如 "host1:26379,host2:26379,host3:26379"）
-  REDIS_SENTINELS: z.string().default(''),
-  REDIS_SENTINEL_MASTER: z.string().default('mymaster'),
 
   // ── JWT (双 token) ──
   JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET must be at least 16 characters'),
@@ -81,8 +78,6 @@ export interface AppConfig {
   };
   redis: {
     url: string;
-    sentinels: Array<{ host: string; port: number }>;
-    sentinelMaster: string;
   };
   jwt: {
     accessSecret: string;
@@ -143,13 +138,6 @@ export function getConfig(): AppConfig {
     },
     redis: {
       url: env.REDIS_URL,
-      sentinels: env.REDIS_SENTINELS
-        ? env.REDIS_SENTINELS.split(',').map((s) => {
-            const [host, port] = s.trim().split(':');
-            return { host, port: parseInt(port || '26379', 10) };
-          })
-        : [],
-      sentinelMaster: env.REDIS_SENTINEL_MASTER,
     },
     jwt: {
       accessSecret: env.JWT_ACCESS_SECRET,

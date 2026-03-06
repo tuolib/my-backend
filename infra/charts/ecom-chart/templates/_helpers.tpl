@@ -123,10 +123,6 @@ imagePullSecrets:
       key: database-url
 - name: REDIS_URL
   value: {{ include "ecom.redisUrl" . }}
-- name: REDIS_SENTINELS
-  value: ""
-- name: REDIS_SENTINEL_MASTER
-  value: "mymaster"
 - name: JWT_ACCESS_SECRET
   valueFrom:
     secretKeyRef:

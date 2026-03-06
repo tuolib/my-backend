@@ -94,7 +94,7 @@ certManager:
 services:
   nodeEnv: production
   logLevel: info
-  corsOrigins: "https://find345.site,https://www.find345.site"
+  corsOrigins: "https://find345.site,https://www.find345.site,https://h5.find345.site,https://admin.find345.site"
 
 # ============ API Gateway ============
 apiGateway:

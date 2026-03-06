@@ -55,10 +55,14 @@ redis:
   architecture: replication
   auth:
     enabled: false
+  image:
+    tag: latest
   sentinel:
     enabled: true
     masterSet: mymaster
     quorum: 2
+    image:
+      tag: latest
     resources:
       requests:
         cpu: "100m"

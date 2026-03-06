@@ -26,7 +26,7 @@ const envSchema = z.object({
   // ── PostgreSQL ──
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   DB_POOL_MAX: z.coerce.number().min(1).max(100).default(20),
-  DB_POOL_IDLE_TIMEOUT: z.coerce.number().min(0).default(30),
+  DB_POOL_IDLE_TIMEOUT: z.coerce.number().min(0).default(120),
 
   // ── Redis ──
   REDIS_URL: z.string().min(1, 'REDIS_URL is required'),

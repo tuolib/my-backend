@@ -11,7 +11,7 @@ export const createCategorySchema = z.object({
   name: z.string().min(1).max(100),
   slug: z.string().min(1).max(100).optional(),
   parentId: z.string().optional(),
-  iconUrl: z.string().url().optional(),
+  iconUrl: z.string().max(100).optional(),
   sortOrder: z.number().int().min(0).optional(),
 });
 
@@ -20,7 +20,7 @@ export const updateCategorySchema = z.object({
   name: z.string().min(1).max(100).optional(),
   slug: z.string().min(1).max(100).optional(),
   parentId: z.string().nullable().optional(),
-  iconUrl: z.string().url().nullable().optional(),
+  iconUrl: z.string().max(100).nullable().optional(),
   sortOrder: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),
 });

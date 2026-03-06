@@ -1009,7 +1009,7 @@ async function seed() {
     minPrice: '1199.00', maxPrice: '1199.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mobile-accessories/amazon-echo-dot-5th-generation/1.webp'), cdnImg('mobile-accessories/amazon-echo-dot-5th-generation/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=amazon%2Becho%2Bdot%2B5th%2Bgeneration&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=amazon%2Becho%2Bdot%2B5th%2Bgeneration&font=roboto'],
     skuList: [
       { code: 'HW-FBP3-WHT', price: '1199.00', comparePrice: '1499.00', stock: 200, attributes: { color: '陶瓷白' } },
       { code: 'HW-FBP3-GRN', price: '1199.00', comparePrice: '1499.00', stock: 150, attributes: { color: '雅川青' } },
@@ -1042,7 +1042,7 @@ async function seed() {
     minPrice: '2199.00', maxPrice: '2799.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-watches/long-moonlight-necklace/1.webp'), cdnImg('mens-watches/round-silver-analog-watch/1.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=long%2Bmoonlight%2Bnecklace&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=round%2Bsilver%2Banalog%2Bwatch&font=roboto'],
     skuList: [
       { code: 'GW6C-43-SLV', price: '2199.00', comparePrice: '2599.00', stock: 100, attributes: { size: '43mm', color: '银色' } },
       { code: 'GW6C-47-BLK', price: '2799.00', comparePrice: '3199.00', stock: 80, attributes: { size: '47mm', color: '黑色' } },
@@ -1076,7 +1076,7 @@ async function seed() {
     minPrice: '8999.00', maxPrice: '10999.00',
     totalSales: randInt(300, 1500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('tablets/samsung-galaxy-tab-s7-plus-midnight-black/1.webp'), cdnImg('tablets/samsung-galaxy-tab-s7-plus-midnight-black/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=samsung%2Bgalaxy%2Btab%2Bs7%2Bplus%2Bmidnight%2Bblack&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=samsung%2Bgalaxy%2Btab%2Bs7%2Bplus%2Bmidnight%2Bblack&font=roboto'],
     skuList: [
       { code: 'TABS9U-256-GRY', price: '8999.00', comparePrice: '9999.00', stock: 60, attributes: { storage: '256GB', color: '石墨灰' } },
       { code: 'TABS9U-512-BEG', price: '10999.00', comparePrice: '11999.00', stock: 40, lowStock: 10, attributes: { storage: '512GB', color: '奶油白' } },
@@ -1187,7 +1187,7 @@ async function seed() {
     minPrice: '1699.00', maxPrice: '1699.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('kitchen-accessories/silver-pot-with-glass-cap/2.webp'), cdnImg('kitchen-accessories/silver-pot-with-glass-cap/3.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=silver%2Bpot%2Bwith%2Bglass%2Bcap&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=silver%2Bpot%2Bwith%2Bglass%2Bcap&font=roboto'],
     skuList: [
       { code: 'PANA-MW-59-BLK', price: '1699.00', comparePrice: '1999.00', stock: 60, attributes: { color: '黑色', capacity: '27L' } },
     ],
@@ -1221,7 +1221,7 @@ async function seed() {
     minPrice: '599.00', maxPrice: '599.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('tops/womans-black-top/1.webp'), cdnImg('tops/womans-black-top/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=womans%2Bblack%2Btop&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=womans%2Bblack%2Btop&font=roboto'],
     skuList: [
       { code: 'PB-BLZ-W-S-BLK', price: '599.00', comparePrice: '799.00', stock: 120, attributes: { size: 'S', color: '黑色' } },
       { code: 'PB-BLZ-W-M-KHK', price: '599.00', comparePrice: '799.00', stock: 150, attributes: { size: 'M', color: '卡其' } },
@@ -1256,7 +1256,7 @@ async function seed() {
     minPrice: '499.00', maxPrice: '499.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-shoes/lace-up-boots/1.webp'), cdnImg('mens-shoes/lace-up-boots/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=lace%2Bup%2Bboots&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=lace%2Bup%2Bboots&font=roboto'],
     skuList: [
       { code: 'CVS-CT-38-BLK', price: '499.00', comparePrice: '599.00', stock: 200, attributes: { size: '38', color: '黑色' } },
       { code: 'CVS-CT-40-WHT', price: '499.00', comparePrice: '599.00', stock: 250, attributes: { size: '40', color: '白色' } },
@@ -1307,7 +1307,7 @@ async function seed() {
     minPrice: '59.90', maxPrice: '59.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/juice/2.webp'), cdnImg('groceries/water/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=juice&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=water&font=roboto'],
     skuList: [
       { code: 'GKF-PEACH-15', price: '59.90', comparePrice: '74.90', stock: 400, attributes: { flavor: '白桃味', spec: '480ml×15瓶' } },
     ],
@@ -1323,7 +1323,7 @@ async function seed() {
     minPrice: '89.00', maxPrice: '89.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/strawberry/2.webp'), cdnImg('groceries/strawberry/3.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=strawberry&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=strawberry&font=roboto'],
     skuList: [
       { code: 'DD99-SB-3LB', price: '89.00', comparePrice: '119.00', stock: 100, lowStock: 15, attributes: { spec: '3斤装', grade: '精选大果' } },
     ],
@@ -1338,7 +1338,7 @@ async function seed() {
     minPrice: '149.00', maxPrice: '149.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/salmon/1.webp'), cdnImg('groceries/fish-steak/1.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=salmon&font=roboto', cdnImg('groceries/fish-steak/1.webp')],
     skuList: [
       { code: 'EC-SHRIMP-4LB', price: '149.00', comparePrice: '199.00', stock: 80, lowStock: 10, attributes: { spec: '净重4斤', size: '30-40只/斤' } },
     ],
@@ -1354,7 +1354,7 @@ async function seed() {
     minPrice: '1080.00', maxPrice: '1080.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('skin-care/dove-body-care-nourishing-body-wash/1.webp'), cdnImg('skin-care/hemani-tea-tree-oil/1.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=dove%2Bbody%2Bcare%2Bnourishing%2Bbody%2Bwash&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=hemani%2Btea%2Btree%2Boil&font=roboto'],
     skuList: [
       { code: 'LC-AGF-50', price: '760.00', comparePrice: '890.00', stock: 200, attributes: { spec: '50ml' } },
       { code: 'LC-AGF-100', price: '1080.00', comparePrice: '1260.00', stock: 150, attributes: { spec: '100ml' } },
@@ -1370,7 +1370,7 @@ async function seed() {
     minPrice: '520.00', maxPrice: '520.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('skin-care/elf-skin-super-hydrate-moisturizer/1.webp'), cdnImg('skin-care/elf-skin-super-hydrate-moisturizer/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=elf%2Bskin%2Bsuper%2Bhydrate%2Bmoisturizer&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=elf%2Bskin%2Bsuper%2Bhydrate%2Bmoisturizer&font=roboto'],
     skuList: [
       { code: 'EL-ANR-EYE-15', price: '520.00', comparePrice: '620.00', stock: 250, attributes: { spec: '15ml' } },
     ],
@@ -1386,7 +1386,7 @@ async function seed() {
     minPrice: '89.90', maxPrice: '89.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('beauty/eyeshadow-palette-with-mirror/2.webp'), cdnImg('beauty/makeup-remover/1.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=eyeshadow%2Bpalette%2Bwith%2Bmirror&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=makeup%2Bremover&font=roboto'],
     skuList: [
       { code: 'PD-CAT-12', price: '89.90', comparePrice: '129.90', stock: 300, attributes: { palette: '小猫盘', colors: '12色' } },
     ],
@@ -1401,7 +1401,7 @@ async function seed() {
     minPrice: '149.00', maxPrice: '149.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('beauty/powder-canister/1.webp'), cdnImg('beauty/powder-canister/2.webp')],
+    imageUrls: [cdnImg('beauty/powder-canister/1.webp'), 'https://placehold.co/800x800/EEE/999/webp?text=powder%2Bcanister&font=roboto'],
     skuList: [
       { code: 'FLR-AP-01', price: '149.00', comparePrice: '199.00', stock: 250, attributes: { shade: '01 自然色' } },
       { code: 'FLR-AP-02', price: '149.00', comparePrice: '199.00', stock: 200, attributes: { shade: '02 嫩肤色' } },
@@ -1433,7 +1433,7 @@ async function seed() {
     minPrice: '39.90', maxPrice: '39.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('skin-care/neutrogena-norwegian-formula-hand-cream/1.webp'), cdnImg('skin-care/neutrogena-norwegian-formula-hand-cream/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=neutrogena%2Bnorwegian%2Bformula%2Bhand%2Bcream&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=neutrogena%2Bnorwegian%2Bformula%2Bhand%2Bcream&font=roboto'],
     skuList: [
       { code: 'SFJ-BW-1L', price: '39.90', comparePrice: '59.90', stock: 500, attributes: { spec: '1L', fragrance: '纯白清香' } },
     ],
@@ -1544,7 +1544,7 @@ async function seed() {
     minPrice: '299.00', maxPrice: '499.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('sports-accessories/football/1.webp'), cdnImg('sports-accessories/metal-bat/1.webp')],
+    imageUrls: [cdnImg('sports-accessories/football/1.webp'), 'https://placehold.co/800x800/EEE/999/webp?text=metal%2Bbat&font=roboto'],
     skuList: [
       { code: 'XM-DB-10KG', price: '299.00', comparePrice: '399.00', stock: 150, attributes: { weight: '10kg×2', material: '包胶' } },
       { code: 'XM-DB-20KG', price: '499.00', comparePrice: '599.00', stock: 100, attributes: { weight: '20kg×2', material: '包胶' } },
@@ -1610,7 +1610,7 @@ async function seed() {
     minPrice: '299.00', maxPrice: '299.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-shirts/man-transition-jacket/1.webp'), cdnImg('mens-shirts/man-transition-jacket/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=man%2Btransition%2Bjacket&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=man%2Btransition%2Bjacket&font=roboto'],
     skuList: [
       { code: 'UA-CMP-M-BLK', price: '299.00', comparePrice: '399.00', stock: 200, attributes: { size: 'M', color: '黑色' } },
       { code: 'UA-CMP-L-BLK', price: '299.00', comparePrice: '399.00', stock: 250, attributes: { size: 'L', color: '黑色' } },
@@ -1660,7 +1660,7 @@ async function seed() {
     minPrice: '899.00', maxPrice: '1299.00',
     totalSales: randInt(800, 2500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('furniture/bedside-table-african-cherry/4.webp'), cdnImg('home-decoration/decoration-swing/1.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=bedside%2Btable%2Bafrican%2Bcherry&font=roboto', cdnImg('home-decoration/decoration-swing/1.webp')],
     skuList: [
       { code: 'LS-TV-180-WHT', price: '899.00', comparePrice: '1199.00', stock: 50, attributes: { length: '180cm', color: '暖白' } },
       { code: 'LS-TV-240-WNT', price: '1299.00', comparePrice: '1599.00', stock: 30, attributes: { length: '240cm', color: '胡桃色' } },
@@ -1677,7 +1677,7 @@ async function seed() {
     minPrice: '999.00', maxPrice: '1599.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('furniture/annibale-colombo-bed/3.webp'), cdnImg('furniture/annibale-colombo-bed/4.webp')],
+    imageUrls: [cdnImg('furniture/annibale-colombo-bed/3.webp'), 'https://placehold.co/800x800/EEE/999/webp?text=annibale%2Bcolombo%2Bbed&font=roboto'],
     skuList: [
       { code: 'LL-SILK-S', price: '999.00', comparePrice: '1399.00', stock: 80, attributes: { weight: '春秋款 1斤', size: '200×230cm' } },
       { code: 'LL-SILK-W', price: '1599.00', comparePrice: '1999.00', stock: 50, attributes: { weight: '冬季款 2斤', size: '200×230cm' } },
@@ -1710,7 +1710,7 @@ async function seed() {
     minPrice: '59.90', maxPrice: '99.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('home-decoration/room-spray/1.webp'), cdnImg('home-decoration/room-spray/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=room%2Bspray&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=room%2Bspray&font=roboto'],
     skuList: [
       { code: 'CTL-SHOE-6', price: '59.90', comparePrice: '79.90', stock: 400, attributes: { spec: '6个装', size: '标准款' } },
       { code: 'CTL-SHOE-12', price: '99.90', comparePrice: '139.90', stock: 250, attributes: { spec: '12个装', size: '标准款' } },
@@ -1743,7 +1743,7 @@ async function seed() {
     minPrice: '338.00', maxPrice: '618.00',
     totalSales: randInt(2000, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/protein-powder/2.webp'), cdnImg('groceries/milk/2.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=protein%2Bpowder&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=milk&font=roboto'],
     skuList: [
       { code: 'APT-PRO-S3-900', price: '338.00', comparePrice: '398.00', stock: 200, attributes: { spec: '900g', stage: '3段' } },
       { code: 'APT-PRO-S3-900x2', price: '618.00', comparePrice: '796.00', stock: 150, attributes: { spec: '900g×2罐', stage: '3段' } },
@@ -1759,7 +1759,7 @@ async function seed() {
     minPrice: '378.00', maxPrice: '378.00',
     totalSales: randInt(1500, 3500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/protein-powder/3.webp'), cdnImg('groceries/milk/3.webp')],
+    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=protein%2Bpowder&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=milk&font=roboto'],
     skuList: [
       { code: 'MJC-LZ-S2-900', price: '378.00', comparePrice: '438.00', stock: 200, attributes: { spec: '900g', stage: '2段' } },
     ],

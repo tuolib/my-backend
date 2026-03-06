@@ -41,6 +41,10 @@ infra/k3s/.secrets.yaml
 # Swarm deploy secrets
 infra/swarm/.secrets.yaml
 
+# Helm dependency charts (CI downloads dynamically)
+infra/charts/*/charts/
+infra/charts/*/Chart.lock
+
 node_modules/
 
 # 如果不想在本地保留二进制锁定文件可以注释掉，但建议保留

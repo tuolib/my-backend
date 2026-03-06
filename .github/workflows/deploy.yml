@@ -348,6 +348,9 @@ jobs:
             --docker-password="${{ secrets.GHCR_PAT }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Build Helm dependencies
+        run: helm dependency build infra/charts/ecom-chart
+
       - name: Lint Helm chart
         run: helm lint infra/charts/ecom-chart ${{ steps.vars.outputs.values_flag }}
 
@@ -501,18 +504,13 @@ jobs:
             JWT_ACCESS="${{ secrets.K3S_JWT_ACCESS_SECRET }}"
             JWT_REFRESH="${{ secrets.K3S_JWT_REFRESH_SECRET }}"
             INTERNAL="${{ secrets.K3S_INTERNAL_SECRET }}"
-            REDIS_SERVICE_NAME="${{ vars.K3S_REDIS_SERVICE_NAME }}"
           else
             PG_PASS="${{ secrets.K8S_POSTGRES_PASSWORD }}"
             REPL_PASS="${{ secrets.K8S_REPLICATION_PASSWORD }}"
             JWT_ACCESS="${{ secrets.K8S_JWT_ACCESS_SECRET }}"
             JWT_REFRESH="${{ secrets.K8S_JWT_REFRESH_SECRET }}"
             INTERNAL="${{ secrets.K8S_INTERNAL_SECRET }}"
-            REDIS_SERVICE_NAME="${{ vars.K8S_REDIS_SERVICE_NAME }}"
           fi
-
-          # 未配置 GitHub Actions Variables 时使用 chart 默认服务名
-          REDIS_SERVICE_NAME="${REDIS_SERVICE_NAME:-ecom-redis}"
 
           # 若集群已有 CNPG 超级用户密码，优先使用其值，避免与仓库 Secret 漂移
           PG_SECRET_NAME="${RELEASE}-pg-superuser"
@@ -576,7 +574,6 @@ jobs:
               --set "global.registry=${REGISTRY}" \
               --set "global.imageTag=${TAG}" \
               --set "global.imagePullSecrets[0]=ghcr-pull-secret" \
-              --set "redis.serviceName=${REDIS_SERVICE_NAME}" \
               --set-string "secrets.postgresPassword=${PG_PASS}" \
               --set-string "secrets.replicationPassword=${REPL_PASS}" \
               --set-string "secrets.jwtAccessSecret=${JWT_ACCESS}" \

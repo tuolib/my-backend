@@ -11,3 +11,8 @@ keywords:
   - cloudnativepg
   - redis
 home: https://api.find345.site
+
+dependencies:
+  - name: redis
+    version: "~20.6"
+    repository: https://charts.bitnami.com/bitnami

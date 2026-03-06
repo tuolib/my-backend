@@ -57,21 +57,25 @@ postgresql://postgres:$(POSTGRES_PASSWORD)@{{ include "ecom.pgRwHost" . }}:5432/
 {{- end }}
 
 {{/*
-Redis Primary Service 地址
+Redis Sentinel Service 地址（Bitnami Redis 子图）
+Sentinel 模式下 ioredis 通过 sentinel 发现 master，REDIS_URL 作为 fallback
 */}}
-{{- define "ecom.redisPrimaryHost" -}}
-{{- if .Values.redis.serviceName -}}
-{{ .Values.redis.serviceName }}
-{{- else -}}
-{{ include "ecom.fullname" . }}-redis-master
-{{- end -}}
+{{- define "ecom.redisSentinelHost" -}}
+{{ include "ecom.fullname" . }}-redis
 {{- end }}
 
 {{/*
-REDIS_URL 连接字符串
+REDIS_URL 连接字符串（fallback，Sentinel 不可用时使用）
 */}}
 {{- define "ecom.redisUrl" -}}
-redis://{{ include "ecom.redisPrimaryHost" . }}:6379
+redis://{{ include "ecom.redisSentinelHost" . }}:6379
+{{- end }}
+
+{{/*
+REDIS_SENTINELS（逗号分隔的 host:port）
+*/}}
+{{- define "ecom.redisSentinels" -}}
+{{ include "ecom.redisSentinelHost" . }}:26379
 {{- end }}
 
 {{/*
@@ -123,6 +127,10 @@ imagePullSecrets:
       key: database-url
 - name: REDIS_URL
   value: {{ include "ecom.redisUrl" . }}
+- name: REDIS_SENTINELS
+  value: {{ include "ecom.redisSentinels" . }}
+- name: REDIS_SENTINEL_MASTER
+  value: {{ .Values.redis.sentinel.masterSet | default "mymaster" | quote }}
 - name: JWT_ACCESS_SECRET
   valueFrom:
     secretKeyRef:

@@ -50,27 +50,56 @@ postgresql:
   nodeSelector:
     role: data
 
-# ============ Redis (OT-Container-Kit Operator) ============
+# ============ Redis (Bitnami Helm Chart + Sentinel) ============
 redis:
-  clusterSize: 3
-  # Redis Service 名称（留空时默认使用 "<release>-redis"）
-  serviceName: ""
-  image: "redis:7-alpine"
-  resources:
-    requests:
-      cpu: "250m"
-      memory: "256Mi"
-    limits:
-      cpu: "500m"
-      memory: "512Mi"
-  storage:
-    size: 2Gi
-    storageClass: local-path
-  config:
-    maxmemory: "256mb"
-    maxmemoryPolicy: "allkeys-lru"
-  nodeSelector:
-    role: data
+  architecture: replication
+  auth:
+    enabled: false
+  sentinel:
+    enabled: true
+    masterSet: mymaster
+    quorum: 2
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+  master:
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    nodeSelector:
+      role: data
+    persistence:
+      size: 2Gi
+      storageClass: local-path
+  replica:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    nodeSelector:
+      role: data
+    persistence:
+      size: 2Gi
+      storageClass: local-path
+  commonConfiguration: |-
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru
+    tcp-keepalive 300
+    save 900 1
+    save 300 10
+    save 60 10000
 
 # ============ Ingress ============
 ingress:

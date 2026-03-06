@@ -646,6 +646,16 @@ jobs:
                 JWT_ACCESS_SECRET=unused \
                 JWT_REFRESH_SECRET=unused \
               bun run packages/database/src/data-migrate.ts 2>&1 || echo "::warning::Data migration failed (may already be up to date)"
+
+            echo "Running production seed (idempotent)..."
+            kubectl exec -n "${NAMESPACE}" deploy/${RELEASE}-product-service -c product-service -- \
+              env \
+                NODE_ENV=production \
+                DATABASE_URL="postgresql://postgres:${PG_PASS}@${PG_IP}:5432/ecommerce" \
+                REDIS_URL="redis://${REDIS_IP:-${RELEASE}-redis}:6379" \
+                JWT_ACCESS_SECRET=unused \
+                JWT_REFRESH_SECRET=unused \
+              bun run packages/database/src/seed-prod.ts 2>&1 || echo "::warning::Production seed failed"
           else
             echo "::warning::PG service or secret not found, skipping migration"
           fi

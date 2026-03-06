@@ -32,6 +32,7 @@ export const PUBLIC_ROUTES: string[] = [
   // 健康检查
   '/health',
   '/health/live',
+  '/health/ready',
 ];
 
 /**

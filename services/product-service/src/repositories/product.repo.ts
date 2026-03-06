@@ -7,7 +7,6 @@ import {
   db,
   products,
   productCategories,
-  productImages,
   skus,
   categories,
 } from '@repo/database';
@@ -59,22 +58,27 @@ export async function findList(params: {
   const { page, pageSize, sort, order, filters } = params;
   const offset = (page - 1) * pageSize;
 
-  // 构建 WHERE 条件
-  const conditions: SQL[] = [isNull(products.deletedAt)];
+  // 构建 WHERE 条件（公开列表强制只显示上架商品）
+  const conditions: SQL[] = [
+    isNull(products.deletedAt),
+    eq(products.status, 'active'),
+  ];
 
-  if (filters?.status) {
-    conditions.push(eq(products.status, filters.status));
-  }
   if (filters?.brand) {
     conditions.push(eq(products.brand, filters.brand));
   }
 
-  // 分类筛选需要 JOIN product_categories（包含子分类）
-  let needCategoryJoin = false;
-  let categoryIds: string[] = [];
+  // 分类筛选：用子查询代替 JOIN，避免 DISTINCT ON 破坏排序
   if (filters?.categoryId) {
-    needCategoryJoin = true;
-    categoryIds = await collectCategoryIds(filters.categoryId);
+    const categoryIds = await collectCategoryIds(filters.categoryId);
+    conditions.push(
+      inArray(
+        products.id,
+        db.select({ id: productCategories.productId })
+          .from(productCategories)
+          .where(inArray(productCategories.categoryId, categoryIds)),
+      ),
+    );
   }
 
   // 构建排序
@@ -91,32 +95,6 @@ export async function findList(params: {
       orderBy = orderFn(products.createdAt);
   }
 
-  if (needCategoryJoin) {
-    conditions.push(inArray(productCategories.categoryId, categoryIds));
-
-    // 查总数
-    const [countResult] = await db
-      .select({ count: sql<number>`count(DISTINCT ${products.id})` })
-      .from(products)
-      .innerJoin(productCategories, eq(products.id, productCategories.productId))
-      .where(and(...conditions));
-    const total = Number(countResult.count);
-
-    // 查数据（DISTINCT ON 去重）
-    const items = await db
-      .selectDistinctOn([products.id])
-      .from(products)
-      .innerJoin(productCategories, eq(products.id, productCategories.productId))
-      .where(and(...conditions))
-      .orderBy(products.id, orderBy)
-      .limit(pageSize)
-      .offset(offset)
-      .then((rows) => rows.map((r) => r.products));
-
-    return { items, total };
-  }
-
-  // 无分类筛选的普通查询
   const [countResult] = await db
     .select({ count: sql<number>`count(*)` })
     .from(products)
@@ -255,11 +233,17 @@ export async function findAdminList(params: {
     conditions.push(ilike(products.title, likePattern));
   }
 
-  let needCategoryJoin = false;
-  let categoryIds: string[] = [];
+  // 分类筛选：用子查询代替 JOIN，避免 DISTINCT ON 破坏排序
   if (filters?.categoryId) {
-    needCategoryJoin = true;
-    categoryIds = await collectCategoryIds(filters.categoryId);
+    const categoryIds = await collectCategoryIds(filters.categoryId);
+    conditions.push(
+      inArray(
+        products.id,
+        db.select({ id: productCategories.productId })
+          .from(productCategories)
+          .where(inArray(productCategories.categoryId, categoryIds)),
+      ),
+    );
   }
 
   const orderFn = order === 'asc' ? asc : desc;
@@ -273,29 +257,6 @@ export async function findAdminList(params: {
       break;
     default:
       orderBy = orderFn(products.createdAt);
-  }
-
-  if (needCategoryJoin) {
-    conditions.push(inArray(productCategories.categoryId, categoryIds));
-
-    const [countResult] = await db
-      .select({ count: sql<number>`count(DISTINCT ${products.id})` })
-      .from(products)
-      .innerJoin(productCategories, eq(products.id, productCategories.productId))
-      .where(and(...conditions));
-    const total = Number(countResult.count);
-
-    const items = await db
-      .selectDistinctOn([products.id])
-      .from(products)
-      .innerJoin(productCategories, eq(products.id, productCategories.productId))
-      .where(and(...conditions))
-      .orderBy(products.id, orderBy)
-      .limit(pageSize)
-      .offset(offset)
-      .then((rows) => rows.map((r) => r.products));
-
-    return { items, total };
   }
 
   const [countResult] = await db

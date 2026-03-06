@@ -8,6 +8,21 @@ import { getConfig } from '@repo/shared';
 const config = getConfig();
 
 export function createRedis(): Redis {
+  const useSentinel = config.redis.sentinels.length > 0;
+
+  if (useSentinel) {
+    return new Redis({
+      sentinels: config.redis.sentinels,
+      name: config.redis.sentinelMaster,
+      maxRetriesPerRequest: 10,
+      retryStrategy(times) {
+        if (times > 10) return null;
+        return Math.min(times * 500, 5000);
+      },
+      lazyConnect: true,
+    });
+  }
+
   return new Redis(config.redis.url, {
     maxRetriesPerRequest: 10,
     retryStrategy(times) {

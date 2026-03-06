@@ -63,7 +63,7 @@ Redis Primary Service 地址
 {{- if .Values.redis.serviceName -}}
 {{ .Values.redis.serviceName }}
 {{- else -}}
-{{ include "ecom.fullname" . }}-redis
+{{ include "ecom.fullname" . }}-redis-master
 {{- end -}}
 {{- end }}
 

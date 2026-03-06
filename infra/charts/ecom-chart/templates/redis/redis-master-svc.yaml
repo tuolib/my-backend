@@ -1,0 +1,19 @@
+# redis-master-svc.yaml — 固定指向 Redis master (pod-0) 的 Service
+# OT-Container-Kit RedisReplication 默认 master 是 StatefulSet 的 pod-0
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ecom.fullname" . }}-redis-master
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "ecom.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      protocol: TCP
+      name: redis
+  selector:
+    app: {{ include "ecom.fullname" . }}-redis
+    statefulset.kubernetes.io/pod-name: {{ include "ecom.fullname" . }}-redis-0

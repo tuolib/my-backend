@@ -3,13 +3,16 @@
  * 检查 seed 文件中所有图片链接：修复不可访问的 + 去除重复的
  *
  * 用法:
- *   bun packages/database/src/fix-seed-images.ts                  # 仅修复不可访问的图片
- *   bun packages/database/src/fix-seed-images.ts --dedup          # 修复 + 去重（需要 Unsplash API Key）
- *   bun packages/database/src/fix-seed-images.ts --dry-run        # 仅检测，不修改文件
- *   bun packages/database/src/fix-seed-images.ts --dedup --dry-run
+ *   bun packages/database/src/fix-seed-images.ts                        # 仅修复不可访问的图片
+ *   bun packages/database/src/fix-seed-images.ts --dedup                # 去重（需要 Unsplash API Key）
+ *   bun packages/database/src/fix-seed-images.ts --replace-all          # 将所有非 Unsplash 图片替换为 Unsplash（需要 API Key）
+ *   bun packages/database/src/fix-seed-images.ts --replace-all --dry-run
+ *   bun packages/database/src/fix-seed-images.ts --picsum               # 将所有非 Unsplash 图片替换为 picsum.photos（无需 API Key）
+ *   bun packages/database/src/fix-seed-images.ts --picsum --dry-run
+ *   bun packages/database/src/fix-seed-images.ts --dry-run              # 仅检测，不修改文件
  *
  * 环境变量:
- *   UNSPLASH_ACCESS_KEY  — Unsplash API 访问密钥（--dedup 模式必须）
+ *   UNSPLASH_ACCESS_KEY  — Unsplash API 访问密钥（--dedup / --replace-all 模式必须）
  *                          免费申请: https://unsplash.com/oauth/applications
  */
 
@@ -21,6 +24,8 @@ const CONCURRENCY = 20;
 const TIMEOUT_MS = 8000;
 const DRY_RUN = process.argv.includes('--dry-run');
 const DEDUP = process.argv.includes('--dedup');
+const REPLACE_ALL = process.argv.includes('--replace-all');
+const PICSUM = process.argv.includes('--picsum');
 const UNSPLASH_KEY = process.env.UNSPLASH_ACCESS_KEY || '';
 
 const DIR = resolve(import.meta.dir);
@@ -71,6 +76,24 @@ class UnsplashRateLimiter {
   /** 本次运行总请求数 */
   total(): number {
     return this.requestCount;
+  }
+
+  /** 下次配额重置时间（最早那条请求 + 1 小时） */
+  resetTime(): Date | null {
+    if (this.requestTimestamps.length === 0) return null;
+    return new Date(this.requestTimestamps[0] + 60 * 60 * 1000);
+  }
+
+  /** 格式化的等待提示 */
+  resetInfo(): string {
+    const reset = this.resetTime();
+    if (!reset) return '';
+    const diffMs = reset.getTime() - Date.now();
+    if (diffMs <= 0) return '现在即可重新运行';
+    const mins = Math.ceil(diffMs / 60000);
+    const hh = reset.getHours().toString().padStart(2, '0');
+    const mm = reset.getMinutes().toString().padStart(2, '0');
+    return `约 ${mins} 分钟后可重新运行（${hh}:${mm}）`;
   }
 
   /**
@@ -203,7 +226,7 @@ async function searchUnsplash(query: string, perPage = 30, page = 1): Promise<st
   // 检查并等待速率限制
   const canProceed = await rateLimiter.waitForSlot();
   if (!canProceed) {
-    console.warn(`  ⚠ 已达到 Unsplash API 每小时 ${UNSPLASH_RATE_LIMIT} 次请求限制，停止请求`);
+    console.warn(`  ⚠ 已达到 Unsplash API 每小时 ${UNSPLASH_RATE_LIMIT} 次请求限制，停止请求（${rateLimiter.resetInfo()}）`);
     return [];
   }
 
@@ -452,7 +475,7 @@ async function dedup() {
 
   if (quotaExhausted) {
     console.log(`\n⚠ Unsplash API 配额已耗尽（本次共使用 ${rateLimiter.total()} 次请求）`);
-    console.log(`  部分分类已使用 picsum.photos 兜底，可稍后重新运行以获取更多 Unsplash 图片`);
+    console.log(`  部分分类已使用 picsum.photos 兜底，${rateLimiter.resetInfo()}`);
   }
 
   // 4) 验证新图片可访问性
@@ -546,6 +569,9 @@ async function dedup() {
   console.log(`  Picsum 兜底: ${finalPicsum} 张`);
   console.log(`  重复数: ${finalIds.length - finalUnique}`);
   console.log(`  API 请求总计: ${rateLimiter.total()}/${UNSPLASH_RATE_LIMIT} (本小时)`);
+  if (rateLimiter.total() > 0) {
+    console.log(`  下次可运行: ${rateLimiter.resetInfo()}`);
+  }
 }
 
 // ── 修复不可访问链接 ──
@@ -684,9 +710,296 @@ async function fixBroken() {
   console.log(`\n完成! 共替换 ${totalReplacements} 处。`);
 }
 
+// ── 替换所有非 Unsplash 图片 ──
+
+/** 从 cdnImg / placeholderImg / placehold.co URL 中提取搜索关键词 */
+function extractKeyword(pattern: string): { keyword: string; groupKey: string } | null {
+  // cdnImg('smartphones/iphone-13-pro/1.webp')
+  const cdnMatch = pattern.match(/cdnImg\('([^']+)'\)/);
+  if (cdnMatch) {
+    const parts = cdnMatch[1].split('/');
+    const productName = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
+    const keyword = productName.replace(/[-_&]/g, ' ').replace(/\s+/g, ' ').trim();
+    const groupKey = parts.slice(0, -1).join('/') || productName;
+    return { keyword, groupKey };
+  }
+
+  // placeholderImg('HHKB+Keyboard', '333', 'FFF')
+  const phMatch = pattern.match(/placeholderImg\('([^']+)'/);
+  if (phMatch) {
+    const text = phMatch[1];
+    return { keyword: text.replace(/\+/g, ' ').trim(), groupKey: text };
+  }
+
+  // 'https://placehold.co/...?text=xxx&font=roboto'
+  const urlMatch = pattern.match(/text=([^&']+)/);
+  if (urlMatch) {
+    const text = decodeURIComponent(urlMatch[1]).replace(/\+/g, ' ');
+    return { keyword: text, groupKey: text };
+  }
+
+  return null;
+}
+
+async function replaceNonUnsplash() {
+  console.log('=== 替换所有非 Unsplash 图片 ===\n');
+
+  if (!UNSPLASH_KEY) {
+    console.error(
+      '错误: --replace-all 需要 Unsplash API Key。\n' +
+        '请设置环境变量: UNSPLASH_ACCESS_KEY=your_key\n'
+    );
+    process.exit(1);
+  }
+
+  // 读取 seed.ts 和 seed-prod.ts
+  const targetFiles = FILES.slice(1);
+  const fileContents = new Map<string, string>();
+  for (const f of targetFiles) {
+    fileContents.set(f, readFileSync(f, 'utf-8'));
+  }
+
+  // 1. 收集所有非 Unsplash 图片表达式
+  //    三种模式: cdnImg('...'), placeholderImg('...', ...), 'https://placehold.co/...'
+  const allPatterns = new Map<string, { keyword: string; groupKey: string }>();
+
+  for (const content of fileContents.values()) {
+    // cdnImg('...')
+    for (const m of content.matchAll(/cdnImg\('[^']+'\)/g)) {
+      const info = extractKeyword(m[0]);
+      if (info) allPatterns.set(m[0], info);
+    }
+    // placeholderImg(...)
+    for (const m of content.matchAll(/placeholderImg\([^)]+\)/g)) {
+      const info = extractKeyword(m[0]);
+      if (info) allPatterns.set(m[0], info);
+    }
+    // 直接 placehold.co URL（作为字符串字面量）
+    for (const m of content.matchAll(/'(https:\/\/placehold\.co\/[^']+)'/g)) {
+      const full = `'${m[1]}'`;
+      const info = extractKeyword(full);
+      if (info) allPatterns.set(full, info);
+    }
+  }
+
+  console.log(`发现 ${allPatterns.size} 个非 Unsplash 图片表达式\n`);
+
+  if (allPatterns.size === 0) {
+    console.log('所有图片已经是 Unsplash，无需替换!');
+    return;
+  }
+
+  // 2. 按 groupKey 分组（同一产品的多张图共用一次搜索）
+  const groups = new Map<string, string[]>();
+  for (const [pattern, { groupKey }] of allPatterns) {
+    const list = groups.get(groupKey) || [];
+    list.push(pattern);
+    groups.set(groupKey, list);
+  }
+
+  console.log(`分为 ${groups.size} 组搜索（配额: ${rateLimiter.remaining()}/${UNSPLASH_RATE_LIMIT}）\n`);
+
+  if (DRY_RUN) {
+    for (const [groupKey, patterns] of groups) {
+      const keyword = allPatterns.get(patterns[0])!.keyword;
+      console.log(`  [${patterns.length} 张] "${keyword}"`);
+      for (const p of patterns) console.log(`    ${p.substring(0, 80)}`);
+    }
+    console.log('\nDRY RUN 结束，未修改任何文件。');
+    return;
+  }
+
+  // 收集已用的 Unsplash ID（避免重复）
+  const usedIds = new Set<string>();
+  const seedImagesContent = readFileSync(FILES[0], 'utf-8');
+  for (const m of seedImagesContent.matchAll(/u\('([^']+)'\)/g)) {
+    usedIds.add(m[1]);
+  }
+  for (const content of fileContents.values()) {
+    for (const m of content.matchAll(/images\.unsplash\.com\/photo-([^?'"]+)/g)) {
+      usedIds.add(m[1]);
+    }
+  }
+
+  // 3. 按组搜索 Unsplash 并分配替换
+  const replacementMap = new Map<string, string>();
+  let quotaExhausted = false;
+  let replaced = 0;
+  let skipped = 0;
+
+  for (const [groupKey, patterns] of groups) {
+    if (quotaExhausted || !rateLimiter.hasQuota()) {
+      quotaExhausted = true;
+      skipped += patterns.length;
+      continue;
+    }
+
+    const keyword = allPatterns.get(patterns[0])!.keyword;
+    const needed = patterns.length;
+    console.log(`  "${keyword}" (${needed} 张) [配额: ${rateLimiter.remaining()}]`);
+
+    const candidates: string[] = [];
+    for (let page = 1; candidates.length < needed && page <= 3; page++) {
+      if (!rateLimiter.hasQuota()) {
+        quotaExhausted = true;
+        break;
+      }
+      const ids = await searchUnsplash(keyword, 10, page);
+      if (ids.length === 0 && !rateLimiter.hasQuota()) {
+        quotaExhausted = true;
+        break;
+      }
+      for (const id of ids) {
+        if (!usedIds.has(id)) {
+          candidates.push(id);
+          usedIds.add(id);
+          if (candidates.length >= needed) break;
+        }
+      }
+    }
+
+    for (let i = 0; i < patterns.length; i++) {
+      if (i < candidates.length) {
+        const url = `${UNSPLASH_BASE}${candidates[i]}${UNSPLASH_SUFFIX}`;
+        replacementMap.set(patterns[i], `'${url}'`);
+        replaced++;
+      } else {
+        skipped++;
+      }
+    }
+    console.log(`    -> ${Math.min(candidates.length, needed)}/${needed} 张已匹配`);
+  }
+
+  if (quotaExhausted) {
+    console.log(`\n⚠ 配额已用尽（${rateLimiter.total()} 次），${rateLimiter.resetInfo()}`);
+  }
+
+  // 4. 应用替换到所有文件
+  if (replacementMap.size === 0) {
+    console.log('\n没有找到可替换的图片。');
+    return;
+  }
+
+  console.log(`\n写入文件（${replacementMap.size} 处替换）...`);
+
+  for (const [filePath, content] of fileContents) {
+    let updated = content;
+    let count = 0;
+    for (const [oldStr, newStr] of replacementMap) {
+      const parts = updated.split(oldStr);
+      if (parts.length > 1) {
+        count += parts.length - 1;
+        updated = parts.join(newStr);
+      }
+    }
+    if (count > 0) {
+      writeFileSync(filePath, updated, 'utf-8');
+      console.log(`  ${filePath.split('/').pop()}: ${count} 处替换`);
+    } else {
+      console.log(`  ${filePath.split('/').pop()}: 无需替换`);
+    }
+  }
+
+  console.log(`\n替换完成!`);
+  console.log(`  已替换: ${replaced} 张`);
+  console.log(`  未替换: ${skipped} 张${skipped > 0 ? '（配额不足，可稍后重新运行）' : ''}`);
+  console.log(`  API 请求: ${rateLimiter.total()}/${UNSPLASH_RATE_LIMIT}`);
+  if (rateLimiter.total() > 0) {
+    console.log(`  下次可运行: ${rateLimiter.resetInfo()}`);
+  }
+}
+
+// ── 替换所有非 Unsplash 图片为 picsum.photos（无需 API Key）──
+
+async function replaceWithPicsum() {
+  console.log('=== 替换所有非 Unsplash 图片为 picsum.photos ===\n');
+
+  const targetFiles = FILES.slice(1); // seed.ts, seed-prod.ts
+  const fileContents = new Map<string, string>();
+  for (const f of targetFiles) {
+    fileContents.set(f, readFileSync(f, 'utf-8'));
+  }
+
+  // 收集所有非 Unsplash 图片表达式（复用 extractKeyword）
+  const allPatterns = new Map<string, { keyword: string; groupKey: string }>();
+
+  for (const content of fileContents.values()) {
+    for (const m of content.matchAll(/cdnImg\('[^']+'\)/g)) {
+      const info = extractKeyword(m[0]);
+      if (info) allPatterns.set(m[0], info);
+    }
+    for (const m of content.matchAll(/placeholderImg\([^)]+\)/g)) {
+      const info = extractKeyword(m[0]);
+      if (info) allPatterns.set(m[0], info);
+    }
+    for (const m of content.matchAll(/'(https:\/\/placehold\.co\/[^']+)'/g)) {
+      const full = `'${m[1]}'`;
+      const info = extractKeyword(full);
+      if (info) allPatterns.set(full, info);
+    }
+  }
+
+  console.log(`发现 ${allPatterns.size} 个非 Unsplash 图片表达式\n`);
+
+  if (allPatterns.size === 0) {
+    console.log('所有图片已经是 Unsplash，无需替换!');
+    return;
+  }
+
+  if (DRY_RUN) {
+    for (const [pattern, { keyword }] of allPatterns) {
+      const seed = keyword.replace(/\s+/g, '-').toLowerCase();
+      console.log(`  ${pattern.substring(0, 80)}`);
+      console.log(`    -> https://picsum.photos/seed/${seed}/800/800`);
+    }
+    console.log(`\nDRY RUN 结束，未修改任何文件。`);
+    return;
+  }
+
+  // 为每个表达式生成 picsum URL（用关键词作 seed 保证同产品图片一致）
+  const replacementMap = new Map<string, string>();
+  const seedCounter = new Map<string, number>(); // 同 groupKey 的图片递增序号
+
+  for (const [pattern, { keyword, groupKey }] of allPatterns) {
+    const count = seedCounter.get(groupKey) || 0;
+    seedCounter.set(groupKey, count + 1);
+    const seed = keyword.replace(/\s+/g, '-').toLowerCase() + (count > 0 ? `-${count}` : '');
+    const picsumUrl = `https://picsum.photos/seed/${encodeURIComponent(seed)}/800/800`;
+    replacementMap.set(pattern, `'${picsumUrl}'`);
+  }
+
+  console.log(`写入文件（${replacementMap.size} 处替换）...\n`);
+
+  let totalReplacements = 0;
+  for (const [filePath, content] of fileContents) {
+    let updated = content;
+    let count = 0;
+    for (const [oldStr, newStr] of replacementMap) {
+      const parts = updated.split(oldStr);
+      if (parts.length > 1) {
+        count += parts.length - 1;
+        updated = parts.join(newStr);
+      }
+    }
+    if (count > 0) {
+      writeFileSync(filePath, updated, 'utf-8');
+      console.log(`  ${filePath.split('/').pop()}: ${count} 处替换`);
+      totalReplacements += count;
+    } else {
+      console.log(`  ${filePath.split('/').pop()}: 无需替换`);
+    }
+  }
+
+  console.log(`\n替换完成! 共替换 ${totalReplacements} 处。`);
+}
+
 // ── 入口 ──
 async function main() {
-  if (DEDUP) {
+  if (PICSUM) {
+    await replaceWithPicsum();
+  } else if (REPLACE_ALL) {
+    await replaceNonUnsplash();
+  } else if (DEDUP) {
     await dedup();
   } else {
     await fixBroken();

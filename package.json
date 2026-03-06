@@ -18,6 +18,7 @@
     "db:generate": "bun run --filter @repo/database generate",
     "db:seed": "bun run --filter @repo/database seed",
     "db:seed:prod": "bun run --filter @repo/database seed:prod",
+    "db:seed:prod:reset": "bun run --filter @repo/database seed:prod:reset",
     "db:data:migrate": "bun run --filter @repo/database data:migrate",
     "db:studio": "bun run --filter @repo/database studio",
     "db:psql": "docker exec -it $(docker ps -q -f name=my-backend-db) psql -U postgres -d ecommerce",

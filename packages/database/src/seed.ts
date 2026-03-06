@@ -6,11 +6,11 @@
 import { sql } from 'drizzle-orm';
 import { db, connection } from './client';
 import { redis } from './redis';
-import { generateId } from '@repo/shared';
 import { hashPassword } from '@repo/shared';
 import { setStock } from './lua';
 import { bulkCatalog } from './seed-prod-catalog';
 import { categoryImagePool } from './seed-images';
+import { seedId } from './seed-id';
 import {
   admins,
   users,
@@ -104,9 +104,9 @@ async function seed() {
   const hashedPw = await hashPassword('password123');
 
   // 测试用户：仅在不存在时插入（ON CONFLICT DO NOTHING）
-  const adminId = generateId();
-  const aliceId = generateId();
-  const bobId = generateId();
+  const adminId = seedId('user:admin@test.com');
+  const aliceId = seedId('user:alice@test.com');
+  const bobId = seedId('user:bob@test.com');
 
   await db.insert(users).values([
     { id: adminId, email: 'admin@test.com', password: hashedPw, nickname: 'Admin', status: 'active' },
@@ -119,7 +119,7 @@ async function seed() {
   console.log('Inserting admin...');
   const adminPw = await hashPassword('admin');
   await db.insert(admins).values({
-    id: generateId(),
+    id: seedId('admin:admin'),
     username: 'admin',
     password: adminPw,
     realName: '超级管理员',
@@ -135,62 +135,62 @@ async function seed() {
   // ══════════════════════════════════════════════════════════════
   console.log('Inserting categories...');
 
-  // 一级分类 ID
-  const catDigital = generateId();
-  const catComputer = generateId();
-  const catAppliance = generateId();
-  const catClothing = generateId();
-  const catFood = generateId();
-  const catBeauty = generateId();
-  const catBooks = generateId();
-  const catSports = generateId();
-  const catHome = generateId();
-  const catBaby = generateId();
+  // 一级分类 ID（确定性，与 seed-prod.ts 一致）
+  const catDigital = seedId('cat:digital');
+  const catComputer = seedId('cat:computer');
+  const catAppliance = seedId('cat:appliance');
+  const catClothing = seedId('cat:clothing');
+  const catFood = seedId('cat:food');
+  const catBeauty = seedId('cat:beauty');
+  const catBooks = seedId('cat:books');
+  const catSports = seedId('cat:sports');
+  const catHome = seedId('cat:home');
+  const catBaby = seedId('cat:baby');
 
-  // 二级分类 ID
-  const catPhone = generateId();
-  const catEarphone = generateId();
-  const catSmartWatch = generateId();
-  const catLaptop = generateId();
-  const catTablet = generateId();
-  const catKeyboard = generateId();
-  const catBigAppliance = generateId();
-  const catSmallAppliance = generateId();
-  const catKitchen = generateId();
-  const catMenswear = generateId();
-  const catWomenswear = generateId();
-  const catShoes = generateId();
-  const catSnacks = generateId();
-  const catDrinks = generateId();
-  const catFresh = generateId();
-  const catSkincare = generateId();
-  const catMakeup = generateId();
-  const catWashCare = generateId();
-  const catLiterature = generateId();
-  const catEducation = generateId();
-  const catComic = generateId();
-  const catFitness = generateId();
-  const catOutdoor = generateId();
-  const catSportswear = generateId();
-  const catFurniture = generateId();
-  const catBedding = generateId();
-  const catStorage = generateId();
-  const catMilkPowder = generateId();
-  const catDiaper = generateId();
-  const catToys = generateId();
+  // 二级分类 ID（确定性，与 seed-prod.ts 一致）
+  const catPhone = seedId('cat:phones');
+  const catEarphone = seedId('cat:earphones');
+  const catSmartWatch = seedId('cat:smart-watches');
+  const catLaptop = seedId('cat:laptops');
+  const catTablet = seedId('cat:tablets');
+  const catKeyboard = seedId('cat:keyboards');
+  const catBigAppliance = seedId('cat:big-appliance');
+  const catSmallAppliance = seedId('cat:small-appliance');
+  const catKitchen = seedId('cat:kitchen-appliance');
+  const catMenswear = seedId('cat:menswear');
+  const catWomenswear = seedId('cat:womenswear');
+  const catShoes = seedId('cat:shoes');
+  const catSnacks = seedId('cat:snacks');
+  const catDrinks = seedId('cat:drinks');
+  const catFresh = seedId('cat:fresh');
+  const catSkincare = seedId('cat:skincare');
+  const catMakeup = seedId('cat:makeup');
+  const catWashCare = seedId('cat:wash-care');
+  const catLiterature = seedId('cat:literature');
+  const catEducation = seedId('cat:education');
+  const catComic = seedId('cat:comic');
+  const catFitness = seedId('cat:fitness');
+  const catOutdoor = seedId('cat:outdoor');
+  const catSportswear = seedId('cat:sportswear');
+  const catFurniture = seedId('cat:furniture');
+  const catBedding = seedId('cat:bedding');
+  const catStorage = seedId('cat:storage');
+  const catMilkPowder = seedId('cat:milk-powder');
+  const catDiaper = seedId('cat:diapers');
+  const catToys = seedId('cat:toys');
 
   await db.insert(categories).values([
     // 一级分类
-    { id: catDigital, name: '手机数码', slug: 'digital', iconUrl: placeholderImg('Digital', '3B82F6', 'FFF'), sortOrder: 1 },
-    { id: catComputer, name: '电脑办公', slug: 'computer', iconUrl: placeholderImg('PC', '6366F1', 'FFF'), sortOrder: 2 },
-    { id: catAppliance, name: '家用电器', slug: 'appliance', iconUrl: placeholderImg('Home', 'F59E0B', 'FFF'), sortOrder: 3 },
-    { id: catClothing, name: '服饰鞋包', slug: 'clothing', iconUrl: placeholderImg('Fashion', 'EC4899', 'FFF'), sortOrder: 4 },
-    { id: catFood, name: '食品生鲜', slug: 'food', iconUrl: placeholderImg('Food', '22C55E', 'FFF'), sortOrder: 5 },
-    { id: catBeauty, name: '美妆个护', slug: 'beauty', iconUrl: placeholderImg('Beauty', 'F472B6', 'FFF'), sortOrder: 6 },
-    { id: catBooks, name: '图书音像', slug: 'books', iconUrl: placeholderImg('Books', '8B5CF6', 'FFF'), sortOrder: 7 },
-    { id: catSports, name: '运动户外', slug: 'sports', iconUrl: placeholderImg('Sports', '14B8A6', 'FFF'), sortOrder: 8 },
-    { id: catHome, name: '家居家装', slug: 'home', iconUrl: placeholderImg('Home', 'F97316', 'FFF'), sortOrder: 9 },
-    { id: catBaby, name: '母婴玩具', slug: 'baby', iconUrl: placeholderImg('Baby', 'FB923C', 'FFF'), sortOrder: 10 },
+    { id: catDigital, name: '手机数码', slug: 'digital', iconUrl: 'https://picsum.photos/seed/digital/800/800', sortOrder: 1 },
+    { id: catComputer, name: '电脑办公', slug: 'computer', iconUrl: 'https://picsum.photos/seed/pc/800/800', sortOrder: 2 },
+    { id: catAppliance, name: '家用电器', slug: 'appliance', iconUrl: 'https://picsum.photos/seed/home/800/800', sortOrder: 3 },
+    { id: catClothing, name: '服饰鞋包', slug: 'clothing', iconUrl: 'https://picsum.photos/seed/fashion/800/800', sortOrder: 4 },
+    { id: catFood, name: '食品生鲜', slug: 'food', iconUrl: 'https://picsum.photos/seed/food/800/800', sortOrder: 5 },
+    { id: catBeauty, name: '美妆个护', slug: 'beauty', iconUrl: 'https://picsum.photos/seed/beauty/800/800', sortOrder: 6 },
+    { id: catBooks, name: '图书音像', slug: 'books', iconUrl: 'https://picsum.photos/seed/books/800/800', sortOrder: 7 },
+    { id: catSports, name: '运动户外', slug: 'sports', iconUrl: 'https://picsum.photos/seed/sports/800/800', sortOrder: 8 },
+    { id: catHome, name: '家居家装', slug: 'home', iconUrl: 'https://picsum.photos/seed/home-1/800/800', sortOrder: 9 },
+    { id: catBaby, name: '母婴玩具', slug: 'baby', iconUrl: 'https://picsum.photos/seed/baby/800/800', sortOrder: 10 },
     // 二级分类
     { id: catPhone, parentId: catDigital, name: '手机', slug: 'phones', sortOrder: 1 },
     { id: catEarphone, parentId: catDigital, name: '耳机', slug: 'earphones', sortOrder: 2 },
@@ -255,7 +255,7 @@ async function seed() {
       attributes: Record<string, string>;
     }>;
   }) {
-    const prodId = generateId();
+    const prodId = seedId('prod:' + opts.slug);
 
     await db.insert(products).values({
       id: prodId,
@@ -273,7 +273,7 @@ async function seed() {
 
     await db.insert(productImages).values(
       opts.imageUrls.map((url, i) => ({
-        id: generateId(),
+        id: seedId('img:' + opts.slug + ':' + i),
         productId: prodId,
         url,
         altText: `${opts.title} ${i + 1}`,
@@ -287,7 +287,7 @@ async function seed() {
     ]);
 
     const skuValues = opts.skuList.map((s) => {
-      const skuId = generateId();
+      const skuId = seedId('sku:' + s.code);
       allSkuData.push({ id: skuId, stock: s.stock });
       return {
         id: skuId,
@@ -315,7 +315,7 @@ async function seed() {
     minPrice: '9999.00', maxPrice: '13999.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('smartphones/iphone-13-pro/1.webp'), cdnImg('smartphones/iphone-13-pro/2.webp'), cdnImg('smartphones/iphone-13-pro/3.webp')],
+    imageUrls: ['https://picsum.photos/seed/iphone-13-pro/800/800', 'https://picsum.photos/seed/iphone-13-pro-1/800/800', 'https://picsum.photos/seed/iphone-13-pro-2/800/800'],
     skuList: [
       { code: 'IP15PM-256-NAT', price: '9999.00', comparePrice: '10999.00', stock: 200, attributes: { storage: '256GB', color: '原色钛金属' } },
       { code: 'IP15PM-512-NAT', price: '11999.00', comparePrice: '12999.00', stock: 150, attributes: { storage: '512GB', color: '原色钛金属' } },
@@ -332,7 +332,7 @@ async function seed() {
     minPrice: '6999.00', maxPrice: '7999.00',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('smartphones/samsung-galaxy-s8/1.webp'), cdnImg('smartphones/samsung-galaxy-s8/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/samsung-galaxy-s8/800/800', 'https://picsum.photos/seed/samsung-galaxy-s8-1/800/800'],
     skuList: [
       { code: 'MATE60P-256-BLK', price: '6999.00', comparePrice: '7499.00', stock: 300, attributes: { storage: '256GB', color: '雅丹黑' } },
       { code: 'MATE60P-512-WHT', price: '7999.00', comparePrice: '8499.00', stock: 200, attributes: { storage: '512GB', color: '白沙银' } },
@@ -348,7 +348,7 @@ async function seed() {
     minPrice: '5999.00', maxPrice: '6499.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('smartphones/oppo-f19-pro-plus/1.webp'), cdnImg('smartphones/realme-xt/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/oppo-f19-pro-plus/800/800', 'https://picsum.photos/seed/realme-xt/800/800'],
     skuList: [
       { code: 'MI14U-256-BLK', price: '5999.00', comparePrice: '6299.00', stock: 250, attributes: { storage: '256GB', color: '黑色' } },
       { code: 'MI14U-512-WHT', price: '6499.00', comparePrice: '6999.00', stock: 180, attributes: { storage: '512GB', color: '白色' } },
@@ -365,7 +365,7 @@ async function seed() {
     minPrice: '1799.00', maxPrice: '1799.00',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mobile-accessories/apple-airpods/1.webp'), cdnImg('mobile-accessories/apple-airpods/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/apple-airpods/800/800', 'https://picsum.photos/seed/apple-airpods-1/800/800'],
     skuList: [
       { code: 'APP2-USBC', price: '1799.00', comparePrice: '1999.00', stock: 500, attributes: { version: 'USB-C', color: '白色' } },
     ],
@@ -380,7 +380,7 @@ async function seed() {
     minPrice: '2299.00', maxPrice: '2299.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mobile-accessories/apple-airpods-max-silver/1.webp'), cdnImg('mobile-accessories/beats-flex-wireless-earphones/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/apple-airpods-max-silver/800/800', 'https://picsum.photos/seed/beats-flex-wireless-earphones/800/800'],
     skuList: [
       { code: 'XM5-BLK', price: '2299.00', comparePrice: '2699.00', stock: 200, attributes: { color: '黑色' } },
       { code: 'XM5-SLV', price: '2299.00', comparePrice: '2699.00', stock: 150, attributes: { color: '铂金银' } },
@@ -397,7 +397,7 @@ async function seed() {
     minPrice: '6499.00', maxPrice: '6499.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mobile-accessories/apple-watch-series-4-gold/1.webp'), cdnImg('mobile-accessories/apple-watch-series-4-gold/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/apple-watch-series-4-gold/800/800', 'https://picsum.photos/seed/apple-watch-series-4-gold-1/800/800'],
     skuList: [
       { code: 'AWU2-49-ORG', price: '6499.00', comparePrice: '6999.00', stock: 100, lowStock: 10, attributes: { size: '49mm', band: '橙色Alpine回环' } },
     ],
@@ -415,7 +415,7 @@ async function seed() {
     minPrice: '14999.00', maxPrice: '19999.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('laptops/apple-macbook-pro-14-inch-space-grey/1.webp'), cdnImg('laptops/apple-macbook-pro-14-inch-space-grey/2.webp'), cdnImg('laptops/apple-macbook-pro-14-inch-space-grey/3.webp')],
+    imageUrls: ['https://picsum.photos/seed/apple-macbook-pro-14-inch-space-grey/800/800', 'https://picsum.photos/seed/apple-macbook-pro-14-inch-space-grey-1/800/800', 'https://picsum.photos/seed/apple-macbook-pro-14-inch-space-grey-2/800/800'],
     skuList: [
       { code: 'MBP14-M3P-18-512', price: '14999.00', comparePrice: '16499.00', stock: 120, attributes: { chip: 'M3 Pro', memory: '18GB', storage: '512GB' } },
       { code: 'MBP14-M3P-36-1T', price: '19999.00', comparePrice: '21999.00', stock: 60, lowStock: 10, attributes: { chip: 'M3 Pro', memory: '36GB', storage: '1TB' } },
@@ -431,7 +431,7 @@ async function seed() {
     minPrice: '9999.00', maxPrice: '12999.00',
     totalSales: randInt(800, 2500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('laptops/lenovo-yoga-920/1.webp'), cdnImg('laptops/lenovo-yoga-920/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/lenovo-yoga-920/800/800', 'https://picsum.photos/seed/lenovo-yoga-920-1/800/800'],
     skuList: [
       { code: 'X1C11-i5-16-512', price: '9999.00', comparePrice: '11499.00', stock: 100, attributes: { cpu: 'i5-1340P', memory: '16GB', storage: '512GB' } },
       { code: 'X1C11-i7-32-1T', price: '12999.00', comparePrice: '14999.00', stock: 80, attributes: { cpu: 'i7-1365H', memory: '32GB', storage: '1TB' } },
@@ -448,7 +448,7 @@ async function seed() {
     minPrice: '4799.00', maxPrice: '6499.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('tablets/ipad-mini-2021-starlight/1.webp'), cdnImg('tablets/ipad-mini-2021-starlight/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/ipad-mini-2021-starlight/800/800', 'https://picsum.photos/seed/ipad-mini-2021-starlight-1/800/800'],
     skuList: [
       { code: 'IPAM2-128-BLU', price: '4799.00', comparePrice: '5299.00', stock: 200, attributes: { storage: '128GB', color: '蓝色' } },
       { code: 'IPAM2-256-PUR', price: '5499.00', comparePrice: '5999.00', stock: 150, attributes: { storage: '256GB', color: '紫色' } },
@@ -465,7 +465,7 @@ async function seed() {
     minPrice: '5199.00', maxPrice: '5999.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('tablets/samsung-galaxy-tab-s8-plus-grey/1.webp'), cdnImg('tablets/samsung-galaxy-tab-s8-plus-grey/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/samsung-galaxy-tab-s8-plus-grey/800/800', 'https://picsum.photos/seed/samsung-galaxy-tab-s8-plus-grey-1/800/800'],
     skuList: [
       { code: 'MPP13-256-BLK', price: '5199.00', comparePrice: '5699.00', stock: 120, attributes: { storage: '256GB', color: '曜金黑' } },
       { code: 'MPP13-512-WHT', price: '5999.00', comparePrice: '6499.00', stock: 80, attributes: { storage: '512GB', color: '晶钻白' } },
@@ -482,7 +482,7 @@ async function seed() {
     minPrice: '2499.00', maxPrice: '2499.00',
     totalSales: randInt(300, 1500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('HHKB+Keyboard', '333', 'FFF'), placeholderImg('HHKB+Type-S', '333', 'FFF')],
+    imageUrls: ['https://picsum.photos/seed/hhkb-keyboard/800/800', 'https://picsum.photos/seed/hhkb-type-s/800/800'],
     skuList: [
       { code: 'HHKB-HTS-WHT', price: '2499.00', comparePrice: '2799.00', stock: 80, lowStock: 10, attributes: { color: '白色', layout: '60键' } },
       { code: 'HHKB-HTS-BLK', price: '2499.00', comparePrice: '2799.00', stock: 60, lowStock: 10, attributes: { color: '墨色', layout: '60键' } },
@@ -501,7 +501,7 @@ async function seed() {
     minPrice: '4590.00', maxPrice: '4590.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Dyson+V15', 'F59E0B', 'FFF'), placeholderImg('Dyson+Detect', 'D97706', 'FFF'), placeholderImg('Dyson+HEPA', 'B45309', 'FFF')],
+    imageUrls: ['https://picsum.photos/seed/dyson-v15/800/800', 'https://picsum.photos/seed/dyson-detect/800/800', 'https://picsum.photos/seed/dyson-hepa/800/800'],
     skuList: [
       { code: 'V15-DETECT-GLD', price: '4590.00', comparePrice: '5490.00', stock: 100, attributes: { color: '金色', version: '旗舰版' } },
     ],
@@ -516,7 +516,7 @@ async function seed() {
     minPrice: '3299.00', maxPrice: '3299.00',
     totalSales: randInt(800, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Haier+Fridge', '60A5FA', 'FFF'), placeholderImg('Haier+510L', '3B82F6', 'FFF')],
+    imageUrls: ['https://picsum.photos/seed/haier-fridge/800/800', 'https://picsum.photos/seed/haier-510l/800/800'],
     skuList: [
       { code: 'HAIER-510-GLD', price: '3299.00', comparePrice: '3999.00', stock: 50, lowStock: 10, attributes: { color: '金色', capacity: '510L' } },
     ],
@@ -531,7 +531,7 @@ async function seed() {
     minPrice: '299.00', maxPrice: '299.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('kitchen-accessories/electric-stove/1.webp'), cdnImg('kitchen-accessories/silver-pot-with-glass-cap/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/electric-stove/800/800', 'https://picsum.photos/seed/silver-pot-with-glass-cap/800/800'],
     skuList: [
       { code: 'MIDEA-FB40-WHT', price: '299.00', comparePrice: '399.00', stock: 300, attributes: { color: '白色', capacity: '4L' } },
     ],
@@ -549,7 +549,7 @@ async function seed() {
     minPrice: '229.00', maxPrice: '229.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-shirts/man-short-sleeve-shirt/1.webp'), cdnImg('mens-shirts/man-short-sleeve-shirt/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/man-short-sleeve-shirt/800/800', 'https://picsum.photos/seed/man-short-sleeve-shirt-1/800/800'],
     skuList: [
       { code: 'NIKE-DF-M-S-BLK', price: '229.00', comparePrice: '299.00', stock: 300, attributes: { size: 'S', color: '黑色' } },
       { code: 'NIKE-DF-M-M-BLK', price: '229.00', comparePrice: '299.00', stock: 400, attributes: { size: 'M', color: '黑色' } },
@@ -567,7 +567,7 @@ async function seed() {
     minPrice: '1099.00', maxPrice: '1099.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-shoes/sports-sneakers-off-white-&-red/1.webp'), cdnImg('mens-shoes/sports-sneakers-off-white-&-red/2.webp'), cdnImg('mens-shoes/sports-sneakers-off-white-&-red/3.webp')],
+    imageUrls: ['https://picsum.photos/seed/sports-sneakers-off-white-red/800/800', 'https://picsum.photos/seed/sports-sneakers-off-white-red-1/800/800', 'https://picsum.photos/seed/sports-sneakers-off-white-red-2/800/800'],
     skuList: [
       { code: 'UBL-40-BLK', price: '1099.00', comparePrice: '1299.00', stock: 100, attributes: { size: '40', color: '黑白' } },
       { code: 'UBL-42-BLK', price: '1099.00', comparePrice: '1299.00', stock: 120, attributes: { size: '42', color: '黑白' } },
@@ -584,7 +584,7 @@ async function seed() {
     minPrice: '499.00', maxPrice: '499.00',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('tops/gray-dress/1.webp'), cdnImg('tops/gray-dress/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/gray-dress/800/800', 'https://picsum.photos/seed/gray-dress-1/800/800'],
     skuList: [
       { code: 'UQ-ULD-W-S-PNK', price: '499.00', comparePrice: '599.00', stock: 200, attributes: { size: 'S', color: '樱花粉' } },
       { code: 'UQ-ULD-W-M-BLK', price: '499.00', comparePrice: '599.00', stock: 250, attributes: { size: 'M', color: '黑色' } },
@@ -601,7 +601,7 @@ async function seed() {
     minPrice: '599.00', maxPrice: '599.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-shirts/blue-&-black-check-shirt/1.webp'), cdnImg('mens-shirts/blue-&-black-check-shirt/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/blue-black-check-shirt/800/800', 'https://picsum.photos/seed/blue-black-check-shirt-1/800/800'],
     skuList: [
       { code: 'LEVI501-30-BLU', price: '599.00', comparePrice: '799.00', stock: 150, attributes: { size: '30', color: '中蓝' } },
       { code: 'LEVI501-32-BLU', price: '599.00', comparePrice: '799.00', stock: 200, attributes: { size: '32', color: '中蓝' } },
@@ -621,7 +621,7 @@ async function seed() {
     minPrice: '69.90', maxPrice: '129.00',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/mulberry/1.webp'), cdnImg('groceries/honey-jar/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/mulberry/800/800', 'https://picsum.photos/seed/honey-jar/800/800'],
     skuList: [
       { code: 'SZS-NUTS-15', price: '69.90', comparePrice: '89.90', stock: 500, attributes: { spec: '15包装' } },
       { code: 'SZS-NUTS-30', price: '129.00', comparePrice: '159.00', stock: 400, attributes: { spec: '30包装' } },
@@ -637,7 +637,7 @@ async function seed() {
     minPrice: '29.90', maxPrice: '29.90',
     totalSales: randInt(4000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/water/1.webp'), cdnImg('groceries/juice/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/water/800/800', 'https://picsum.photos/seed/juice/800/800'],
     skuList: [
       { code: 'NFS-550-24', price: '29.90', comparePrice: '39.90', stock: 500, attributes: { spec: '550ml×24瓶' } },
     ],
@@ -652,7 +652,7 @@ async function seed() {
     minPrice: '68.00', maxPrice: '128.00',
     totalSales: randInt(800, 2500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/nescafe-coffee/1.webp'), cdnImg('groceries/ice-cream/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/nescafe-coffee/800/800', 'https://picsum.photos/seed/ice-cream/800/800'],
     skuList: [
       { code: 'COFFEE-200G', price: '68.00', comparePrice: '88.00', stock: 200, attributes: { weight: '200g', roast: '中深烘焙' } },
       { code: 'COFFEE-500G', price: '128.00', comparePrice: '158.00', stock: 150, attributes: { weight: '500g', roast: '中深烘焙' } },
@@ -668,7 +668,7 @@ async function seed() {
     minPrice: '129.00', maxPrice: '129.00',
     totalSales: randInt(1500, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/strawberry/1.webp'), cdnImg('groceries/kiwi/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/strawberry/800/800', 'https://picsum.photos/seed/kiwi/800/800'],
     skuList: [
       { code: 'CHERRY-JJ-2LB', price: '129.00', comparePrice: '169.00', stock: 80, lowStock: 10, attributes: { spec: '2斤装', grade: 'JJ级' } },
     ],
@@ -686,7 +686,7 @@ async function seed() {
     minPrice: '1370.00', maxPrice: '1370.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('skin-care/olay-ultra-moisture-shea-butter-body-wash/1.webp'), cdnImg('skin-care/olay-ultra-moisture-shea-butter-body-wash/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/olay-ultra-moisture-shea-butter-body-wash/800/800', 'https://picsum.photos/seed/olay-ultra-moisture-shea-butter-body-wash-1/800/800'],
     skuList: [
       { code: 'SKII-FTE-230', price: '1370.00', comparePrice: '1590.00', stock: 200, attributes: { spec: '230ml' } },
     ],
@@ -701,7 +701,7 @@ async function seed() {
     minPrice: '230.00', maxPrice: '230.00',
     totalSales: randInt(2500, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('beauty/red-lipstick/1.webp'), cdnImg('beauty/eyeshadow-palette-with-mirror/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/red-lipstick/800/800', 'https://picsum.photos/seed/eyeshadow-palette-with-mirror/800/800'],
     skuList: [
       { code: 'MAC-LS-RUBY', price: '230.00', comparePrice: '270.00', stock: 300, attributes: { color: 'Ruby Woo', finish: '哑光' } },
       { code: 'MAC-LS-CHILI', price: '230.00', comparePrice: '270.00', stock: 250, attributes: { color: 'Chili', finish: '哑光' } },
@@ -718,7 +718,7 @@ async function seed() {
     minPrice: '69.90', maxPrice: '69.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('skin-care/vaseline-men-body-and-face-lotion/1.webp'), cdnImg('skin-care/attitude-super-leaves-hand-soap/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/vaseline-men-body-and-face-lotion/800/800', 'https://picsum.photos/seed/attitude-super-leaves-hand-soap/800/800'],
     skuList: [
       { code: 'LOREAL-HA-SH-700', price: '69.90', comparePrice: '89.90', stock: 400, attributes: { spec: '700ml', type: '柔顺型' } },
     ],
@@ -736,7 +736,7 @@ async function seed() {
     minPrice: '93.00', maxPrice: '93.00',
     totalSales: randInt(4000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Three+Body', '1E1B4B', 'E0E7FF'), placeholderImg('Dark+Forest', '312E81', 'C7D2FE')],
+    imageUrls: ['https://picsum.photos/seed/three-body/800/800', 'https://picsum.photos/seed/dark-forest/800/800'],
     skuList: [
       { code: 'SANTI-3BOOK', price: '93.00', comparePrice: '168.00', stock: 500, attributes: { version: '典藏版', format: '纸质书' } },
     ],
@@ -751,7 +751,7 @@ async function seed() {
     minPrice: '99.00', maxPrice: '99.00',
     totalSales: randInt(1500, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('JavaScript', 'FEF08A', '854D0E'), placeholderImg('ES6+', 'FDE047', '713F12')],
+    imageUrls: ['https://picsum.photos/seed/javascript/800/800', 'https://picsum.photos/seed/es6/800/800'],
     skuList: [
       { code: 'PROJS-4TH', price: '99.00', comparePrice: '129.00', stock: 300, attributes: { version: '第4版', format: '纸质书' } },
     ],
@@ -766,7 +766,7 @@ async function seed() {
     minPrice: '5.90', maxPrice: '1999.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('One+Piece', 'DC2626', 'FEF2F2'), placeholderImg('Luffy', 'B91C1C', 'FEE2E2')],
+    imageUrls: ['https://picsum.photos/seed/one-piece/800/800', 'https://picsum.photos/seed/luffy/800/800'],
     skuList: [
       { code: 'OP-SINGLE', price: '5.90', comparePrice: '7.90', stock: 500, attributes: { spec: '单册', format: '漫画' } },
       { code: 'OP-BOX-1-106', price: '1999.00', comparePrice: '2499.00', stock: 50, lowStock: 10, attributes: { spec: '全套1-106卷', format: '漫画' } },
@@ -785,7 +785,7 @@ async function seed() {
     minPrice: '1999.00', maxPrice: '1999.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Keep+Bike', '0D9488', 'F0FDFA'), placeholderImg('Smart+Bike', '115E59', 'CCFBF1'), placeholderImg('AI+Coach', '134E4A', 'D1FAE5')],
+    imageUrls: ['https://picsum.photos/seed/keep-bike/800/800', 'https://picsum.photos/seed/smart-bike/800/800', 'https://picsum.photos/seed/ai-coach/800/800'],
     skuList: [
       { code: 'KEEP-C1-WHT', price: '1999.00', comparePrice: '2499.00', stock: 80, attributes: { color: '白色' } },
     ],
@@ -800,7 +800,7 @@ async function seed() {
     minPrice: '1999.00', maxPrice: '1999.00',
     totalSales: randInt(800, 2500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('GORE-TEX', '166534', 'F0FDF4'), placeholderImg('TNF+Jacket', '14532D', 'DCFCE7')],
+    imageUrls: ['https://picsum.photos/seed/gore-tex/800/800', 'https://picsum.photos/seed/tnf-jacket/800/800'],
     skuList: [
       { code: 'TNF-GTX-M-M-BLK', price: '1999.00', comparePrice: '2599.00', stock: 100, attributes: { size: 'M', color: '黑色' } },
       { code: 'TNF-GTX-M-L-BLK', price: '1999.00', comparePrice: '2599.00', stock: 120, attributes: { size: 'L', color: '黑色' } },
@@ -817,7 +817,7 @@ async function seed() {
     minPrice: '699.00', maxPrice: '699.00',
     totalSales: randInt(2000, 4500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-shoes/nike-air-jordan-1-red-and-black/1.webp'), cdnImg('mens-shoes/nike-air-jordan-1-red-and-black/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/nike-air-jordan-1-red-and-black/800/800', 'https://picsum.photos/seed/nike-air-jordan-1-red-and-black-1/800/800'],
     skuList: [
       { code: 'PEG40-41-BLK', price: '699.00', comparePrice: '899.00', stock: 150, attributes: { size: '41', color: '黑白' } },
       { code: 'PEG40-42-BLK', price: '699.00', comparePrice: '899.00', stock: 200, attributes: { size: '42', color: '黑白' } },
@@ -837,7 +837,7 @@ async function seed() {
     minPrice: '1599.00', maxPrice: '1999.00',
     totalSales: randInt(500, 1500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('furniture/bedside-table-african-cherry/1.webp'), cdnImg('furniture/bedside-table-african-cherry/2.webp'), cdnImg('furniture/bedside-table-african-cherry/3.webp')],
+    imageUrls: ['https://picsum.photos/seed/bedside-table-african-cherry/800/800', 'https://picsum.photos/seed/bedside-table-african-cherry-1/800/800', 'https://picsum.photos/seed/bedside-table-african-cherry-2/800/800'],
     skuList: [
       { code: 'GENJI-DESK-120', price: '1599.00', comparePrice: '1999.00', stock: 60, attributes: { size: '120×60cm', material: '白橡木' } },
       { code: 'GENJI-DESK-140', price: '1999.00', comparePrice: '2399.00', stock: 50, attributes: { size: '140×70cm', material: '白橡木' } },
@@ -853,7 +853,7 @@ async function seed() {
     minPrice: '899.00', maxPrice: '899.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('furniture/annibale-colombo-bed/1.webp'), cdnImg('furniture/annibale-colombo-bed/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/annibale-colombo-bed/800/800', 'https://picsum.photos/seed/annibale-colombo-bed-1/800/800'],
     skuList: [
       { code: 'FUANNA-4PC-1.5-WHT', price: '899.00', comparePrice: '1299.00', stock: 100, attributes: { size: '1.5m床', color: '珍珠白' } },
       { code: 'FUANNA-4PC-1.8-GRY', price: '899.00', comparePrice: '1299.00', stock: 120, attributes: { size: '1.8m床', color: '高级灰' } },
@@ -869,7 +869,7 @@ async function seed() {
     minPrice: '99.00', maxPrice: '159.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('home-decoration/house-showpiece-plant/1.webp'), cdnImg('home-decoration/plant-pot/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/house-showpiece-plant/800/800', 'https://picsum.photos/seed/plant-pot/800/800'],
     skuList: [
       { code: 'TENMA-56L-3PK', price: '99.00', comparePrice: '129.00', stock: 300, attributes: { spec: '56L×3个', color: '透明' } },
       { code: 'TENMA-78L-3PK', price: '159.00', comparePrice: '199.00', stock: 200, attributes: { spec: '78L×3个', color: '透明' } },
@@ -888,7 +888,7 @@ async function seed() {
     minPrice: '236.00', maxPrice: '436.00',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/milk/1.webp'), cdnImg('groceries/protein-powder/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/milk/800/800', 'https://picsum.photos/seed/protein-powder/800/800'],
     skuList: [
       { code: 'FIRMUS-S3-700', price: '236.00', comparePrice: '278.00', stock: 300, attributes: { spec: '700g', stage: '3段' } },
       { code: 'FIRMUS-S3-700x2', price: '436.00', comparePrice: '556.00', stock: 200, attributes: { spec: '700g×2罐', stage: '3段' } },
@@ -904,7 +904,7 @@ async function seed() {
     minPrice: '109.00', maxPrice: '199.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Merries+L', 'FEF3C7', 'B45309'), placeholderImg('Merries+XL', 'FDE68A', '92400E')],
+    imageUrls: ['https://picsum.photos/seed/merries-l/800/800', 'https://picsum.photos/seed/merries-xl/800/800'],
     skuList: [
       { code: 'MERRIES-L-54', price: '109.00', comparePrice: '139.00', stock: 400, attributes: { size: 'L', spec: '54片' } },
       { code: 'MERRIES-XL-44', price: '109.00', comparePrice: '139.00', stock: 350, attributes: { size: 'XL', spec: '44片' } },
@@ -921,7 +921,7 @@ async function seed() {
     minPrice: '349.00', maxPrice: '349.00',
     totalSales: randInt(800, 2500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('LEGO+Bugatti', 'DC2626', 'FEF2F2'), placeholderImg('LEGO+42151', 'B91C1C', 'FEE2E2'), placeholderImg('905+Pieces', '991B1B', 'FECACA')],
+    imageUrls: ['https://picsum.photos/seed/lego-bugatti/800/800', 'https://picsum.photos/seed/lego-42151/800/800', 'https://picsum.photos/seed/905-pieces/800/800'],
     skuList: [
       { code: 'LEGO-42151', price: '349.00', comparePrice: '449.00', stock: 150, lowStock: 10, attributes: { pieces: '905', age: '9+' } },
     ],
@@ -936,7 +936,7 @@ async function seed() {
     minPrice: '199.00', maxPrice: '199.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('B.Duck+Scooter', 'FACC15', '422006'), placeholderImg('Kids+Scooter', 'EAB308', '3F3700')],
+    imageUrls: ['https://picsum.photos/seed/b.duck-scooter/800/800', 'https://picsum.photos/seed/kids-scooter/800/800'],
     skuList: [
       { code: 'BDUCK-SCOOT-YLW', price: '199.00', comparePrice: '269.00', stock: 200, attributes: { color: '黄色', ageRange: '3-8岁' } },
       { code: 'BDUCK-SCOOT-PNK', price: '199.00', comparePrice: '269.00', stock: 150, attributes: { color: '粉色', ageRange: '3-8岁' } },
@@ -954,7 +954,7 @@ async function seed() {
     minPrice: '9699.00', maxPrice: '13699.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('smartphones/samsung-galaxy-s10/1.webp'), cdnImg('smartphones/samsung-galaxy-s10/2.webp'), cdnImg('smartphones/samsung-galaxy-s10/3.webp')],
+    imageUrls: ['https://picsum.photos/seed/samsung-galaxy-s10/800/800', 'https://picsum.photos/seed/samsung-galaxy-s10-1/800/800', 'https://picsum.photos/seed/samsung-galaxy-s10-2/800/800'],
     skuList: [
       { code: 'S24U-256-BLK', price: '9699.00', comparePrice: '10499.00', stock: 180, attributes: { storage: '256GB', color: '钛黑' } },
       { code: 'S24U-512-VIO', price: '11699.00', comparePrice: '12499.00', stock: 120, attributes: { storage: '512GB', color: '钛紫' } },
@@ -971,7 +971,7 @@ async function seed() {
     minPrice: '3199.00', maxPrice: '3199.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Dyson+HD15', 'EC4899', 'FFF'), placeholderImg('Dyson+Supersonic', 'DB2777', 'FFF')],
+    imageUrls: ['https://picsum.photos/seed/dyson-hd15/800/800', 'https://picsum.photos/seed/dyson-supersonic/800/800'],
     skuList: [
       { code: 'DYSON-HD15-FUC', price: '3199.00', comparePrice: '3599.00', stock: 150, attributes: { color: '紫红镍色' } },
       { code: 'DYSON-HD15-BLU', price: '3199.00', comparePrice: '3599.00', stock: 120, attributes: { color: '璀璨蓝金' } },
@@ -987,7 +987,7 @@ async function seed() {
     minPrice: '299.00', maxPrice: '299.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('womens-dresses/dress-pea/1.webp'), cdnImg('womens-dresses/dress-pea/2.webp'), cdnImg('womens-dresses/dress-pea/3.webp')],
+    imageUrls: ['https://picsum.photos/seed/dress-pea/800/800', 'https://picsum.photos/seed/dress-pea-1/800/800', 'https://picsum.photos/seed/dress-pea-2/800/800'],
     skuList: [
       { code: 'FD-FV-S-FLR', price: '299.00', comparePrice: '459.00', stock: 180, attributes: { size: 'S', color: '碎花白' } },
       { code: 'FD-FV-M-FLR', price: '299.00', comparePrice: '459.00', stock: 220, attributes: { size: 'M', color: '碎花白' } },
@@ -1009,7 +1009,7 @@ async function seed() {
     minPrice: '1199.00', maxPrice: '1199.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=amazon%2Becho%2Bdot%2B5th%2Bgeneration&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=amazon%2Becho%2Bdot%2B5th%2Bgeneration&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/amazon-echo-dot-5th-generation/800/800', 'https://picsum.photos/seed/amazon-echo-dot-5th-generation/800/800'],
     skuList: [
       { code: 'HW-FBP3-WHT', price: '1199.00', comparePrice: '1499.00', stock: 200, attributes: { color: '陶瓷白' } },
       { code: 'HW-FBP3-GRN', price: '1199.00', comparePrice: '1499.00', stock: 150, attributes: { color: '雅川青' } },
@@ -1026,7 +1026,7 @@ async function seed() {
     minPrice: '1488.00', maxPrice: '1688.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-watches/brown-leather-belt-watch/1.webp'), cdnImg('mens-watches/brown-leather-belt-watch/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/brown-leather-belt-watch/800/800', 'https://picsum.photos/seed/brown-leather-belt-watch-1/800/800'],
     skuList: [
       { code: 'HWGT4-46-BLK', price: '1488.00', comparePrice: '1688.00', stock: 150, attributes: { size: '46mm', band: '黑色氟橡胶' } },
       { code: 'HWGT4-46-BRN', price: '1688.00', comparePrice: '1888.00', stock: 100, attributes: { size: '46mm', band: '棕色真皮' } },
@@ -1042,7 +1042,7 @@ async function seed() {
     minPrice: '2199.00', maxPrice: '2799.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=long%2Bmoonlight%2Bnecklace&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=round%2Bsilver%2Banalog%2Bwatch&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/long-moonlight-necklace/800/800', 'https://picsum.photos/seed/round-silver-analog-watch/800/800'],
     skuList: [
       { code: 'GW6C-43-SLV', price: '2199.00', comparePrice: '2599.00', stock: 100, attributes: { size: '43mm', color: '银色' } },
       { code: 'GW6C-47-BLK', price: '2799.00', comparePrice: '3199.00', stock: 80, attributes: { size: '47mm', color: '黑色' } },
@@ -1059,7 +1059,7 @@ async function seed() {
     minPrice: '11999.00', maxPrice: '14999.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('laptops/asus-zenbook-pro-dual-screen-laptop/1.webp'), cdnImg('laptops/asus-zenbook-pro-dual-screen-laptop/2.webp'), cdnImg('laptops/asus-zenbook-pro-dual-screen-laptop/3.webp')],
+    imageUrls: ['https://picsum.photos/seed/asus-zenbook-pro-dual-screen-laptop/800/800', 'https://picsum.photos/seed/asus-zenbook-pro-dual-screen-laptop-1/800/800', 'https://picsum.photos/seed/asus-zenbook-pro-dual-screen-laptop-2/800/800'],
     skuList: [
       { code: 'ROG-G16-4060', price: '11999.00', comparePrice: '13499.00', stock: 80, attributes: { gpu: 'RTX4060', memory: '16GB', storage: '512GB' } },
       { code: 'ROG-G16-4070', price: '14999.00', comparePrice: '16999.00', stock: 50, lowStock: 10, attributes: { gpu: 'RTX4070', memory: '32GB', storage: '1TB' } },
@@ -1076,7 +1076,7 @@ async function seed() {
     minPrice: '8999.00', maxPrice: '10999.00',
     totalSales: randInt(300, 1500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=samsung%2Bgalaxy%2Btab%2Bs7%2Bplus%2Bmidnight%2Bblack&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=samsung%2Bgalaxy%2Btab%2Bs7%2Bplus%2Bmidnight%2Bblack&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/samsung-galaxy-tab-s7-plus-midnight-black/800/800', 'https://picsum.photos/seed/samsung-galaxy-tab-s7-plus-midnight-black/800/800'],
     skuList: [
       { code: 'TABS9U-256-GRY', price: '8999.00', comparePrice: '9999.00', stock: 60, attributes: { storage: '256GB', color: '石墨灰' } },
       { code: 'TABS9U-512-BEG', price: '10999.00', comparePrice: '11999.00', stock: 40, lowStock: 10, attributes: { storage: '512GB', color: '奶油白' } },
@@ -1093,7 +1093,7 @@ async function seed() {
     minPrice: '699.00', maxPrice: '699.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('MX+Keys+S', '1F2937', 'F3F4F6'), placeholderImg('Logitech+MX', '111827', 'E5E7EB')],
+    imageUrls: ['https://picsum.photos/seed/mx-keys-s/800/800', 'https://picsum.photos/seed/logitech-mx/800/800'],
     skuList: [
       { code: 'MXKEYS-S-BLK', price: '699.00', comparePrice: '849.00', stock: 200, attributes: { color: '石墨', layout: '全尺寸' } },
     ],
@@ -1108,7 +1108,7 @@ async function seed() {
     minPrice: '549.00', maxPrice: '549.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('K3+Pro', '374151', 'F9FAFB'), placeholderImg('Keychron', '1F2937', 'F3F4F6')],
+    imageUrls: ['https://picsum.photos/seed/k3-pro/800/800', 'https://picsum.photos/seed/keychron/800/800'],
     skuList: [
       { code: 'KC-K3P-RED', price: '549.00', comparePrice: '649.00', stock: 120, attributes: { switch: '红轴', backlight: 'RGB' } },
       { code: 'KC-K3P-BRN', price: '549.00', comparePrice: '649.00', stock: 100, attributes: { switch: '茶轴', backlight: 'RGB' } },
@@ -1125,7 +1125,7 @@ async function seed() {
     minPrice: '4999.00', maxPrice: '4999.00',
     totalSales: randInt(500, 1500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Siemens+Washer', '60A5FA', 'FFF'), placeholderImg('10kg+Drum', '3B82F6', 'FFF')],
+    imageUrls: ['https://picsum.photos/seed/siemens-washer/800/800', 'https://picsum.photos/seed/10kg-drum/800/800'],
     skuList: [
       { code: 'SIEM-WG54B-WHT', price: '4999.00', comparePrice: '5999.00', stock: 40, lowStock: 10, attributes: { color: '白色', capacity: '10kg' } },
     ],
@@ -1140,7 +1140,7 @@ async function seed() {
     minPrice: '2699.00', maxPrice: '2699.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Midea+AC', '38BDF8', 'FFF'), placeholderImg('1.5P+AC', '0EA5E9', 'FFF')],
+    imageUrls: ['https://picsum.photos/seed/midea-ac/800/800', 'https://picsum.photos/seed/1.5p-ac/800/800'],
     skuList: [
       { code: 'MIDEA-AC-35-WHT', price: '2699.00', comparePrice: '3299.00', stock: 80, attributes: { power: '1.5匹', energy: '一级能效' } },
     ],
@@ -1156,7 +1156,7 @@ async function seed() {
     minPrice: '3999.00', maxPrice: '3999.00',
     totalSales: randInt(800, 2500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Roborock+G20', '4B5563', 'F9FAFB'), placeholderImg('Robot+Vacuum', '374151', 'F3F4F6')],
+    imageUrls: ['https://picsum.photos/seed/roborock-g20/800/800', 'https://picsum.photos/seed/robot-vacuum/800/800'],
     skuList: [
       { code: 'ROBO-G20-WHT', price: '3999.00', comparePrice: '4799.00', stock: 60, attributes: { color: '曙光白' } },
     ],
@@ -1172,7 +1172,7 @@ async function seed() {
     minPrice: '1299.00', maxPrice: '1299.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('kitchen-accessories/electric-stove/2.webp'), cdnImg('kitchen-accessories/electric-stove/3.webp')],
+    imageUrls: ['https://picsum.photos/seed/electric-stove-1/800/800', 'https://picsum.photos/seed/electric-stove-2/800/800'],
     skuList: [
       { code: 'JY-Y1P-WHT', price: '1299.00', comparePrice: '1599.00', stock: 100, attributes: { color: '白色', capacity: '1.2L' } },
     ],
@@ -1187,7 +1187,7 @@ async function seed() {
     minPrice: '1699.00', maxPrice: '1699.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=silver%2Bpot%2Bwith%2Bglass%2Bcap&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=silver%2Bpot%2Bwith%2Bglass%2Bcap&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/silver-pot-with-glass-cap/800/800', 'https://picsum.photos/seed/silver-pot-with-glass-cap/800/800'],
     skuList: [
       { code: 'PANA-MW-59-BLK', price: '1699.00', comparePrice: '1999.00', stock: 60, attributes: { color: '黑色', capacity: '27L' } },
     ],
@@ -1203,7 +1203,7 @@ async function seed() {
     minPrice: '799.00', maxPrice: '799.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-shirts/man-plaid-shirt/1.webp'), cdnImg('mens-shirts/man-plaid-shirt/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/man-plaid-shirt/800/800', 'https://picsum.photos/seed/man-plaid-shirt-1/800/800'],
     skuList: [
       { code: 'RL-POLO-M-NVY', price: '799.00', comparePrice: '990.00', stock: 150, attributes: { size: 'M', color: '藏青' } },
       { code: 'RL-POLO-L-WHT', price: '799.00', comparePrice: '990.00', stock: 120, attributes: { size: 'L', color: '白色' } },
@@ -1221,7 +1221,7 @@ async function seed() {
     minPrice: '599.00', maxPrice: '599.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=womans%2Bblack%2Btop&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=womans%2Bblack%2Btop&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/womans-black-top/800/800', 'https://picsum.photos/seed/womans-black-top/800/800'],
     skuList: [
       { code: 'PB-BLZ-W-S-BLK', price: '599.00', comparePrice: '799.00', stock: 120, attributes: { size: 'S', color: '黑色' } },
       { code: 'PB-BLZ-W-M-KHK', price: '599.00', comparePrice: '799.00', stock: 150, attributes: { size: 'M', color: '卡其' } },
@@ -1239,7 +1239,7 @@ async function seed() {
     minPrice: '769.00', maxPrice: '769.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-shoes/nike-baseball-cleats/1.webp'), cdnImg('mens-shoes/nike-baseball-cleats/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/nike-baseball-cleats/800/800', 'https://picsum.photos/seed/nike-baseball-cleats-1/800/800'],
     skuList: [
       { code: 'NB574-40-GRY', price: '769.00', comparePrice: '899.00', stock: 120, attributes: { size: '40', color: '元祖灰' } },
       { code: 'NB574-42-GRY', price: '769.00', comparePrice: '899.00', stock: 150, attributes: { size: '42', color: '元祖灰' } },
@@ -1256,7 +1256,7 @@ async function seed() {
     minPrice: '499.00', maxPrice: '499.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=lace%2Bup%2Bboots&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=lace%2Bup%2Bboots&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/lace-up-boots/800/800', 'https://picsum.photos/seed/lace-up-boots/800/800'],
     skuList: [
       { code: 'CVS-CT-38-BLK', price: '499.00', comparePrice: '599.00', stock: 200, attributes: { size: '38', color: '黑色' } },
       { code: 'CVS-CT-40-WHT', price: '499.00', comparePrice: '599.00', stock: 250, attributes: { size: '40', color: '白色' } },
@@ -1274,7 +1274,7 @@ async function seed() {
     minPrice: '59.90', maxPrice: '99.90',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/beef-steak/1.webp'), cdnImg('groceries/chicken-meat/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/beef-steak/800/800', 'https://picsum.photos/seed/chicken-meat/800/800'],
     skuList: [
       { code: 'LPPZ-DUCK-S', price: '59.90', comparePrice: '79.90', stock: 300, attributes: { spec: '小份装 400g' } },
       { code: 'LPPZ-DUCK-L', price: '99.90', comparePrice: '129.90', stock: 200, attributes: { spec: '大礼包 800g' } },
@@ -1290,7 +1290,7 @@ async function seed() {
     minPrice: '29.90', maxPrice: '49.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('groceries/apple/1.webp'), cdnImg('groceries/cat-food/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/apple/800/800', 'https://picsum.photos/seed/cat-food/800/800'],
     skuList: [
       { code: 'BCW-MANGO-250', price: '29.90', comparePrice: '39.90', stock: 400, attributes: { spec: '250g' } },
       { code: 'BCW-MANGO-500', price: '49.90', comparePrice: '69.90', stock: 300, attributes: { spec: '500g' } },
@@ -1307,7 +1307,7 @@ async function seed() {
     minPrice: '59.90', maxPrice: '59.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=juice&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=water&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/juice/800/800', 'https://picsum.photos/seed/water/800/800'],
     skuList: [
       { code: 'GKF-PEACH-15', price: '59.90', comparePrice: '74.90', stock: 400, attributes: { flavor: '白桃味', spec: '480ml×15瓶' } },
     ],
@@ -1323,7 +1323,7 @@ async function seed() {
     minPrice: '89.00', maxPrice: '89.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=strawberry&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=strawberry&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/strawberry/800/800', 'https://picsum.photos/seed/strawberry/800/800'],
     skuList: [
       { code: 'DD99-SB-3LB', price: '89.00', comparePrice: '119.00', stock: 100, lowStock: 15, attributes: { spec: '3斤装', grade: '精选大果' } },
     ],
@@ -1338,7 +1338,7 @@ async function seed() {
     minPrice: '149.00', maxPrice: '149.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=salmon&font=roboto', cdnImg('groceries/fish-steak/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/salmon/800/800', 'https://picsum.photos/seed/fish-steak/800/800'],
     skuList: [
       { code: 'EC-SHRIMP-4LB', price: '149.00', comparePrice: '199.00', stock: 80, lowStock: 10, attributes: { spec: '净重4斤', size: '30-40只/斤' } },
     ],
@@ -1354,7 +1354,7 @@ async function seed() {
     minPrice: '1080.00', maxPrice: '1080.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=dove%2Bbody%2Bcare%2Bnourishing%2Bbody%2Bwash&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=hemani%2Btea%2Btree%2Boil&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/dove-body-care-nourishing-body-wash/800/800', 'https://picsum.photos/seed/hemani-tea-tree-oil/800/800'],
     skuList: [
       { code: 'LC-AGF-50', price: '760.00', comparePrice: '890.00', stock: 200, attributes: { spec: '50ml' } },
       { code: 'LC-AGF-100', price: '1080.00', comparePrice: '1260.00', stock: 150, attributes: { spec: '100ml' } },
@@ -1370,7 +1370,7 @@ async function seed() {
     minPrice: '520.00', maxPrice: '520.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=elf%2Bskin%2Bsuper%2Bhydrate%2Bmoisturizer&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=elf%2Bskin%2Bsuper%2Bhydrate%2Bmoisturizer&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/elf-skin-super-hydrate-moisturizer/800/800', 'https://picsum.photos/seed/elf-skin-super-hydrate-moisturizer/800/800'],
     skuList: [
       { code: 'EL-ANR-EYE-15', price: '520.00', comparePrice: '620.00', stock: 250, attributes: { spec: '15ml' } },
     ],
@@ -1386,7 +1386,7 @@ async function seed() {
     minPrice: '89.90', maxPrice: '89.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=eyeshadow%2Bpalette%2Bwith%2Bmirror&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=makeup%2Bremover&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/eyeshadow-palette-with-mirror/800/800', 'https://picsum.photos/seed/makeup-remover/800/800'],
     skuList: [
       { code: 'PD-CAT-12', price: '89.90', comparePrice: '129.90', stock: 300, attributes: { palette: '小猫盘', colors: '12色' } },
     ],
@@ -1401,7 +1401,7 @@ async function seed() {
     minPrice: '149.00', maxPrice: '149.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('beauty/powder-canister/1.webp'), 'https://placehold.co/800x800/EEE/999/webp?text=powder%2Bcanister&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/powder-canister/800/800', 'https://picsum.photos/seed/powder-canister/800/800'],
     skuList: [
       { code: 'FLR-AP-01', price: '149.00', comparePrice: '199.00', stock: 250, attributes: { shade: '01 自然色' } },
       { code: 'FLR-AP-02', price: '149.00', comparePrice: '199.00', stock: 200, attributes: { shade: '02 嫩肤色' } },
@@ -1418,7 +1418,7 @@ async function seed() {
     minPrice: '39.90', maxPrice: '39.90',
     totalSales: randInt(2500, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('skin-care/vaseline-men-body-and-face-lotion/2.webp'), cdnImg('skin-care/attitude-super-leaves-hand-soap/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/vaseline-men-body-and-face-lotion-1/800/800', 'https://picsum.photos/seed/attitude-super-leaves-hand-soap-1/800/800'],
     skuList: [
       { code: 'PANT-3MM-270', price: '39.90', comparePrice: '59.90', stock: 400, attributes: { spec: '270ml', type: '丝质顺滑型' } },
     ],
@@ -1433,7 +1433,7 @@ async function seed() {
     minPrice: '39.90', maxPrice: '39.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=neutrogena%2Bnorwegian%2Bformula%2Bhand%2Bcream&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=neutrogena%2Bnorwegian%2Bformula%2Bhand%2Bcream&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/neutrogena-norwegian-formula-hand-cream/800/800', 'https://picsum.photos/seed/neutrogena-norwegian-formula-hand-cream/800/800'],
     skuList: [
       { code: 'SFJ-BW-1L', price: '39.90', comparePrice: '59.90', stock: 500, attributes: { spec: '1L', fragrance: '纯白清香' } },
     ],
@@ -1449,7 +1449,7 @@ async function seed() {
     minPrice: '29.00', maxPrice: '29.00',
     totalSales: randInt(4000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('To+Live', '1E3A5F', 'DBEAFE'), placeholderImg('Yu+Hua', '1E40AF', 'BFDBFE')],
+    imageUrls: ['https://picsum.photos/seed/to-live/800/800', 'https://picsum.photos/seed/yu-hua/800/800'],
     skuList: [
       { code: 'HUOZHE-PB', price: '29.00', comparePrice: '45.00', stock: 500, attributes: { format: '平装', version: '最新版' } },
     ],
@@ -1464,7 +1464,7 @@ async function seed() {
     minPrice: '55.00', maxPrice: '55.00',
     totalSales: randInt(2000, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Solitude', '5B21B6', 'F5F3FF'), placeholderImg('Marquez', '6D28D9', 'EDE9FE')],
+    imageUrls: ['https://picsum.photos/seed/solitude/800/800', 'https://picsum.photos/seed/marquez/800/800'],
     skuList: [
       { code: 'BNGD-50TH', price: '55.00', comparePrice: '69.80', stock: 400, attributes: { format: '精装', version: '50周年纪念版' } },
     ],
@@ -1480,7 +1480,7 @@ async function seed() {
     minPrice: '79.80', maxPrice: '79.80',
     totalSales: randInt(2000, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Python', '3B82F6', 'DBEAFE'), placeholderImg('Crash+Course', '2563EB', 'BFDBFE')],
+    imageUrls: ['https://picsum.photos/seed/python/800/800', 'https://picsum.photos/seed/crash-course/800/800'],
     skuList: [
       { code: 'PYCC-3RD', price: '79.80', comparePrice: '109.80', stock: 300, attributes: { format: '纸质书', edition: '第3版' } },
     ],
@@ -1495,7 +1495,7 @@ async function seed() {
     minPrice: '68.00', maxPrice: '68.00',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Math', '059669', 'D1FAE5'), placeholderImg('Calculus', '047857', 'A7F3D0')],
+    imageUrls: ['https://picsum.photos/seed/math/800/800', 'https://picsum.photos/seed/calculus/800/800'],
     skuList: [
       { code: 'GDSX-7-SET', price: '68.00', comparePrice: '96.60', stock: 500, attributes: { format: '纸质书', spec: '上下册套装' } },
     ],
@@ -1511,7 +1511,7 @@ async function seed() {
     minPrice: '6.90', maxPrice: '299.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Demon+Slayer', '166534', 'F0FDF4'), placeholderImg('Tanjiro', '15803D', 'DCFCE7')],
+    imageUrls: ['https://picsum.photos/seed/demon-slayer/800/800', 'https://picsum.photos/seed/tanjiro/800/800'],
     skuList: [
       { code: 'GMMZR-SINGLE', price: '6.90', comparePrice: '9.90', stock: 500, attributes: { spec: '单册', format: '漫画' } },
       { code: 'GMMZR-BOX-1-23', price: '299.00', comparePrice: '399.00', stock: 80, lowStock: 10, attributes: { spec: '全套1-23卷', format: '漫画' } },
@@ -1527,7 +1527,7 @@ async function seed() {
     minPrice: '6.90', maxPrice: '399.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('AoT', '78350F', 'FEF9C3'), placeholderImg('Titan', '854D0E', 'FEF08A')],
+    imageUrls: ['https://picsum.photos/seed/aot/800/800', 'https://picsum.photos/seed/titan/800/800'],
     skuList: [
       { code: 'AOT-SINGLE', price: '6.90', comparePrice: '9.90', stock: 500, attributes: { spec: '单册', format: '漫画' } },
       { code: 'AOT-BOX-1-34', price: '399.00', comparePrice: '499.00', stock: 50, lowStock: 10, attributes: { spec: '全套1-34卷', format: '漫画' } },
@@ -1544,7 +1544,7 @@ async function seed() {
     minPrice: '299.00', maxPrice: '499.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('sports-accessories/football/1.webp'), 'https://placehold.co/800x800/EEE/999/webp?text=metal%2Bbat&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/football/800/800', 'https://picsum.photos/seed/metal-bat/800/800'],
     skuList: [
       { code: 'XM-DB-10KG', price: '299.00', comparePrice: '399.00', stock: 150, attributes: { weight: '10kg×2', material: '包胶' } },
       { code: 'XM-DB-20KG', price: '499.00', comparePrice: '599.00', stock: 100, attributes: { weight: '20kg×2', material: '包胶' } },
@@ -1560,7 +1560,7 @@ async function seed() {
     minPrice: '89.00', maxPrice: '129.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('sports-accessories/tennis-ball/1.webp'), cdnImg('sports-accessories/cricket-helmet/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/tennis-ball/800/800', 'https://picsum.photos/seed/cricket-helmet/800/800'],
     skuList: [
       { code: 'YB-YOGA-6MM', price: '89.00', comparePrice: '119.00', stock: 300, attributes: { thickness: '6mm', color: '藕粉' } },
       { code: 'YB-YOGA-8MM', price: '129.00', comparePrice: '159.00', stock: 200, attributes: { thickness: '8mm', color: '深紫' } },
@@ -1577,7 +1577,7 @@ async function seed() {
     minPrice: '1350.00', maxPrice: '1350.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('womens-bags/women-handbag-black/1.webp'), cdnImg('womens-bags/women-handbag-black/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/women-handbag-black/800/800', 'https://picsum.photos/seed/women-handbag-black-1/800/800'],
     skuList: [
       { code: 'ARC-M26-BLK', price: '1350.00', comparePrice: '1600.00', stock: 80, lowStock: 10, attributes: { color: '黑色', capacity: '26L' } },
     ],
@@ -1592,7 +1592,7 @@ async function seed() {
     minPrice: '799.00', maxPrice: '799.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Columbia+Pants', '065F46', 'ECFDF5'), placeholderImg('Waterproof', '047857', 'D1FAE5')],
+    imageUrls: ['https://picsum.photos/seed/columbia-pants/800/800', 'https://picsum.photos/seed/waterproof/800/800'],
     skuList: [
       { code: 'COL-WP-M-M', price: '799.00', comparePrice: '999.00', stock: 100, attributes: { size: 'M', color: '黑色' } },
       { code: 'COL-WP-M-L', price: '799.00', comparePrice: '999.00', stock: 120, attributes: { size: 'L', color: '黑色' } },
@@ -1610,7 +1610,7 @@ async function seed() {
     minPrice: '299.00', maxPrice: '299.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=man%2Btransition%2Bjacket&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=man%2Btransition%2Bjacket&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/man-transition-jacket/800/800', 'https://picsum.photos/seed/man-transition-jacket/800/800'],
     skuList: [
       { code: 'UA-CMP-M-BLK', price: '299.00', comparePrice: '399.00', stock: 200, attributes: { size: 'M', color: '黑色' } },
       { code: 'UA-CMP-L-BLK', price: '299.00', comparePrice: '399.00', stock: 250, attributes: { size: 'L', color: '黑色' } },
@@ -1627,7 +1627,7 @@ async function seed() {
     minPrice: '899.00', maxPrice: '899.00',
     totalSales: randInt(1000, 3000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('mens-shoes/puma-future-rider-trainers/1.webp'), cdnImg('mens-shoes/puma-future-rider-trainers/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/puma-future-rider-trainers/800/800', 'https://picsum.photos/seed/puma-future-rider-trainers-1/800/800'],
     skuList: [
       { code: 'ANTA-KT8-41-WHT', price: '899.00', comparePrice: '1099.00', stock: 100, attributes: { size: '41', color: '白蓝' } },
       { code: 'ANTA-KT8-43-BLK', price: '899.00', comparePrice: '1099.00', stock: 120, attributes: { size: '43', color: '黑金' } },
@@ -1644,7 +1644,7 @@ async function seed() {
     minPrice: '3299.00', maxPrice: '4299.00',
     totalSales: randInt(500, 1500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('furniture/wooden-bathroom-sink-with-mirror/1.webp'), cdnImg('furniture/wooden-bathroom-sink-with-mirror/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/wooden-bathroom-sink-with-mirror/800/800', 'https://picsum.photos/seed/wooden-bathroom-sink-with-mirror-1/800/800'],
     skuList: [
       { code: 'QY-SOFA-3-GRY', price: '3299.00', comparePrice: '4199.00', stock: 30, lowStock: 5, attributes: { type: '三人位', color: '浅灰' } },
       { code: 'QY-SOFA-L-GRY', price: '4299.00', comparePrice: '5199.00', stock: 20, lowStock: 5, attributes: { type: 'L型转角', color: '浅灰' } },
@@ -1660,7 +1660,7 @@ async function seed() {
     minPrice: '899.00', maxPrice: '1299.00',
     totalSales: randInt(800, 2500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=bedside%2Btable%2Bafrican%2Bcherry&font=roboto', cdnImg('home-decoration/decoration-swing/1.webp')],
+    imageUrls: ['https://picsum.photos/seed/bedside-table-african-cherry/800/800', 'https://picsum.photos/seed/decoration-swing/800/800'],
     skuList: [
       { code: 'LS-TV-180-WHT', price: '899.00', comparePrice: '1199.00', stock: 50, attributes: { length: '180cm', color: '暖白' } },
       { code: 'LS-TV-240-WNT', price: '1299.00', comparePrice: '1599.00', stock: 30, attributes: { length: '240cm', color: '胡桃色' } },
@@ -1677,7 +1677,7 @@ async function seed() {
     minPrice: '999.00', maxPrice: '1599.00',
     totalSales: randInt(500, 2000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('furniture/annibale-colombo-bed/3.webp'), 'https://placehold.co/800x800/EEE/999/webp?text=annibale%2Bcolombo%2Bbed&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/annibale-colombo-bed-2/800/800', 'https://picsum.photos/seed/annibale-colombo-bed/800/800'],
     skuList: [
       { code: 'LL-SILK-S', price: '999.00', comparePrice: '1399.00', stock: 80, attributes: { weight: '春秋款 1斤', size: '200×230cm' } },
       { code: 'LL-SILK-W', price: '1599.00', comparePrice: '1999.00', stock: 50, attributes: { weight: '冬季款 2斤', size: '200×230cm' } },
@@ -1693,7 +1693,7 @@ async function seed() {
     minPrice: '199.00', maxPrice: '359.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Latex+Pillow', 'FCD34D', '78350F'), placeholderImg('Thailand+Latex', 'FBBF24', '92400E')],
+    imageUrls: ['https://picsum.photos/seed/latex-pillow/800/800', 'https://picsum.photos/seed/thailand-latex/800/800'],
     skuList: [
       { code: 'SX-LTX-STD', price: '199.00', comparePrice: '299.00', stock: 300, attributes: { type: '标准款', size: '60×40cm' } },
       { code: 'SX-LTX-PAIR', price: '359.00', comparePrice: '499.00', stock: 200, attributes: { type: '一对装', size: '60×40cm' } },
@@ -1710,7 +1710,7 @@ async function seed() {
     minPrice: '59.90', maxPrice: '99.90',
     totalSales: randInt(3000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=room%2Bspray&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=room%2Bspray&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/room-spray/800/800', 'https://picsum.photos/seed/room-spray/800/800'],
     skuList: [
       { code: 'CTL-SHOE-6', price: '59.90', comparePrice: '79.90', stock: 400, attributes: { spec: '6个装', size: '标准款' } },
       { code: 'CTL-SHOE-12', price: '99.90', comparePrice: '139.90', stock: 250, attributes: { spec: '12个装', size: '标准款' } },
@@ -1726,7 +1726,7 @@ async function seed() {
     minPrice: '49.90', maxPrice: '89.90',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [cdnImg('home-decoration/plant-pot/2.webp'), cdnImg('home-decoration/house-showpiece-plant/2.webp')],
+    imageUrls: ['https://picsum.photos/seed/plant-pot-1/800/800', 'https://picsum.photos/seed/house-showpiece-plant-1/800/800'],
     skuList: [
       { code: 'TL-VAC-8', price: '49.90', comparePrice: '69.90', stock: 300, attributes: { spec: '8袋+手泵' } },
       { code: 'TL-VAC-15P', price: '89.90', comparePrice: '119.90', stock: 200, attributes: { spec: '15袋+电泵' } },
@@ -1743,7 +1743,7 @@ async function seed() {
     minPrice: '338.00', maxPrice: '618.00',
     totalSales: randInt(2000, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=protein%2Bpowder&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=milk&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/protein-powder/800/800', 'https://picsum.photos/seed/milk/800/800'],
     skuList: [
       { code: 'APT-PRO-S3-900', price: '338.00', comparePrice: '398.00', stock: 200, attributes: { spec: '900g', stage: '3段' } },
       { code: 'APT-PRO-S3-900x2', price: '618.00', comparePrice: '796.00', stock: 150, attributes: { spec: '900g×2罐', stage: '3段' } },
@@ -1759,7 +1759,7 @@ async function seed() {
     minPrice: '378.00', maxPrice: '378.00',
     totalSales: randInt(1500, 3500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: ['https://placehold.co/800x800/EEE/999/webp?text=protein%2Bpowder&font=roboto', 'https://placehold.co/800x800/EEE/999/webp?text=milk&font=roboto'],
+    imageUrls: ['https://picsum.photos/seed/protein-powder/800/800', 'https://picsum.photos/seed/milk/800/800'],
     skuList: [
       { code: 'MJC-LZ-S2-900', price: '378.00', comparePrice: '438.00', stock: 200, attributes: { spec: '900g', stage: '2段' } },
     ],
@@ -1775,7 +1775,7 @@ async function seed() {
     minPrice: '139.00', maxPrice: '249.00',
     totalSales: randInt(2000, 5000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Huggies+L', 'BFDBFE', '5B21B6'), placeholderImg('Huggies+XL', 'DDD6FE', '7C3AED')],
+    imageUrls: ['https://picsum.photos/seed/huggies-l/800/800', 'https://picsum.photos/seed/huggies-xl/800/800'],
     skuList: [
       { code: 'HGS-PLT-L-58', price: '139.00', comparePrice: '169.00', stock: 300, attributes: { size: 'L', spec: '58片' } },
       { code: 'HGS-PLT-L-116', price: '249.00', comparePrice: '319.00', stock: 200, attributes: { size: 'L', spec: '116片(2包)' } },
@@ -1791,7 +1791,7 @@ async function seed() {
     minPrice: '119.00', maxPrice: '219.00',
     totalSales: randInt(1500, 4000),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Pampers+XL', 'FED7AA', 'C2410C'), placeholderImg('Premium', 'FDBA74', '9A3412')],
+    imageUrls: ['https://picsum.photos/seed/pampers-xl/800/800', 'https://picsum.photos/seed/premium/800/800'],
     skuList: [
       { code: 'PMP-1-XL-42', price: '119.00', comparePrice: '149.00', stock: 350, attributes: { size: 'XL', spec: '42片' } },
       { code: 'PMP-1-XL-84', price: '219.00', comparePrice: '279.00', stock: 200, attributes: { size: 'XL', spec: '84片(2包)' } },
@@ -1808,7 +1808,7 @@ async function seed() {
     minPrice: '269.00', maxPrice: '269.00',
     totalSales: randInt(1500, 3500),
     avgRating: randRating(), reviewCount: randReviews(),
-    imageUrls: [placeholderImg('Fisher+Walker', '0EA5E9', 'F0F9FF'), placeholderImg('Learn+Walk', '0284C7', 'E0F2FE')],
+    imageUrls: ['https://picsum.photos/seed/fisher-walker/800/800', 'https://picsum.photos/seed/learn-walk/800/800'],
     skuList: [
       { code: 'FP-WALKER-BLU', price: '269.00', comparePrice: '349.00', stock: 150, attributes: { color: '蓝色', ageRange: '6-36个月' } },
       { code: 'FP-WALKER-PNK', price: '269.00', comparePrice: '349.00', stock: 120, attributes: { color: '粉色', ageRange: '6-36个月' } },
@@ -1873,60 +1873,60 @@ async function seed() {
   console.log('Inserting banners...');
   await db.insert(banners).values([
     {
-      id: generateId(),
+      id: seedId('banner:1'),
       title: '春季数码焕新',
       subtitle: '手机电脑限时特惠，最高立减2000元',
-      imageUrl: cdnImg('smartphones/iphone-13-pro/1.webp'),
+      imageUrl: 'https://picsum.photos/seed/iphone-13-pro/800/800',
       linkType: 'category',
       linkValue: 'digital',
       sortOrder: 1,
       isActive: true,
     },
     {
-      id: generateId(),
+      id: seedId('banner:2'),
       title: 'iPhone 15 Pro Max',
       subtitle: 'A17 Pro 芯片，钛金属边框，从9999起',
-      imageUrl: cdnImg('smartphones/iphone-13-pro/2.webp'),
+      imageUrl: 'https://picsum.photos/seed/iphone-13-pro-1/800/800',
       linkType: 'product',
       linkValue: 'iphone-15-pro-max',
       sortOrder: 2,
       isActive: true,
     },
     {
-      id: generateId(),
+      id: seedId('banner:3'),
       title: '时尚女装专场',
       subtitle: '春夏新品上市，满299减50',
-      imageUrl: cdnImg('womens-dresses/dress-pea/1.webp'),
+      imageUrl: 'https://picsum.photos/seed/dress-pea/800/800',
       linkType: 'category',
       linkValue: 'womenswear',
       sortOrder: 3,
       isActive: true,
     },
     {
-      id: generateId(),
+      id: seedId('banner:4'),
       title: '戴森超级品牌日',
       subtitle: '吸尘器/吹风机全线优惠',
-      imageUrl: placeholderImg('Dyson+V15+Detect', 'F59E0B', 'FFF'),
+      imageUrl: 'https://picsum.photos/seed/dyson-v15-detect/800/800',
       linkType: 'product',
       linkValue: 'dyson-v15-detect',
       sortOrder: 4,
       isActive: true,
     },
     {
-      id: generateId(),
+      id: seedId('banner:5'),
       title: '图书满100减50',
       subtitle: '经典文学、教育、漫画全场参与',
-      imageUrl: placeholderImg('Best+Sellers', '7C3AED', 'F5F3FF'),
+      imageUrl: 'https://picsum.photos/seed/best-sellers/800/800',
       linkType: 'category',
       linkValue: 'books',
       sortOrder: 5,
       isActive: true,
     },
     {
-      id: generateId(),
+      id: seedId('banner:6'),
       title: '生鲜好物精选',
       subtitle: '新鲜水果产地直发，次日达',
-      imageUrl: cdnImg('groceries/strawberry/1.webp'),
+      imageUrl: 'https://picsum.photos/seed/strawberry/800/800',
       linkType: 'category',
       linkValue: 'fresh',
       sortOrder: 6,

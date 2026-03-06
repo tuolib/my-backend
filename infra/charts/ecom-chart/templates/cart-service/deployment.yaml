@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       {{- include "ecom.imagePullSecrets" . | nindent 6 }}
-      terminationGracePeriodSeconds: 5
+      terminationGracePeriodSeconds: 10
       nodeSelector:
         {{- toYaml .Values.cartService.nodeSelector | nindent 8 }}
       containers:
@@ -47,4 +47,5 @@ spec:
           resources:
             {{- toYaml .Values.cartService.resources | nindent 12 }}
           {{- include "ecom.securityContext" . | nindent 10 }}
+          {{- include "ecom.lifecycle" . | nindent 10 }}
           {{- include "ecom.probes" (dict "port" .Values.cartService.port) | nindent 10 }}

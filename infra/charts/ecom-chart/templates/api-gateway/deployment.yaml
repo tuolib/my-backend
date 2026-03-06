@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       {{- include "ecom.imagePullSecrets" . | nindent 6 }}
-      terminationGracePeriodSeconds: 5
+      terminationGracePeriodSeconds: 10
       nodeSelector:
         {{- toYaml .Values.apiGateway.nodeSelector | nindent 8 }}
       containers:
@@ -54,4 +54,26 @@ spec:
           resources:
             {{- toYaml .Values.apiGateway.resources | nindent 12 }}
           {{- include "ecom.securityContext" . | nindent 10 }}
-          {{- include "ecom.probes" (dict "port" .Values.apiGateway.port "path" "/health/live") | nindent 10 }}
+          {{- include "ecom.lifecycle" . | nindent 10 }}
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: {{ .Values.apiGateway.port }}
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 15
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: {{ .Values.apiGateway.port }}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: {{ .Values.apiGateway.port }}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3

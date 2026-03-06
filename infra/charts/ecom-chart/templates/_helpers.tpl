@@ -166,10 +166,13 @@ securityContext:
 
 {{/*
 通用健康检查探针
-用法: {{ include "ecom.probes" (dict "port" 3000 "path" "/health/live") }}
+用法: {{ include "ecom.probes" (dict "port" 3000 "path" "/health") }}
+      {{ include "ecom.probes" (dict "port" 3000 "path" "/health/ready" "livePath" "/health/live") }}
+livePath 可选，默认与 path 相同；用于 API Gateway 区分存活/就绪探针
 */}}
 {{- define "ecom.probes" -}}
 {{- $path := default "/health" .path -}}
+{{- $livePath := default $path .livePath -}}
 startupProbe:
   httpGet:
     path: {{ $path }}
@@ -177,10 +180,10 @@ startupProbe:
   initialDelaySeconds: 1
   periodSeconds: 2
   timeoutSeconds: 3
-  failureThreshold: 10
+  failureThreshold: 30
 livenessProbe:
   httpGet:
-    path: {{ $path }}
+    path: {{ $livePath }}
     port: {{ .port }}
   periodSeconds: 10
   timeoutSeconds: 3
@@ -189,7 +192,20 @@ readinessProbe:
   httpGet:
     path: {{ $path }}
     port: {{ .port }}
-  periodSeconds: 2
+  periodSeconds: 5
   timeoutSeconds: 3
   failureThreshold: 3
+{{- end }}
+
+{{/*
+preStop 钩子：Pod 收到 SIGTERM 后先等 3 秒
+让 K8s Endpoint 控制器有时间将此 Pod 从 Service 中摘除
+避免 NGINX Ingress 仍往已停止的 Pod 发请求
+用法: {{ include "ecom.lifecycle" . | nindent 10 }}
+*/}}
+{{- define "ecom.lifecycle" -}}
+lifecycle:
+  preStop:
+    exec:
+      command: ["sh", "-c", "sleep 3"]
 {{- end }}

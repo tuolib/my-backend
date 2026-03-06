@@ -23,6 +23,41 @@ export function liveCheck(c: Context<AppEnv>) {
   return c.json({ status: 'ok', service: 'api-gateway' }, 200);
 }
 
+/**
+ * 就绪检查：验证 DB + Redis 核心连接，不调用下游服务
+ * K8s readinessProbe / startupProbe 使用此端点
+ * 不检查下游服务避免超时（下游有自己的探针）
+ */
+let _ready = false;
+export function setGatewayReady(ready: boolean) { _ready = ready; }
+
+export async function readyCheck(c: Context<AppEnv>) {
+  if (!_ready) {
+    return c.json({ status: 'warming', service: 'api-gateway' }, 503);
+  }
+
+  try {
+    const [pgResult, redisResult] = await Promise.allSettled([
+      connection`SELECT 1`.then(() => 'ok' as const),
+      redis.ping().then(() => 'ok' as const),
+    ]);
+
+    const pgOk = pgResult.status === 'fulfilled' && pgResult.value === 'ok';
+    const redisOk = redisResult.status === 'fulfilled' && redisResult.value === 'ok';
+
+    if (pgOk && redisOk) {
+      return c.json({ status: 'ok', service: 'api-gateway' }, 200);
+    }
+    return c.json({
+      status: 'not_ready',
+      postgres: pgOk ? 'ok' : 'down',
+      redis: redisOk ? 'ok' : 'down',
+    }, 503);
+  } catch {
+    return c.json({ status: 'error', service: 'api-gateway' }, 503);
+  }
+}
+
 /** 检查单个下游服务健康状态 */
 async function checkService(url: string): Promise<string> {
   try {

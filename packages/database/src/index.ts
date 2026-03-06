@@ -4,10 +4,10 @@
  */
 
 // ── Client ──
-export { db, connection } from './client';
+export { db, connection, warmupDb } from './client';
 
 // ── Redis ──
-export { redis, createRedis } from './redis';
+export { redis, createRedis, warmupRedis } from './redis';
 
 // ── Migration ──
 export { migrate } from './migrate';

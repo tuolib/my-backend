@@ -5,9 +5,10 @@
  * 开发环境直连 REDIS_URL
  */
 import Redis from 'ioredis';
-import { getConfig } from '@repo/shared';
+import { getConfig, createLogger } from '@repo/shared';
 
 const config = getConfig();
+const log = createLogger('redis');
 
 export function createRedis(): Redis {
   const useSentinel = config.redis.sentinels.length > 0;
@@ -25,7 +26,6 @@ export function createRedis(): Redis {
         if (times > 10) return null;
         return Math.min(times * 500, 5000);
       },
-      lazyConnect: true,
     });
   }
 
@@ -35,9 +35,17 @@ export function createRedis(): Redis {
       if (times > 10) return null;
       return Math.min(times * 500, 5000);
     },
-    lazyConnect: true,
   });
 }
 
 /** 默认实例（大多数场景直接使用） */
 export const redis = createRedis();
+
+/**
+ * 预热：确保 Redis 连接已建立 + DB 连接池已创建首个连接
+ * 各服务在启动时调用，健康检查在预热完成后才返回 ready
+ */
+export async function warmupRedis(instance: Redis = redis): Promise<void> {
+  await instance.ping();
+  log.info('Redis connection warmed up');
+}

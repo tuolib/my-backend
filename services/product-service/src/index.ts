@@ -5,7 +5,7 @@
 import { Hono } from 'hono';
 import { requestId, logger, errorHandler, createLogger } from '@repo/shared';
 import type { AppEnv } from '@repo/shared';
-import { redis, registerLuaScripts } from '@repo/database';
+import { redis, registerLuaScripts, warmupDb, warmupRedis } from '@repo/database';
 import productRoutes from './routes/product';
 import categoryRoutes from './routes/category';
 import bannerRoutes from './routes/banner';
@@ -17,16 +17,19 @@ import stockRoutes from './routes/stock';
 
 const log = createLogger('product-service');
 
-// 启动时注册 Lua 脚本（带重试，等待 Redis 就绪）
-// 注意：不阻塞 HTTP 服务启动，确保启动探针可达
-let luaReady = false;
-async function initLuaScripts(maxRetries = 10, delayMs = 3000): Promise<void> {
+// 连接预热 + Lua 脚本注册（带重试）
+// 健康检查在预热完成前返回 503，阻止流量进入
+let ready = false;
+async function initService(maxRetries = 10, delayMs = 3000): Promise<void> {
+  // 先预热基础连接
+  await Promise.all([warmupDb(), warmupRedis()]);
+
+  // 注册 Lua 脚本
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      await redis.ping();
       await registerLuaScripts(redis);
-      luaReady = true;
-      log.info('Lua scripts registered');
+      ready = true;
+      log.info('Product service ready (Lua scripts registered)');
       return;
     } catch (err) {
       log.warn('Lua script registration failed', {
@@ -39,9 +42,8 @@ async function initLuaScripts(maxRetries = 10, delayMs = 3000): Promise<void> {
     }
   }
 }
-// 后台初始化，不阻塞 HTTP 服务器启动
-initLuaScripts().catch((err) => {
-  log.fatal('Lua script init failed, process will exit', { error: (err as Error).message });
+initService().catch((err) => {
+  log.fatal('Product service init failed, process will exit', { error: (err as Error).message });
   process.exit(1);
 });
 
@@ -63,7 +65,11 @@ app.route('/internal/product', internalRoutes);
 app.route('/internal/stock', stockRoutes);
 
 // 健康检查（GET + POST 双支持）
-const productHealth = (c: any) => c.json({ status: 'ok', service: 'product-service' });
+// 预热完成前返回 503，阻止 K8s/Docker 将流量路由到此 Pod
+const productHealth = (c: any) => {
+  if (!ready) return c.json({ status: 'warming', service: 'product-service' }, 503);
+  return c.json({ status: 'ok', service: 'product-service' });
+};
 app.get('/health', productHealth);
 app.post('/health', productHealth);
 

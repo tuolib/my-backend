@@ -4,10 +4,11 @@
  */
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { getConfig } from '@repo/shared';
+import { getConfig, createLogger } from '@repo/shared';
 import * as schema from './schema';
 
 const config = getConfig();
+const log = createLogger('postgres');
 
 const connection = postgres(config.database.url, {
   max: config.database.poolMax,
@@ -17,3 +18,12 @@ const connection = postgres(config.database.url, {
 
 export const db = drizzle(connection, { schema });
 export { connection };
+
+/**
+ * 预热：执行一次查询以建立连接池中的首个连接
+ * 避免首次业务请求时才触发连接建立导致延迟
+ */
+export async function warmupDb(): Promise<void> {
+  await connection`SELECT 1`;
+  log.info('PostgreSQL connection pool warmed up');
+}

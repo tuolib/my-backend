@@ -12,19 +12,26 @@ const log = createLogger('order-client');
 
 /** 获取用户订单统计 */
 export async function fetchUserOrderStats(userId: string): Promise<AdminUserOrderStats> {
-  const res = await internalFetch(`${ORDER_SERVICE_URL}/internal/order/user-stats`, {
-    method: 'POST',
-    body: JSON.stringify({ userId }),
-  });
+  const fallback: AdminUserOrderStats = { totalOrders: 0, totalPaid: 0, totalAmount: '0' };
 
-  if (!res.ok) {
-    log.error('order stats fetch failed', { status: res.status, userId });
-    return { totalOrders: 0, totalPaid: 0, totalAmount: '0' };
+  try {
+    const res = await internalFetch(`${ORDER_SERVICE_URL}/internal/order/user-stats`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!res.ok) {
+      log.error('order stats fetch failed', { status: res.status, userId });
+      return fallback;
+    }
+
+    const json = (await res.json()) as {
+      success: boolean;
+      data: AdminUserOrderStats;
+    };
+    return json.data ?? fallback;
+  } catch (err) {
+    log.error('order stats fetch error', { userId, error: String(err) });
+    return fallback;
   }
-
-  const json = (await res.json()) as {
-    success: boolean;
-    data: AdminUserOrderStats;
-  };
-  return json.data ?? { totalOrders: 0, totalPaid: 0, totalAmount: '0' };
 }

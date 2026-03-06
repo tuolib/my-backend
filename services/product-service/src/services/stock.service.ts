@@ -37,6 +37,31 @@ import * as skuRepo from '../repositories/sku.repo';
 const log = createLogger('stock');
 
 // ═══════════════════════════════════════════════
+// lazy sync — Redis key 缺失时从 DB 按需回填
+// ═══════════════════════════════════════════════
+
+/** 单个 SKU 从 DB 回填 Redis，返回是否成功 */
+async function lazySyncSku(skuId: string): Promise<boolean> {
+  const skuStock = await stockRepo.getSkuStock(skuId);
+  if (!skuStock) return false;
+  await setStock(redis, skuId, skuStock.stock);
+  log.info('lazy sync completed', { skuId, stock: skuStock.stock });
+  return true;
+}
+
+/** 批量检查并回填缺失的 SKU，返回实际回填数量 */
+async function lazySyncSkuBatch(skuIds: string[]): Promise<number> {
+  let synced = 0;
+  for (const skuId of skuIds) {
+    const exists = await redis.exists(`stock:${skuId}`);
+    if (exists) continue;
+    const ok = await lazySyncSku(skuId);
+    if (ok) synced++;
+  }
+  return synced;
+}
+
+// ═══════════════════════════════════════════════
 // reserve — 库存预扣（下单时调用）
 // ═══════════════════════════════════════════════
 
@@ -46,12 +71,21 @@ export async function reserveSingle(
   quantity: number,
   orderId: string,
 ): Promise<void> {
-  const { success, code } = await deductStock(redis, skuId, quantity);
+  let { success, code } = await deductStock(redis, skuId, quantity);
 
-  if (!success) {
-    if (code === -1) {
+  // Redis key 缺失 → 从 DB 回填后重试一次
+  if (!success && code === -1) {
+    log.warn('stock key missing, lazy sync from DB', { skuId });
+    const synced = await lazySyncSku(skuId);
+    if (synced) {
+      ({ success, code } = await deductStock(redis, skuId, quantity));
+    }
+    if (!success && code === -1) {
       throw new InternalError(`Stock key not found for SKU ${skuId}, run sync`);
     }
+  }
+
+  if (!success) {
     // code === 0 → 库存不足
     const available = await getStock(redis, skuId);
     throw new ValidationError('库存不足', ErrorCode.STOCK_INSUFFICIENT, {
@@ -75,7 +109,16 @@ export async function reserveMulti(
   items: Array<{ skuId: string; quantity: number }>,
   orderId: string,
 ): Promise<void> {
-  const { success, failedIndex } = await deductStockMulti(redis, items);
+  let { success, failedIndex } = await deductStockMulti(redis, items);
+
+  // 失败时检查是否因 key 缺失，批量回填后重试一次
+  if (!success) {
+    const missingSynced = await lazySyncSkuBatch(items.map((i) => i.skuId));
+    if (missingSynced > 0) {
+      log.warn('stock keys missing, lazy synced from DB', { orderId, missingSynced });
+      ({ success, failedIndex } = await deductStockMulti(redis, items));
+    }
+  }
 
   if (!success) {
     const failedItem = items[failedIndex! - 1]; // failedIndex 从 1 开始

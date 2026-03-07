@@ -24,6 +24,7 @@ usage() {
     echo "  rollback <service>  Rollback service to previous image"
     echo "  reload <service>    Force restart a service"
     echo "  scale <service> N   Scale service to N replicas"
+    echo "  reset               Remove stack and clean all data volumes (for fresh deploy)"
     exit 1
 }
 
@@ -49,7 +50,7 @@ cmd_status() {
     echo "═══════ Patroni Cluster ═══════"
     PATRONI_CONTAINER=$(docker ps -qf "name=${STACK}_patroni-1" 2>/dev/null | head -1)
     if [ -n "${PATRONI_CONTAINER}" ]; then
-        docker exec "${PATRONI_CONTAINER}" patronictl list 2>/dev/null || echo "Patroni not ready"
+        docker exec "${PATRONI_CONTAINER}" patronictl -c /etc/patroni/patroni.yml list ecom-pg 2>/dev/null || echo "Patroni not ready"
     else
         echo "Patroni container not found"
     fi
@@ -92,6 +93,58 @@ cmd_scale() {
     docker service scale "${STACK}_${SERVICE}=${REPLICAS}"
 }
 
+cmd_reset() {
+    echo "This will remove the entire stack and ALL data volumes (PG, etcd, Redis)."
+    echo "Press Ctrl+C within 5 seconds to abort..."
+    sleep 5
+
+    echo ""
+    echo "═══════ Removing stack ═══════"
+    docker stack rm "${STACK}" 2>/dev/null || true
+    echo "Waiting for containers to stop..."
+    sleep 15
+
+    echo ""
+    echo "═══════ Cleaning data volumes (this node) ═══════"
+    DATA_VOLUMES=(
+        "${STACK}_patroni-1-data"
+        "${STACK}_patroni-2-data"
+        "${STACK}_etcd-1-data"
+        "${STACK}_etcd-2-data"
+        "${STACK}_etcd-3-data"
+        "${STACK}_redis-primary-data"
+        "${STACK}_redis-replica-data"
+        "${STACK}_certbot-data"
+    )
+    for VOL in "${DATA_VOLUMES[@]}"; do
+        if docker volume rm "${VOL}" 2>/dev/null; then
+            echo "  Removed: ${VOL}"
+        else
+            echo "  Skipped: ${VOL} (not on this node or not found)"
+        fi
+    done
+
+    echo ""
+    echo "═══════ Cleaning data volumes (remote nodes) ═══════"
+    REMOTE_NODES=$(docker node ls --format '{{.Hostname}}' | grep -v "$(hostname)")
+    if [ -n "${REMOTE_NODES}" ]; then
+        for NODE_HOST in ${REMOTE_NODES}; do
+            echo "── ${NODE_HOST} ──"
+            # Docker API doesn't support remote volume rm, use SSH
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "${NODE_HOST}" \
+                "for v in ${DATA_VOLUMES[*]}; do docker volume rm \"\$v\" 2>/dev/null && echo \"  Removed: \$v\" || true; done" 2>/dev/null; then
+                true
+            else
+                echo "  SSH not available — manually run on ${NODE_HOST}:"
+                echo "    docker volume rm ${DATA_VOLUMES[*]}"
+            fi
+        done
+    fi
+
+    echo ""
+    echo "Reset complete. Ready for fresh deploy."
+}
+
 # ── Main ──
 
 COMMAND="${1:-}"
@@ -103,5 +156,6 @@ case "${COMMAND}" in
     rollback) cmd_rollback "$@" ;;
     reload)   cmd_reload "$@" ;;
     scale)    cmd_scale "$@" ;;
+    reset)    cmd_reset ;;
     *)        usage ;;
 esac

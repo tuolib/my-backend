@@ -34,19 +34,10 @@ export PATRONI_POSTGRESQL_CONNECT_ADDRESS="${PATRONI_NAME}:5432"
 echo "REST API: ${PATRONI_RESTAPI_CONNECT_ADDRESS}"
 echo "PG Connect: ${PATRONI_POSTGRESQL_CONNECT_ADDRESS}"
 
-# 确保数据目录权限正确，清理失败的初始化残留
+# 数据目录
 DATA_DIR="/var/lib/postgresql/data/pgdata"
-if [ ! -d "${DATA_DIR}" ]; then
-    echo "Creating data directory: ${DATA_DIR}"
-    mkdir -p "${DATA_DIR}"
-elif [ -n "$(ls -A "${DATA_DIR}" 2>/dev/null)" ] && [ ! -f "${DATA_DIR}/PG_VERSION" ]; then
-    echo "Data directory has partial/corrupted data (no PG_VERSION), cleaning up..."
-    rm -rf "${DATA_DIR:?}"/*
-else
-    echo "Data directory exists: ${DATA_DIR}"
-    echo "  Contents: $(ls -A "${DATA_DIR}" 2>/dev/null | head -20)"
-fi
-chown -R postgres:postgres /var/lib/postgresql/data
+SCOPE="ecom-pg"
+mkdir -p "${DATA_DIR}"
 
 # 等待 etcd 集群就绪（至少 2/3 节点可达 = 有 quorum）
 echo "Waiting for etcd cluster quorum..."
@@ -70,6 +61,48 @@ done
 if [ $RETRY -eq $MAX_RETRIES ]; then
     echo "WARNING: etcd quorum not confirmed after ${MAX_RETRIES} retries, starting Patroni anyway..."
 fi
+
+# 自动清理过期本地数据
+# 判断逻辑：etcd 中无已初始化集群 → 本地残留数据必定过期
+HAS_LOCAL_DATA="false"
+if [ -n "$(ls -A "${DATA_DIR}" 2>/dev/null)" ]; then
+    HAS_LOCAL_DATA="true"
+fi
+
+if [ "${HAS_LOCAL_DATA}" = "true" ]; then
+    # 情况 1：initdb 未完成（无 PG_VERSION）→ 直接清理
+    if [ ! -f "${DATA_DIR}/PG_VERSION" ]; then
+        echo "Partial initdb detected (no PG_VERSION), cleaning up..."
+        rm -rf "${DATA_DIR:?}"/*
+    else
+        # 情况 2：查询 etcd 确认集群是否已初始化
+        CLUSTER_STATE=$(python3 -c "
+import urllib.request, urllib.error
+for host in ['etcd-1:2379', 'etcd-2:2379', 'etcd-3:2379']:
+    try:
+        urllib.request.urlopen('http://{}/v2/keys/service/${SCOPE}/initialize'.format(host), timeout=3)
+        print('initialized'); break
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            print('empty'); break
+    except: pass
+else:
+    print('unknown')
+" 2>/dev/null)
+        echo "  etcd cluster state: ${CLUSTER_STATE}"
+
+        if [ "${CLUSTER_STATE}" = "empty" ]; then
+            echo "Cluster not initialized in etcd but local pgdata exists — stale data, cleaning up..."
+            rm -rf "${DATA_DIR:?}"/*
+        fi
+        # 'initialized' → Patroni 正常接管（rewind/basebackup）
+        # 'unknown'     → etcd 不可达，保留数据让 Patroni 自行判断
+    fi
+fi
+
+chown -R postgres:postgres /var/lib/postgresql/data
+echo "Data directory: ${DATA_DIR}"
+echo "  Contents: $(ls -A "${DATA_DIR}" 2>/dev/null | head -5 || echo "(empty)")"
 
 echo "Starting Patroni as postgres user..."
 exec gosu postgres patroni /etc/patroni/patroni.yml

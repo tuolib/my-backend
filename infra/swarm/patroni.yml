@@ -65,6 +65,8 @@ postgresql:
   listen: 0.0.0.0:5432
   data_dir: /var/lib/postgresql/data/pgdata
   pgpass: /tmp/pgpass
+  remove_data_directory_on_rewind_failure: true
+  remove_data_directory_on_diverged_timeline: true
   authentication:
     replication:
       username: replicator

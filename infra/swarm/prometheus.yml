@@ -1,0 +1,36 @@
+# Prometheus 采集配置
+#
+# 目标：node-exporter（主机指标）+ cAdvisor（容器指标）
+# 存储保留 15 天（见 docker-stack.yml 启动参数）
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Node Exporter — 每台节点的 CPU/内存/磁盘/网络
+  - job_name: "node-exporter"
+    dns_sd_configs:
+      - names:
+          - "tasks.node-exporter"
+        type: A
+        port: 9100
+
+  # cAdvisor — 每个容器的资源使用
+  - job_name: "cadvisor"
+    dns_sd_configs:
+      - names:
+          - "tasks.cadvisor"
+        type: A
+        port: 8080
+
+  # HAProxy Stats — 数据代理状态
+  - job_name: "haproxy"
+    dns_sd_configs:
+      - names:
+          - "tasks.data-proxy"
+        type: A
+        port: 8404
+    metrics_path: /stats
+    params:
+      stats: ["csv"]

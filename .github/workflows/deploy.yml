@@ -2,7 +2,7 @@
 #
 # 触发方式:
 #   1. push 到 main → 自动部署到 k3s-multi
-#   2. 手动触发 workflow_dispatch → 可选平台
+#   2. 手动触发 workflow_dispatch → 可选平台（含 swarm）
 
 name: Build & Deploy
 
@@ -19,6 +19,7 @@ on:
         options:
           - k3s-single
           - k3s-multi
+          - swarm
       image_tag:
         description: "Custom image tag (leave blank = SHA)"
         required: false
@@ -61,7 +62,7 @@ jobs:
       - name: Type check
         run: bunx tsc --noEmit
 
-  # ─── Job ② 并行构建 5 个微服务镜像 ──────────────────────────────────────────
+  # ─── Job ② 并行构建镜像（5 微服务 + patroni） ──────────────────────────────
   build-images:
     name: Build ${{ matrix.service.name }}
     needs: check
@@ -74,15 +75,22 @@ jobs:
         service:
           - name: api-gateway
             dockerfile: apps/api-gateway/Dockerfile
+            context: "."
           - name: user-service
             dockerfile: services/user-service/Dockerfile
+            context: "."
           - name: product-service
             dockerfile: services/product-service/Dockerfile
+            context: "."
           - name: cart-service
             dockerfile: services/cart-service/Dockerfile
+            context: "."
           - name: order-service
             dockerfile: services/order-service/Dockerfile
-
+            context: "."
+          - name: patroni
+            dockerfile: infra/swarm/Dockerfile.patroni
+            context: infra/swarm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -111,7 +119,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.service.context }}
           file: ${{ matrix.service.dockerfile }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
@@ -511,14 +519,235 @@ jobs:
         if: always()
         run: rm -f "${HOME}/.kube/config"
 
+  # ─── Job ③-B Docker Swarm 部署 ──────────────────────────────────────────────
+  deploy-swarm:
+    name: Deploy to Swarm
+    needs: build-images
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.platform == 'swarm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production-swarm
+      url: https://${{ vars.SWARM_DOMAIN || env.DOMAIN }}
+
+    steps:
+      - name: Checkout (Swarm configs)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            infra/swarm
+            infra/redis
+
+      - name: Compute image tag
+        id: vars
+        run: |
+          OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          CUSTOM_TAG="${{ inputs.image_tag }}"
+          TAG="${CUSTOM_TAG:-${GITHUB_SHA::12}}"
+          echo "registry=ghcr.io/${OWNER_LC}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SWARM_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ vars.SWARM_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy to Swarm
+        env:
+          REGISTRY: ${{ steps.vars.outputs.registry }}
+          TAG: ${{ steps.vars.outputs.tag }}
+          SWARM_HOST: ${{ vars.SWARM_HOST }}
+          SWARM_USER: ${{ vars.SWARM_USER || 'root' }}
+          DOMAIN: ${{ vars.SWARM_DOMAIN || env.DOMAIN }}
+          EMAIL: ${{ vars.SWARM_EMAIL || 'admin@example.com' }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          POSTGRES_PASSWORD: ${{ secrets.SWARM_POSTGRES_PASSWORD }}
+          REPLICATION_PASSWORD: ${{ secrets.SWARM_REPLICATION_PASSWORD }}
+          JWT_ACCESS_SECRET: ${{ secrets.SWARM_JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.SWARM_JWT_REFRESH_SECRET }}
+          INTERNAL_SECRET: ${{ secrets.SWARM_INTERNAL_SECRET }}
+        run: |
+          set -euo pipefail
+          SSH_CMD="ssh -o StrictHostKeyChecking=no ${SWARM_USER}@${SWARM_HOST}"
+
+          echo "══════════════════════════════════════════"
+          echo "Deploying to Swarm (tag: ${TAG})"
+          echo "══════════════════════════════════════════"
+
+          # ── 1. 上传 Swarm 配置文件到 S1 ──
+          echo "Uploading stack configs..."
+          scp -o StrictHostKeyChecking=no -r \
+              infra/swarm/ infra/redis/ \
+              "${SWARM_USER}@${SWARM_HOST}:/tmp/swarm-deploy/"
+
+          # ── 2. 登录 GHCR（所有节点拉取镜像需要认证） ──
+          echo "Logging into GHCR on all nodes..."
+          ${SSH_CMD} bash <<REMOTE_LOGIN
+            echo "${GHCR_PAT}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            # 在所有节点登录（通过 SSH）
+            for NODE_IP in \$(docker node ls --format '{{.Hostname}}' -q 2>/dev/null | xargs -I{} docker node inspect {} --format '{{.Status.Addr}}' 2>/dev/null); do
+              if [ "\${NODE_IP}" != "\$(hostname -I | awk '{print \$1}')" ]; then
+                ssh -o StrictHostKeyChecking=no root@\${NODE_IP} \
+                  "echo '${GHCR_PAT}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin" 2>/dev/null || true
+              fi
+            done
+          REMOTE_LOGIN
+
+          # ── 3. 创建/更新 Docker Secrets（幂等） ──
+          echo "Creating Docker secrets..."
+          ${SSH_CMD} bash <<REMOTE_SECRETS
+            create_or_update_secret() {
+              local NAME="\$1" VALUE="\$2"
+              if docker secret inspect "\${NAME}" >/dev/null 2>&1; then
+                echo "  Secret \${NAME} already exists, skipping"
+              else
+                echo "\${VALUE}" | docker secret create "\${NAME}" -
+                echo "  Secret \${NAME} created"
+              fi
+            }
+            create_or_update_secret postgres_password "${POSTGRES_PASSWORD}"
+            create_or_update_secret replication_password "${REPLICATION_PASSWORD}"
+            create_or_update_secret jwt_access_secret "${JWT_ACCESS_SECRET}"
+            create_or_update_secret jwt_refresh_secret "${JWT_REFRESH_SECRET}"
+            create_or_update_secret internal_secret "${INTERNAL_SECRET}"
+          REMOTE_SECRETS
+
+          # ── 4. Docker Stack Deploy ──
+          echo "Deploying stack..."
+          ${SSH_CMD} bash <<REMOTE_DEPLOY
+            set -euo pipefail
+            cd /tmp/swarm-deploy/swarm
+
+            export REGISTRY="${REGISTRY}"
+            export TAG="${TAG}"
+            export DOMAIN="${DOMAIN}"
+            export EMAIL="${EMAIL}"
+
+            docker stack deploy \
+              -c docker-stack.yml \
+              --with-registry-auth \
+              --prune \
+              ecom
+
+            echo "Stack deployed, waiting for services to converge..."
+          REMOTE_DEPLOY
+
+          # ── 5. 等待服务收敛 ──
+          echo "Waiting for services to converge (max 180s)..."
+          ${SSH_CMD} bash <<'REMOTE_WAIT'
+            set -euo pipefail
+            TIMEOUT=180
+            ELAPSED=0
+
+            while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
+              ALL_READY=true
+
+              # 检查所有服务的副本数
+              while IFS= read -r LINE; do
+                SVC=$(echo "${LINE}" | awk '{print $2}')
+                REPLICAS=$(echo "${LINE}" | awk '{print $4}')
+                CURRENT=$(echo "${REPLICAS}" | cut -d'/' -f1)
+                DESIRED=$(echo "${REPLICAS}" | cut -d'/' -f2)
+                if [ "${CURRENT}" != "${DESIRED}" ]; then
+                  ALL_READY=false
+                fi
+              done < <(docker stack services ecom --format "{{.ID}} {{.Name}} {{.Mode}} {{.Replicas}}" 2>/dev/null)
+
+              if ${ALL_READY}; then
+                echo "All services converged!"
+                docker stack services ecom
+                break
+              fi
+
+              echo "  [${ELAPSED}s] Waiting..."
+              sleep 10
+              ELAPSED=$((ELAPSED + 10))
+            done
+
+            if [ ${ELAPSED} -ge ${TIMEOUT} ]; then
+              echo "::warning::Timeout waiting for convergence"
+              docker stack services ecom
+            fi
+          REMOTE_WAIT
+
+          # ── 6. 数据库迁移 ──
+          echo "Running database migration..."
+          ${SSH_CMD} bash <<REMOTE_MIGRATE
+            set -euo pipefail
+
+            # 等待 Patroni 就绪
+            echo "Waiting for Patroni to be ready..."
+            for i in \$(seq 1 30); do
+              PATRONI_ID=\$(docker ps -qf name=ecom_patroni-1 2>/dev/null | head -1)
+              if [ -n "\${PATRONI_ID}" ]; then
+                if docker exec "\${PATRONI_ID}" patronictl list 2>/dev/null | grep -q Leader; then
+                  echo "Patroni cluster is ready"
+                  break
+                fi
+              fi
+              echo "  Waiting for Patroni... (\${i}/30)"
+              sleep 5
+            done
+
+            # 等待 API Gateway 就绪
+            echo "Waiting for API Gateway..."
+            for i in \$(seq 1 30); do
+              GW_ID=\$(docker ps -qf name=ecom_api-gateway --format "{{.ID}}" 2>/dev/null | head -1)
+              if [ -n "\${GW_ID}" ]; then
+                if docker exec "\${GW_ID}" bun run -e "fetch('http://localhost:3000/health',{method:'POST'}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
+                  echo "API Gateway is ready"
+                  break
+                fi
+              fi
+              echo "  Waiting for API Gateway... (\${i}/30)"
+              sleep 5
+            done
+
+            # Schema 迁移
+            GW_ID=\$(docker ps -qf name=ecom_api-gateway --format "{{.ID}}" 2>/dev/null | head -1)
+            if [ -n "\${GW_ID}" ]; then
+              echo "Running schema migration..."
+              docker exec "\${GW_ID}" bun run packages/database/src/migrate.ts 2>&1 || echo "::warning::Schema migration failed (may already be up to date)"
+
+              echo "Running data migration..."
+              PRODUCT_ID=\$(docker ps -qf name=ecom_product-service --format "{{.ID}}" 2>/dev/null | head -1)
+              if [ -n "\${PRODUCT_ID}" ]; then
+                docker exec "\${PRODUCT_ID}" bun run packages/database/src/data-migrate.ts 2>&1 || echo "::warning::Data migration failed"
+                docker exec "\${PRODUCT_ID}" bun run packages/database/src/seed-prod.ts 2>&1 || echo "::warning::Seed failed"
+              fi
+            else
+              echo "::warning::API Gateway not found, skipping migration"
+            fi
+          REMOTE_MIGRATE
+
+      - name: Verify deployment
+        if: always()
+        env:
+          SWARM_HOST: ${{ vars.SWARM_HOST }}
+          SWARM_USER: ${{ vars.SWARM_USER || 'root' }}
+        run: |
+          SSH_CMD="ssh -o StrictHostKeyChecking=no ${SWARM_USER}@${SWARM_HOST}"
+          echo "══════════ Stack Services ══════════"
+          ${SSH_CMD} docker stack services ecom 2>/dev/null || true
+          echo ""
+          echo "══════════ Node List ══════════"
+          ${SSH_CMD} docker node ls 2>/dev/null || true
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519
+
   # ─── Job ④ 外部健康检查 ─────────────────────────────────────────────────────
   smoke-test:
     name: Smoke test
-    needs: deploy-k3s
+    needs: [deploy-k3s, deploy-swarm]
     if: >-
       always() &&
       github.event_name != 'pull_request' &&
-      needs.deploy-k3s.result == 'success'
+      (needs.deploy-k3s.result == 'success' || needs.deploy-swarm.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -548,21 +777,34 @@ jobs:
           exit 1
 
       - name: Write kubeconfig for rollback
-        if: failure()
+        if: failure() && env.PLATFORM != 'swarm'
         run: |
           mkdir -p "${HOME}/.kube"
           echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
           chmod 600 "${HOME}/.kube/config"
 
       - name: Setup Helm for rollback
-        if: failure()
+        if: failure() && env.PLATFORM != 'swarm'
         uses: azure/setup-helm@v4
 
       - name: Rollback Helm release
-        if: failure()
+        if: failure() && env.PLATFORM != 'swarm'
         run: |
           echo "::warning::Smoke test failed — rolling back Helm release"
           helm rollback ecom -n ecom --wait || echo "::error::Helm rollback failed"
+
+      - name: Rollback Swarm services
+        if: failure() && env.PLATFORM == 'swarm'
+        run: |
+          echo "::warning::Smoke test failed — rolling back Swarm services"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SWARM_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          SSH_CMD="ssh -o StrictHostKeyChecking=no ${{ vars.SWARM_USER || 'root' }}@${{ vars.SWARM_HOST }}"
+          for SVC in api-gateway user-service product-service cart-service order-service; do
+            ${SSH_CMD} "docker service rollback ecom_${SVC}" 2>/dev/null || true
+          done
+          rm -f ~/.ssh/id_ed25519
 
       - name: Cleanup kubeconfig
         if: always()
@@ -575,6 +817,7 @@ jobs:
           case "${PLATFORM}" in
             k3s-single) PLATFORM_LABEL="K3s single (Helm)" ;;
             k3s-multi)  PLATFORM_LABEL="K3s multi (Helm)" ;;
+            swarm)      PLATFORM_LABEL="Docker Swarm" ;;
             *)          PLATFORM_LABEL="${PLATFORM}" ;;
           esac
 
@@ -593,6 +836,10 @@ jobs:
           OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           CUSTOM_TAG="${{ inputs.image_tag }}"
           TAG="${CUSTOM_TAG:-${GITHUB_SHA::12}}"
-          for SVC in api-gateway user-service product-service cart-service order-service; do
+          SERVICES="api-gateway user-service product-service cart-service order-service"
+          if [ "${PLATFORM}" = "swarm" ]; then
+            SERVICES="${SERVICES} patroni"
+          fi
+          for SVC in ${SERVICES}; do
             echo "- \`ghcr.io/${OWNER_LC}/ecom-${SVC}:${TAG}\`" >> "$GITHUB_STEP_SUMMARY"
           done

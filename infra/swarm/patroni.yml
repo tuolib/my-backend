@@ -1,0 +1,72 @@
+# Patroni 配置 — PostgreSQL HA
+#
+# 运行时变量通过 patroni-entrypoint.sh 注入：
+#   PATRONI_NAME — 节点名（patroni-1 / patroni-2）
+#   PATRONI_SUPERUSER_PASSWORD — PG 超级用户密码
+#   PATRONI_REPLICATION_PASSWORD — 复制用户密码
+#   PATRONI_RESTAPI_CONNECT_ADDRESS — REST API 连接地址
+#   PATRONI_POSTGRESQL_CONNECT_ADDRESS — PG 连接地址
+
+scope: ecom-pg
+
+restapi:
+  listen: 0.0.0.0:8008
+
+etcd3:
+  hosts: etcd-1:2379,etcd-2:2379,etcd-3:2379
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      parameters:
+        # 连接
+        max_connections: 200
+        superuser_reserved_connections: 3
+        # 内存（2GB 实例）
+        shared_buffers: 512MB
+        effective_cache_size: 1536MB
+        work_mem: 8MB
+        maintenance_work_mem: 128MB
+        # WAL
+        wal_buffers: 16MB
+        checkpoint_completion_target: 0.9
+        max_wal_size: 2GB
+        wal_level: replica
+        max_wal_senders: 5
+        max_replication_slots: 5
+        hot_standby: "on"
+        # 查询优化（SSD）
+        random_page_cost: 1.1
+        effective_io_concurrency: 200
+        default_statistics_target: 100
+        # 日志
+        log_min_duration_statement: 200
+        log_timezone: UTC
+        timezone: UTC
+        listen_addresses: "*"
+
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+
+  post_bootstrap: /scripts/patroni-post-bootstrap.sh
+
+  pg_hba:
+    - local all all trust
+    - host all all 0.0.0.0/0 md5
+    - host replication replicator 0.0.0.0/0 md5
+
+postgresql:
+  listen: 0.0.0.0:5432
+  data_dir: /var/lib/postgresql/data/pgdata
+  pgpass: /tmp/pgpass
+  authentication:
+    replication:
+      username: replicator
+    superuser:
+      username: postgres

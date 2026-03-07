@@ -1,0 +1,757 @@
+# Docker Swarm Stack — 电商微服务平台生产部署
+#
+# 22 个服务：3 etcd + 2 patroni + 2 redis + 3 sentinel + 1 data-proxy
+#            + 2 nginx + 1 certbot + 5 应用 + 2 global 监控 + 1 prometheus
+#
+# 网络隔离：public_net (DMZ) / service_net (内部) / data_net (数据层，外部不可达)
+# 部署方式：docker stack deploy -c docker-stack.yml ecom
+
+version: "3.9"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Networks
+# ═══════════════════════════════════════════════════════════════════════════════
+
+networks:
+  public_net:
+    driver: overlay
+  service_net:
+    driver: overlay
+  data_net:
+    driver: overlay
+    internal: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Volumes
+# ═══════════════════════════════════════════════════════════════════════════════
+
+volumes:
+  patroni-1-data:
+  patroni-2-data:
+  redis-primary-data:
+  redis-replica-data:
+  etcd-1-data:
+  etcd-2-data:
+  etcd-3-data:
+  certbot-data:
+  prometheus-data:
+  grafana-data:
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Secrets (external — 由 GitHub Actions 或 init-node.sh 创建)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+secrets:
+  postgres_password:
+    external: true
+  replication_password:
+    external: true
+  jwt_access_secret:
+    external: true
+  jwt_refresh_secret:
+    external: true
+  internal_secret:
+    external: true
+  ssl_cert:
+    external: true
+  ssl_key:
+    external: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Configs (文件内容随 stack deploy 自动创建)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+configs:
+  app_entrypoint:
+    file: ./app-entrypoint.sh
+  nginx_conf:
+    file: ./nginx.conf
+  haproxy_cfg:
+    file: ./haproxy-data.cfg
+  redis_sentinel_conf:
+    file: ./redis-sentinel.conf
+  redis_conf:
+    file: ../redis/redis.conf
+  certbot_entrypoint:
+    file: ./certbot-entrypoint.sh
+  prometheus_yml:
+    file: ./prometheus.yml
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Services
+# ═══════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── etcd 集群（3 节点分布式共识，防脑裂） ──────────────────────────────────
+
+  etcd-1:
+    image: quay.io/coreos/etcd:v3.5.17
+    hostname: etcd-1
+    environment:
+      ETCD_NAME: etcd-1
+      ETCD_DATA_DIR: /etcd-data
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-1:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-1:2380
+      ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
+    volumes:
+      - etcd-1-data:/etcd-data
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == db-primary
+      resources:
+        reservations:
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  etcd-2:
+    image: quay.io/coreos/etcd:v3.5.17
+    hostname: etcd-2
+    environment:
+      ETCD_NAME: etcd-2
+      ETCD_DATA_DIR: /etcd-data
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-2:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-2:2380
+      ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
+    volumes:
+      - etcd-2-data:/etcd-data
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == db-replica
+      resources:
+        reservations:
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  etcd-3:
+    image: quay.io/coreos/etcd:v3.5.17
+    hostname: etcd-3
+    environment:
+      ETCD_NAME: etcd-3
+      ETCD_DATA_DIR: /etcd-data
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-3:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
+    volumes:
+      - etcd-3-data:/etcd-data
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == gateway
+      resources:
+        reservations:
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  # ── PostgreSQL HA（Patroni + etcd，自动故障转移 ~10s） ──────────────────────
+
+  patroni-1:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-patroni:${TAG:-latest}
+    hostname: patroni-1
+    environment:
+      PATRONI_NAME: patroni-1
+    secrets:
+      - postgres_password
+      - replication_password
+    volumes:
+      - patroni-1-data:/var/lib/postgresql/data
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == db-primary
+      resources:
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+      update_config:
+        order: stop-first
+
+  patroni-2:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-patroni:${TAG:-latest}
+    hostname: patroni-2
+    environment:
+      PATRONI_NAME: patroni-2
+    secrets:
+      - postgres_password
+      - replication_password
+    volumes:
+      - patroni-2-data:/var/lib/postgresql/data
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == db-replica
+      resources:
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+      update_config:
+        order: stop-first
+
+  # ── Redis HA（主从 + Sentinel 投票，HAProxy 自动路由） ──────────────────────
+
+  redis-primary:
+    image: redis:7-alpine
+    hostname: redis-primary
+    command: redis-server /usr/local/etc/redis/redis.conf
+    configs:
+      - source: redis_conf
+        target: /usr/local/etc/redis/redis.conf
+    volumes:
+      - redis-primary-data:/data
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == db-primary
+      resources:
+        reservations:
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        order: stop-first
+
+  redis-replica:
+    image: redis:7-alpine
+    hostname: redis-replica
+    command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-primary 6379
+    configs:
+      - source: redis_conf
+        target: /usr/local/etc/redis/redis.conf
+    volumes:
+      - redis-replica-data:/data
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == db-replica
+      resources:
+        reservations:
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        order: stop-first
+
+  redis-sentinel-1:
+    image: redis:7-alpine
+    hostname: redis-sentinel-1
+    entrypoint: sh
+    command: >
+      -c 'cp /etc/redis/sentinel-template.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf'
+    configs:
+      - source: redis_sentinel_conf
+        target: /etc/redis/sentinel-template.conf
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == db-primary
+      resources:
+        reservations:
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  redis-sentinel-2:
+    image: redis:7-alpine
+    hostname: redis-sentinel-2
+    entrypoint: sh
+    command: >
+      -c 'cp /etc/redis/sentinel-template.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf'
+    configs:
+      - source: redis_sentinel_conf
+        target: /etc/redis/sentinel-template.conf
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == db-replica
+      resources:
+        reservations:
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  redis-sentinel-3:
+    image: redis:7-alpine
+    hostname: redis-sentinel-3
+    entrypoint: sh
+    command: >
+      -c 'cp /etc/redis/sentinel-template.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf'
+    configs:
+      - source: redis_sentinel_conf
+        target: /etc/redis/sentinel-template.conf
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == gateway
+      resources:
+        reservations:
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  # ── 数据代理（HAProxy — PG :5432 + Redis :6379 合并） ──────────────────────
+
+  data-proxy:
+    image: haproxy:2.9-alpine
+    hostname: data-proxy
+    configs:
+      - source: haproxy_cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+    networks:
+      - data_net
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        order: start-first
+        delay: 5s
+
+  # ── Nginx（SSL 终结 + 反向代理，ingress mesh 多节点入口） ──────────────────
+
+  nginx:
+    image: nginx:1.27-alpine
+    hostname: nginx
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: ingress
+      - target: 443
+        published: 443
+        protocol: tcp
+        mode: ingress
+    configs:
+      - source: nginx_conf
+        target: /etc/nginx/nginx.conf
+    secrets:
+      - ssl_cert
+      - ssl_key
+    networks:
+      - public_net
+    deploy:
+      replicas: 2
+      resources:
+        reservations:
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+      placement:
+        preferences:
+          - spread: node.id
+
+  # ── Certbot（SSL 自动签发 & 续签，仅 S3） ──────────────────────────────────
+
+  certbot:
+    image: certbot/certbot:latest
+    entrypoint: /bin/sh
+    command: ["/scripts/certbot-entrypoint.sh"]
+    environment:
+      DOMAIN: ${DOMAIN:-example.com}
+      EMAIL: ${EMAIL:-admin@example.com}
+      STACK_NAME: ecom
+    volumes:
+      - certbot-data:/etc/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock
+    configs:
+      - source: certbot_entrypoint
+        target: /scripts/certbot-entrypoint.sh
+        mode: 0755
+    networks:
+      - public_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == gateway
+      resources:
+        reservations:
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        delay: 60s
+
+  # ── 应用微服务（优先 S4/S5 Worker，可溢出到 Manager） ──────────────────────
+
+  api-gateway:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-api-gateway:${TAG:-latest}
+    entrypoint: ["/bin/sh", "/scripts/app-entrypoint.sh"]
+    command: ["bun", "run", "apps/api-gateway/src/index.ts"]
+    environment:
+      API_GATEWAY_PORT: "3000"
+      NODE_ENV: production
+      USER_SERVICE_URL: http://user-service:3001
+      PRODUCT_SERVICE_URL: http://product-service:3002
+      CART_SERVICE_URL: http://cart-service:3003
+      ORDER_SERVICE_URL: http://order-service:3004
+    secrets:
+      - postgres_password
+      - jwt_access_secret
+      - jwt_refresh_secret
+      - internal_secret
+    configs:
+      - source: app_entrypoint
+        target: /scripts/app-entrypoint.sh
+        mode: 0755
+    networks:
+      - public_net
+      - service_net
+      - data_net
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      replicas: 2
+      resources:
+        reservations:
+          memory: 128M
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      placement:
+        preferences:
+          - spread: node.id
+
+  user-service:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-user-service:${TAG:-latest}
+    entrypoint: ["/bin/sh", "/scripts/app-entrypoint.sh"]
+    command: ["bun", "run", "services/user-service/src/index.ts"]
+    environment:
+      USER_SERVICE_PORT: "3001"
+      NODE_ENV: production
+    secrets:
+      - postgres_password
+      - jwt_access_secret
+      - jwt_refresh_secret
+      - internal_secret
+    configs:
+      - source: app_entrypoint
+        target: /scripts/app-entrypoint.sh
+        mode: 0755
+    networks:
+      - service_net
+      - data_net
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3001/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      replicas: 2
+      resources:
+        reservations:
+          memory: 128M
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      placement:
+        preferences:
+          - spread: node.id
+
+  product-service:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-product-service:${TAG:-latest}
+    entrypoint: ["/bin/sh", "/scripts/app-entrypoint.sh"]
+    command: ["bun", "run", "services/product-service/src/index.ts"]
+    environment:
+      PRODUCT_SERVICE_PORT: "3002"
+      NODE_ENV: production
+    secrets:
+      - postgres_password
+      - jwt_access_secret
+      - jwt_refresh_secret
+      - internal_secret
+    configs:
+      - source: app_entrypoint
+        target: /scripts/app-entrypoint.sh
+        mode: 0755
+    networks:
+      - service_net
+      - data_net
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3002/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      replicas: 2
+      resources:
+        reservations:
+          memory: 128M
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      placement:
+        preferences:
+          - spread: node.id
+
+  cart-service:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-cart-service:${TAG:-latest}
+    entrypoint: ["/bin/sh", "/scripts/app-entrypoint.sh"]
+    command: ["bun", "run", "services/cart-service/src/index.ts"]
+    environment:
+      CART_SERVICE_PORT: "3003"
+      NODE_ENV: production
+      PRODUCT_SERVICE_URL: http://product-service:3002
+    secrets:
+      - postgres_password
+      - jwt_access_secret
+      - jwt_refresh_secret
+      - internal_secret
+    configs:
+      - source: app_entrypoint
+        target: /scripts/app-entrypoint.sh
+        mode: 0755
+    networks:
+      - service_net
+      - data_net
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3003/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      replicas: 2
+      resources:
+        reservations:
+          memory: 128M
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      placement:
+        preferences:
+          - spread: node.id
+
+  order-service:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-order-service:${TAG:-latest}
+    entrypoint: ["/bin/sh", "/scripts/app-entrypoint.sh"]
+    command: ["bun", "run", "services/order-service/src/index.ts"]
+    environment:
+      ORDER_SERVICE_PORT: "3004"
+      NODE_ENV: production
+      PRODUCT_SERVICE_URL: http://product-service:3002
+      CART_SERVICE_URL: http://cart-service:3003
+      USER_SERVICE_URL: http://user-service:3001
+    secrets:
+      - postgres_password
+      - jwt_access_secret
+      - jwt_refresh_secret
+      - internal_secret
+    configs:
+      - source: app_entrypoint
+        target: /scripts/app-entrypoint.sh
+        mode: 0755
+    networks:
+      - service_net
+      - data_net
+    healthcheck:
+      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3004/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      replicas: 2
+      resources:
+        reservations:
+          memory: 128M
+      update_config:
+        order: start-first
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      placement:
+        preferences:
+          - spread: node.id
+
+  # ── 监控（Prometheus + Grafana + Node Exporter + cAdvisor） ────────────────
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    hostname: "{{.Node.Hostname}}"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    networks:
+      - data_net
+    deploy:
+      mode: global
+      resources:
+        reservations:
+          memory: 32M
+      restart_policy:
+        condition: on-failure
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    hostname: "{{.Node.Hostname}}"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - data_net
+    deploy:
+      mode: global
+      resources:
+        reservations:
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+
+  prometheus:
+    image: prom/prometheus:latest
+    hostname: prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    configs:
+      - source: prometheus_yml
+        target: /etc/prometheus/prometheus.yml
+    volumes:
+      - prometheus-data:/prometheus
+    networks:
+      - data_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == gateway
+      resources:
+        reservations:
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+
+  grafana:
+    image: grafana/grafana:latest
+    hostname: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: "https://${DOMAIN:-example.com}/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - data_net
+      - public_net
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == gateway
+      resources:
+        reservations:
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s

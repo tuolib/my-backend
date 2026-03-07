@@ -118,6 +118,8 @@ infra/swarm/
 ├── patroni-post-bootstrap.sh # 首次引导后创建数据库和 Schema
 ├── haproxy-data.cfg          # PG + Redis 连接代理配置（合并）
 ├── redis-sentinel.conf       # Redis Sentinel 配置
+├── prometheus.yml            # Prometheus 采集配置
+├── pg-backup.sh              # 数据库定时备份脚本
 
 infra/postgres/
 ├── postgresql.conf           # PG 调优（本地开发用）
@@ -133,7 +135,7 @@ docs/
 ├── swarm-setup.md            # 用户操作手册
 ```
 
-## 服务总览（18 个）
+## 服务总览（22 个）
 
 | 类别 | 服务 | 数量 | 部署位置 |
 |------|------|------|---------|
@@ -144,10 +146,13 @@ docs/
 | 数据代理 | data-proxy (HAProxy) | 1 | 任意节点 |
 | 网关 | nginx (replicas=2) | 2 | 任意节点（Swarm 调度） |
 | SSL | certbot | 1 | S3 (gateway) |
-| 应用 | api-gateway, user/product/cart/order-service | 5 | S4/S5 |
+| 监控 | node-exporter, cadvisor | 2 | global（每台节点各一个） |
+| 监控 | prometheus, grafana | 2 | S3 |
+| 应用 | api-gateway, user/product/cart/order-service | 5 | 优先 S4/S5，可溢出 |
 
 - PG + Redis 共用一个 data-proxy（HAProxy 多端口监听）
 - Nginx 多副本，证书通过 Docker Secret 共享，不绑定特定节点
+- node-exporter 和 cadvisor 用 global 模式，每台节点自动运行一个
 
 ## ops.sh 命令
 
@@ -162,6 +167,51 @@ ops.sh scale <service> N # 扩缩容
 ```
 
 不包含 deploy、migrate、setup、init、destroy（这些由 GitHub Actions 或 init-node.sh 处理）。
+
+## 数据库备份
+
+Patroni 主节点上定时备份，防止误删或代码 bug 导致的数据损坏（主从同步无法防御这种情况）：
+
+- 每天一次 `pg_dump` 全量备份
+- 默认存本地磁盘（免费），可选上传 Vultr Object Storage（$5/月）
+- 保留最近 7 天，自动清理过期备份
+- 备份脚本通过 `init-node.sh` 自动配置 cron 到 Patroni 所在节点
+
+## Docker 垃圾清理
+
+每次部署拉取新镜像，旧镜像和无用容器会积累占满磁盘：
+
+- 每台节点添加 cron：`docker system prune -af --filter "until=72h"`
+- 每天执行一次，清理 3 天前的无用镜像、容器、网络
+- 通过 `init-node.sh` 初始化集群时自动配置此 cron
+
+## 监控
+
+Prometheus + Grafana + Node Exporter，部署在 Swarm 中：
+
+```
+Node Exporter (每台节点) → Prometheus (S3) → Grafana (S3)
+                              ↑
+                     cAdvisor (每台节点，容器指标)
+```
+
+- Node Exporter：global 模式部署，采集每台节点的 CPU/内存/磁盘/网络
+- cAdvisor：global 模式部署，采集每个容器的资源使用
+- Prometheus：单副本，定期抓取所有 Exporter，存储指标数据
+- Grafana：单副本，可视化看板，预配置 Node + Docker + PG 面板
+
+## CI/CD 镜像安全扫描
+
+GitHub Actions 构建镜像后，使用 Trivy 扫描已知漏洞：
+
+```yaml
+- name: Scan image
+  uses: aquasecurity/trivy-action@master
+  with:
+    image-ref: ${{ image }}
+    severity: CRITICAL,HIGH
+    exit-code: 1        # 有高危漏洞则阻止部署
+```
 
 ## 设计原则
 

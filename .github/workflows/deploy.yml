@@ -17,8 +17,6 @@ on:
         type: choice
         default: "k3s-multi"
         options:
-          - swarm
-          - k8s
           - k3s-single
           - k3s-multi
       image_tag:
@@ -84,8 +82,6 @@ jobs:
             dockerfile: services/cart-service/Dockerfile
           - name: order-service
             dockerfile: services/order-service/Dockerfile
-          - name: patroni
-            dockerfile: infra/swarm/Dockerfile.patroni
 
     steps:
       - name: Checkout
@@ -130,201 +126,8 @@ jobs:
           echo "- **Image**: \`${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Pushed**: \`${{ github.event_name != 'pull_request' }}\`" >> "$GITHUB_STEP_SUMMARY"
 
-  # ─── Job ③a SSH 部署到 Docker Swarm ─────────────────────────────────────────
-  deploy-swarm:
-    name: Deploy to Swarm
-    needs: build-images
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      inputs.platform == 'swarm'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: production
-      url: https://api.find345.site
-
-    steps:
-      - name: Compute image tag
-        id: vars
-        run: |
-          OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
-          CUSTOM_TAG="${{ inputs.image_tag }}"
-          TAG="${CUSTOM_TAG:-${GITHUB_SHA::12}}"
-          echo "registry=ghcr.io/${OWNER_LC}" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout (for stack file)
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: infra
-
-      - name: Copy stack configs to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ vars.SWARM_HOST }}
-          username: ${{ vars.SWARM_USER }}
-          key: ${{ secrets.SWARM_SSH_KEY }}
-          source: "infra/"
-          target: /opt/ecom
-
-      - name: Create secrets & deploy stack
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ vars.SWARM_HOST }}
-          username: ${{ vars.SWARM_USER }}
-          key: ${{ secrets.SWARM_SSH_KEY }}
-          script: |
-            set -euo pipefail
-
-            REGISTRY="${{ steps.vars.outputs.registry }}"
-            TAG="${{ steps.vars.outputs.tag }}"
-            STACK="ecom"
-            SERVICES="api-gateway user-service product-service cart-service order-service"
-
-            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-            # ── 1. 节点标签（幂等，按 Node ID 分配，hostname 重复也安全） ──
-            echo "══════════ Node Labels ══════════"
-            SELF_ID=$(docker node inspect self --format '{{.ID}}')
-            OTHER_MGR_IDS=$(docker node ls --filter "role=manager" --format '{{.ID}}' | grep -v "^${SELF_ID}$" | sort)
-
-            NODE_DB_PRIMARY="${SELF_ID}"
-            NODE_DB_REPLICA=$(echo "${OTHER_MGR_IDS}" | sed -n '1p')
-            NODE_GATEWAY=$(echo "${OTHER_MGR_IDS}" | sed -n '2p')
-
-            for pair in "db-primary:${NODE_DB_PRIMARY}" "db-replica:${NODE_DB_REPLICA}" "gateway:${NODE_GATEWAY}"; do
-              ROLE="${pair%%:*}"; NID="${pair#*:}"
-              if [ -n "${NID}" ]; then
-                HNAME=$(docker node inspect --format '{{.Description.Hostname}}' "${NID}" 2>/dev/null || echo "${NID}")
-                docker node update --label-add role="${ROLE}" "${NID}" >/dev/null 2>&1
-                echo "  ${HNAME} (${NID:0:12}) → ${ROLE}"
-              fi
-            done
-
-            # ── 2. Docker Secrets（幂等，已存在则跳过） ──
-            create_secret() {
-              if docker secret inspect "$1" >/dev/null 2>&1; then
-                echo "  $1 exists"
-              else
-                echo -n "$2" | docker secret create "$1" -
-                echo "  $1 created"
-              fi
-            }
-            echo "══════════ Secrets ══════════"
-            create_secret postgres_password   "${{ secrets.SWARM_POSTGRES_PASSWORD }}"
-            create_secret jwt_access_secret   "${{ secrets.SWARM_JWT_ACCESS_SECRET }}"
-            create_secret jwt_refresh_secret  "${{ secrets.SWARM_JWT_REFRESH_SECRET }}"
-            create_secret internal_secret     "${{ secrets.SWARM_INTERNAL_SECRET }}"
-
-            # ── 3. Deploy / Update ──
-            if ! docker service inspect "${STACK}_api-gateway" >/dev/null 2>&1; then
-              echo ""
-              echo "══════════ Initial Deployment ══════════"
-
-              # 清理旧 stack（释放端口）
-              OLD_STACK=$(docker stack ls --format '{{.Name}}' | grep -v "^${STACK}$" | head -1 || true)
-              if [ -n "${OLD_STACK}" ]; then
-                echo "Removing old stack: ${OLD_STACK}"
-                docker stack rm "${OLD_STACK}"
-                TIMEOUT=60; ELAPSED=0
-                while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
-                  [ "$(docker service ls --filter "name=${OLD_STACK}_" -q 2>/dev/null | wc -l)" -eq 0 ] && break
-                  sleep 5; ELAPSED=$((ELAPSED + 5))
-                done
-              fi
-
-              cd /opt/ecom/infra/swarm
-              REGISTRY="${REGISTRY}" TAG="${TAG}" \
-                CERTBOT_DOMAIN="${{ vars.CERTBOT_DOMAIN || 'api.find345.site' }}" \
-                CERTBOT_EMAIL="${{ vars.CERTBOT_EMAIL || 'admin@find345.site' }}" \
-                CORS_ORIGINS="${{ vars.CORS_ORIGINS || '' }}" \
-                docker stack deploy -c docker-stack.yml --with-registry-auth "${STACK}"
-            else
-              echo ""
-              echo "══════════ Rolling Update ══════════"
-
-              # 先 re-deploy stack（拾取配置变更：nginx.conf、entrypoint 等）
-              cd /opt/ecom/infra/swarm
-              REGISTRY="${REGISTRY}" TAG="${TAG}" \
-                CERTBOT_DOMAIN="${{ vars.CERTBOT_DOMAIN || 'api.find345.site' }}" \
-                CERTBOT_EMAIL="${{ vars.CERTBOT_EMAIL || 'admin@find345.site' }}" \
-                CORS_ORIGINS="${{ vars.CORS_ORIGINS || '' }}" \
-                docker stack deploy -c docker-stack.yml --with-registry-auth "${STACK}"
-
-              # 更新 Patroni 镜像（两个节点共用同一镜像）
-              PATRONI_IMAGE="${REGISTRY}/ecom-patroni:${TAG}"
-              for P in patroni-1 patroni-2; do
-                echo "Updating ${STACK}_${P} → ${PATRONI_IMAGE}"
-                docker service update --with-registry-auth --image "${PATRONI_IMAGE}" "${STACK}_${P}" || true
-              done
-
-              # 逐个滚动更新应用镜像
-              for SVC in ${SERVICES}; do
-                IMAGE="${REGISTRY}/ecom-${SVC}:${TAG}"
-                echo "Updating ${STACK}_${SVC} → ${IMAGE}"
-                docker service update --with-registry-auth --image "${IMAGE}" "${STACK}_${SVC}"
-
-                TIMEOUT=180; ELAPSED=0
-                while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
-                  STATE=$(docker service inspect --format '{{.UpdateStatus.State}}' "${STACK}_${SVC}" 2>/dev/null || echo "unknown")
-                  case "${STATE}" in
-                    completed)          echo "  ${SVC} done"; break ;;
-                    rollback_completed) echo "  ${SVC} rolled back!"; exit 1 ;;
-                    paused)             echo "  ${SVC} paused!"; exit 1 ;;
-                    *)                  sleep 5; ELAPSED=$((ELAPSED + 5)) ;;
-                  esac
-                done
-                [ ${ELAPSED} -ge ${TIMEOUT} ] && { echo "${SVC} timeout"; exit 1; }
-              done
-            fi
-
-            # ── 4. 等待所有服务就绪 ──
-            echo ""
-            echo "══════════ Waiting for convergence ══════════"
-            TIMEOUT=180; ELAPSED=0
-            while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
-              NOT_READY=$(docker stack services "${STACK}" --format '{{.Replicas}}' \
-                | awk -F'/' '$1 != $2 { n++ } END { print n+0 }')
-              [ "${NOT_READY}" -eq 0 ] && break
-              sleep 5; ELAPSED=$((ELAPSED + 5))
-            done
-            docker stack services "${STACK}"
-
-            # ── 5. Schema 迁移 + Data 迁移 + Seed ──
-            echo ""
-            echo "══════════ Schema Migration ══════════"
-            GW_ID=$(docker ps -q --filter "name=${STACK}_api-gateway" --filter "status=running" | head -1)
-            if [ -n "${GW_ID}" ]; then
-              docker exec "${GW_ID}" /app-entrypoint.sh \
-                bun run packages/database/src/migrate.ts \
-                || echo "::warning::Schema migration failed (may already be up to date)"
-            else
-              echo "::warning::api-gateway not running, skipping schema migration"
-            fi
-
-            echo ""
-            echo "══════════ Data Migration ══════════"
-            PS_ID=$(docker ps -q --filter "name=${STACK}_product-service" --filter "status=running" | head -1)
-            if [ -n "${PS_ID}" ]; then
-              docker exec "${PS_ID}" /app-entrypoint.sh \
-                bun run packages/database/src/data-migrate.ts \
-                || echo "::warning::Data migration failed (may already be up to date)"
-
-              echo ""
-              echo "══════════ Production Seed (idempotent) ══════════"
-              docker exec "${PS_ID}" /app-entrypoint.sh \
-                bun run packages/database/src/seed-prod.ts \
-                || echo "::warning::Production seed failed"
-            else
-              echo "::warning::product-service not running, skipping data migration & seed"
-            fi
-
-            echo ""
-            echo "All done."
-            docker service ls --filter "name=${STACK}_"
-
-  # ─── Job ③b Kubeconfig 直连 K8s/K3s API Server，Helm 部署 ──────────────────
-  deploy-k8s:
+  # ─── Job ③ Helm 部署到 K3s ──────────────────────────────────────────────────
+  deploy-k3s:
     name: Deploy to ${{ inputs.platform || 'k3s-multi' }}
     needs: build-images
     if: >-
@@ -372,12 +175,7 @@ jobs:
       - name: Write kubeconfig
         run: |
           mkdir -p "${HOME}/.kube"
-          PLATFORM="${{ env.PLATFORM }}"
-          if [[ "${PLATFORM}" == k3s* ]]; then
-            echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
-          else
-            echo "${{ secrets.K8S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
-          fi
+          echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
           chmod 600 "${HOME}/.kube/config"
 
       - name: Verify cluster connectivity
@@ -544,20 +342,11 @@ jobs:
             helm rollback "${RELEASE}" 0 -n "${NAMESPACE}" --no-hooks || true
           fi
 
-          # 根据平台选择 secrets（K8S_ 或 K3S_ 前缀）
-          if [[ "${PLATFORM}" == k3s* ]]; then
-            PG_PASS="${{ secrets.K3S_POSTGRES_PASSWORD }}"
-            REPL_PASS="${{ secrets.K3S_REPLICATION_PASSWORD }}"
-            JWT_ACCESS="${{ secrets.K3S_JWT_ACCESS_SECRET }}"
-            JWT_REFRESH="${{ secrets.K3S_JWT_REFRESH_SECRET }}"
-            INTERNAL="${{ secrets.K3S_INTERNAL_SECRET }}"
-          else
-            PG_PASS="${{ secrets.K8S_POSTGRES_PASSWORD }}"
-            REPL_PASS="${{ secrets.K8S_REPLICATION_PASSWORD }}"
-            JWT_ACCESS="${{ secrets.K8S_JWT_ACCESS_SECRET }}"
-            JWT_REFRESH="${{ secrets.K8S_JWT_REFRESH_SECRET }}"
-            INTERNAL="${{ secrets.K8S_INTERNAL_SECRET }}"
-          fi
+          PG_PASS="${{ secrets.K3S_POSTGRES_PASSWORD }}"
+          REPL_PASS="${{ secrets.K3S_REPLICATION_PASSWORD }}"
+          JWT_ACCESS="${{ secrets.K3S_JWT_ACCESS_SECRET }}"
+          JWT_REFRESH="${{ secrets.K3S_JWT_REFRESH_SECRET }}"
+          INTERNAL="${{ secrets.K3S_INTERNAL_SECRET }}"
 
           # 若集群已有 CNPG 超级用户密码，优先使用其值，避免与仓库 Secret 漂移
           PG_SECRET_NAME="${RELEASE}-pg-superuser"
@@ -725,11 +514,11 @@ jobs:
   # ─── Job ④ 外部健康检查 ─────────────────────────────────────────────────────
   smoke-test:
     name: Smoke test
-    needs: [deploy-swarm, deploy-k8s]
+    needs: deploy-k3s
     if: >-
       always() &&
       github.event_name != 'pull_request' &&
-      (needs.deploy-swarm.result == 'success' || needs.deploy-k8s.result == 'success')
+      needs.deploy-k3s.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -759,29 +548,24 @@ jobs:
           exit 1
 
       - name: Write kubeconfig for rollback
-        if: failure() && startsWith(env.PLATFORM, 'k')
+        if: failure()
         run: |
           mkdir -p "${HOME}/.kube"
-          PLATFORM="${{ env.PLATFORM }}"
-          if [[ "${PLATFORM}" == k3s* ]]; then
-            echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
-          else
-            echo "${{ secrets.K8S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
-          fi
+          echo "${{ secrets.K3S_KUBECONFIG }}" | base64 -d > "${HOME}/.kube/config"
           chmod 600 "${HOME}/.kube/config"
 
       - name: Setup Helm for rollback
-        if: failure() && startsWith(env.PLATFORM, 'k')
+        if: failure()
         uses: azure/setup-helm@v4
 
       - name: Rollback Helm release
-        if: failure() && startsWith(env.PLATFORM, 'k')
+        if: failure()
         run: |
           echo "::warning::Smoke test failed — rolling back Helm release"
           helm rollback ecom -n ecom --wait || echo "::error::Helm rollback failed"
 
       - name: Cleanup kubeconfig
-        if: always() && startsWith(env.PLATFORM, 'k')
+        if: always()
         run: rm -f "${HOME}/.kube/config"
 
       - name: Deploy summary
@@ -789,10 +573,8 @@ jobs:
         run: |
           PLATFORM="${{ env.PLATFORM }}"
           case "${PLATFORM}" in
-            swarm)      PLATFORM_LABEL="Docker Swarm" ;;
             k3s-single) PLATFORM_LABEL="K3s single (Helm)" ;;
             k3s-multi)  PLATFORM_LABEL="K3s multi (Helm)" ;;
-            k8s)        PLATFORM_LABEL="Kubernetes (Helm)" ;;
             *)          PLATFORM_LABEL="${PLATFORM}" ;;
           esac
 

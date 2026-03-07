@@ -71,5 +71,5 @@ if [ $RETRY -eq $MAX_RETRIES ]; then
     echo "WARNING: etcd quorum not confirmed after ${MAX_RETRIES} retries, starting Patroni anyway..."
 fi
 
-echo "Starting Patroni..."
-exec patroni /etc/patroni/patroni.yml
+echo "Starting Patroni as postgres user..."
+exec gosu postgres patroni /etc/patroni/patroni.yml

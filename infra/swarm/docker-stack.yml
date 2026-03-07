@@ -2,23 +2,17 @@
 # Docker Swarm Stack — 电商平台生产部署
 # ═══════════════════════════════════════════════════════════════
 #
-# 集群拓扑（5 节点）:
 #   S1 Manager  db-primary   PG主 + Redis主 + Sentinel
 #   S2 Manager  db-replica   PG从 + Redis从 + Sentinel
 #   S3 Manager  gateway      Nginx + Certbot + Sentinel
 #   S4 Worker   (auto)       API Gateway + 微服务
 #   S5 Worker   (auto)       微服务
 #
-# VPC 网络隔离:
 #   public_net   nginx <-> api-gateway          (DMZ)
 #   service_net  api-gateway <-> 微服务          (内部通信)
-#   data_net     微服务 <-> PG/Redis             (internal, 无外部路由)
-#
-# 部署:
-#   ./deploy.sh deploy
-# ═══════════════════════════════════════════════════════════════
+#   data_net     微服务 <-> PG/Redis             (internal)
 
-# ── 共享配置（YAML 锚点复用） ──
+# ── YAML 锚点 ──
 
 x-logging: &logging
   driver: json-file
@@ -26,7 +20,21 @@ x-logging: &logging
     max-size: "10m"
     max-file: "3"
 
+x-app-env: &app-env
+  NODE_ENV: production
+  LOG_LEVEL: info
+  REDIS_URL: redis://redis-primary:6379
+
+x-app-healthcheck: &app-healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+
 x-app-deploy: &app-deploy
+  placement:
+    constraints:
+      - node.role == worker
   update_config:
     parallelism: 1
     delay: 15s
@@ -53,11 +61,20 @@ x-app-secrets: &app-secrets
   - internal_secret
   - postgres_password
 
+# 所有应用服务共享：secrets + 共享 entrypoint + 优雅停机 + 日志轮转
+x-app-base: &app-base
+  secrets: *app-secrets
+  configs:
+    - source: app_entrypoint
+      target: /app-entrypoint.sh
+      mode: 0755
+  entrypoint: /app-entrypoint.sh
+  stop_grace_period: 30s
+  logging: *logging
+
 services:
 
-  # ═══════════════════════════════════════
-  # DATA LAYER — S1 (primary) / S2 (replica)
-  # ═══════════════════════════════════════
+  # ═══ DATA LAYER ═══
 
   postgres-primary:
     image: postgres:16-alpine
@@ -85,8 +102,7 @@ services:
       -c max_wal_senders=5
       -c max_replication_slots=5
       -c hot_standby=on
-    networks:
-      - data_net
+    networks: [data_net]
     stop_grace_period: 60s
     logging: *logging
     healthcheck:
@@ -98,14 +114,10 @@ services:
     deploy:
       replicas: 1
       placement:
-        constraints:
-          - node.labels.role == db-primary
+        constraints: [node.labels.role == db-primary]
       resources:
-        limits:
-          cpus: "1.0"
-          memory: 1024M
-        reservations:
-          memory: 512M
+        limits:   { cpus: "1.0", memory: 1024M }
+        reservations: { memory: 512M }
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -114,8 +126,7 @@ services:
   postgres-replica:
     image: postgres:16-alpine
     hostname: pg-replica
-    secrets:
-      - postgres_password
+    secrets: [postgres_password]
     configs:
       - source: pg_replica_conf
         target: /etc/postgresql/postgresql.conf
@@ -140,8 +151,7 @@ services:
           echo "=== Replica initialized ==="
         fi
         exec gosu postgres postgres -c config_file=/etc/postgresql/postgresql.conf
-    networks:
-      - data_net
+    networks: [data_net]
     stop_grace_period: 60s
     logging: *logging
     healthcheck:
@@ -153,14 +163,10 @@ services:
     deploy:
       replicas: 1
       placement:
-        constraints:
-          - node.labels.role == db-replica
+        constraints: [node.labels.role == db-replica]
       resources:
-        limits:
-          cpus: "1.0"
-          memory: 1024M
-        reservations:
-          memory: 512M
+        limits:   { cpus: "1.0", memory: 1024M }
+        reservations: { memory: 512M }
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -172,11 +178,9 @@ services:
     configs:
       - source: redis_conf
         target: /usr/local/etc/redis/redis.conf
-    volumes:
-      - redis_primary_data:/data
+    volumes: [redis_primary_data:/data]
     command: redis-server /usr/local/etc/redis/redis.conf
-    networks:
-      - data_net
+    networks: [data_net]
     logging: *logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -186,17 +190,11 @@ services:
     deploy:
       replicas: 1
       placement:
-        constraints:
-          - node.labels.role == db-primary
+        constraints: [node.labels.role == db-primary]
       resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-        reservations:
-          memory: 256M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
+        limits:   { cpus: "0.5", memory: 512M }
+        reservations: { memory: 256M }
+      restart_policy: { condition: on-failure, delay: 5s }
 
   redis-replica:
     image: redis:7-alpine
@@ -204,11 +202,9 @@ services:
     configs:
       - source: redis_conf
         target: /usr/local/etc/redis/redis.conf
-    volumes:
-      - redis_replica_data:/data
+    volumes: [redis_replica_data:/data]
     command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-primary 6379
-    networks:
-      - data_net
+    networks: [data_net]
     logging: *logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -218,30 +214,19 @@ services:
     deploy:
       replicas: 1
       placement:
-        constraints:
-          - node.labels.role == db-replica
+        constraints: [node.labels.role == db-replica]
       resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-        reservations:
-          memory: 256M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
+        limits:   { cpus: "0.5", memory: 512M }
+        reservations: { memory: 256M }
+      restart_policy: { condition: on-failure, delay: 5s }
 
   redis-sentinel:
     image: redis:7-alpine
     configs:
       - source: redis_sentinel_conf
         target: /etc/redis/sentinel.conf
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        cp /etc/redis/sentinel.conf /tmp/sentinel.conf
-        exec redis-sentinel /tmp/sentinel.conf
-    networks:
-      - data_net
+    entrypoint: ["sh", "-c", "cp /etc/redis/sentinel.conf /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"]
+    networks: [data_net]
     logging: *logging
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "26379", "ping"]
@@ -251,23 +236,13 @@ services:
     deploy:
       replicas: 3
       placement:
-        constraints:
-          - node.role == manager
-        preferences:
-          - spread: node.id
+        constraints: [node.role == manager]
+        preferences: [{ spread: node.id }]
       resources:
-        limits:
-          cpus: "0.1"
-          memory: 64M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
+        limits: { cpus: "0.1", memory: 64M }
+      restart_policy: { condition: on-failure, delay: 5s }
 
-  # ═══════════════════════════════════════
-  # GATEWAY LAYER — S3
-  # mode: ingress -> 任意节点 IP 可接入
-  # nginx + certbot 共享证书卷，同节点部署
-  # ═══════════════════════════════════════
+  # ═══ GATEWAY LAYER ═══
 
   nginx:
     image: nginx:1-alpine
@@ -278,14 +253,9 @@ services:
       - certbot_certs:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
     ports:
-      - target: 80
-        published: 80
-        mode: ingress
-      - target: 443
-        published: 443
-        mode: ingress
-    networks:
-      - public_net
+      - { target: 80,  published: 80,  mode: ingress }
+      - { target: 443, published: 443, mode: ingress }
+    networks: [public_net]
     logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/nginx-health || exit 1"]
@@ -296,21 +266,12 @@ services:
     deploy:
       replicas: 1
       placement:
-        constraints:
-          - node.labels.role == gateway
+        constraints: [node.labels.role == gateway]
       resources:
-        limits:
-          cpus: "0.5"
-          memory: 256M
-        reservations:
-          memory: 128M
-      update_config:
-        order: start-first
-        failure_action: rollback
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 10
+        limits:   { cpus: "0.5", memory: 256M }
+        reservations: { memory: 128M }
+      update_config: { order: start-first, failure_action: rollback }
+      restart_policy: { condition: on-failure, delay: 5s, max_attempts: 10 }
 
   certbot:
     image: certbot/certbot
@@ -329,226 +290,107 @@ services:
     deploy:
       replicas: 1
       placement:
-        constraints:
-          - node.labels.role == gateway
+        constraints: [node.labels.role == gateway]
       resources:
-        limits:
-          cpus: "0.1"
-          memory: 64M
-      restart_policy:
-        condition: on-failure
-        delay: 30s
+        limits: { cpus: "0.1", memory: 64M }
+      restart_policy: { condition: on-failure, delay: 30s }
 
-  # ═══════════════════════════════════════
-  # APPLICATION LAYER — S4 / S5 (Workers)
-  # start-first 滚动更新，失败自动回滚
-  # ═══════════════════════════════════════
+  # ═══ APPLICATION LAYER ═══
 
   api-gateway:
+    <<: *app-base
     image: ${REGISTRY}/ecom-api-gateway:${TAG:-latest}
     environment:
+      <<: *app-env
       API_GATEWAY_PORT: "3000"
-      REDIS_URL: redis://redis-primary:6379
-      NODE_ENV: production
-      LOG_LEVEL: info
       USER_SERVICE_URL: http://user-service:3001
       PRODUCT_SERVICE_URL: http://product-service:3002
       CART_SERVICE_URL: http://cart-service:3003
       ORDER_SERVICE_URL: http://order-service:3004
       CORS_ORIGINS: ${CORS_ORIGINS:-}
-    secrets: *app-secrets
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
-        export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
-        export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
-        exec bun run apps/api-gateway/src/index.ts
-    networks:
-      - public_net
-      - service_net
-      - data_net
-    stop_grace_period: 30s
-    logging: *logging
+    command: bun run apps/api-gateway/src/index.ts
+    networks: [public_net, service_net, data_net]
     healthcheck:
+      <<: *app-healthcheck
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     deploy:
       <<: *app-deploy
       replicas: 1
-      placement:
-        constraints:
-          - node.role == worker
 
   user-service:
+    <<: *app-base
     image: ${REGISTRY}/ecom-user-service:${TAG:-latest}
     environment:
+      <<: *app-env
       USER_SERVICE_PORT: "3001"
-      REDIS_URL: redis://redis-primary:6379
-      NODE_ENV: production
-      LOG_LEVEL: info
-    secrets: *app-secrets
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
-        export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
-        export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
-        exec bun run services/user-service/src/index.ts
-    networks:
-      - service_net
-      - data_net
-    stop_grace_period: 30s
-    logging: *logging
+    command: bun run services/user-service/src/index.ts
+    networks: [service_net, data_net]
     healthcheck:
+      <<: *app-healthcheck
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3001/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     deploy:
       <<: *app-deploy
       replicas: 1
-      placement:
-        constraints:
-          - node.role == worker
 
   product-service:
+    <<: *app-base
     image: ${REGISTRY}/ecom-product-service:${TAG:-latest}
     environment:
+      <<: *app-env
       PRODUCT_SERVICE_PORT: "3002"
-      REDIS_URL: redis://redis-primary:6379
-      NODE_ENV: production
-      LOG_LEVEL: info
-    secrets: *app-secrets
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
-        export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
-        export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
-        exec bun run services/product-service/src/index.ts
-    networks:
-      - service_net
-      - data_net
-    stop_grace_period: 30s
-    logging: *logging
+    command: bun run services/product-service/src/index.ts
+    networks: [service_net, data_net]
     healthcheck:
+      <<: *app-healthcheck
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3002/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     deploy:
       <<: *app-deploy
       replicas: 1
-      placement:
-        constraints:
-          - node.role == worker
 
   cart-service:
+    <<: *app-base
     image: ${REGISTRY}/ecom-cart-service:${TAG:-latest}
     environment:
+      <<: *app-env
       CART_SERVICE_PORT: "3003"
-      REDIS_URL: redis://redis-primary:6379
-      NODE_ENV: production
-      LOG_LEVEL: info
       PRODUCT_SERVICE_URL: http://product-service:3002
-    secrets: *app-secrets
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
-        export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
-        export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
-        exec bun run services/cart-service/src/index.ts
-    networks:
-      - service_net
-      - data_net
-    stop_grace_period: 30s
-    logging: *logging
+    command: bun run services/cart-service/src/index.ts
+    networks: [service_net, data_net]
     healthcheck:
+      <<: *app-healthcheck
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3003/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     deploy:
       <<: *app-deploy
       replicas: 1
-      placement:
-        constraints:
-          - node.role == worker
 
   order-service:
+    <<: *app-base
     image: ${REGISTRY}/ecom-order-service:${TAG:-latest}
     environment:
+      <<: *app-env
       ORDER_SERVICE_PORT: "3004"
-      REDIS_URL: redis://redis-primary:6379
-      NODE_ENV: production
-      LOG_LEVEL: info
       PRODUCT_SERVICE_URL: http://product-service:3002
       CART_SERVICE_URL: http://cart-service:3003
       USER_SERVICE_URL: http://user-service:3001
-    secrets: *app-secrets
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        export JWT_ACCESS_SECRET=$$(cat /run/secrets/jwt_access_secret)
-        export JWT_REFRESH_SECRET=$$(cat /run/secrets/jwt_refresh_secret)
-        export INTERNAL_SECRET=$$(cat /run/secrets/internal_secret)
-        export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
-        exec bun run services/order-service/src/index.ts
-    networks:
-      - service_net
-      - data_net
-    stop_grace_period: 30s
-    logging: *logging
+    command: bun run services/order-service/src/index.ts
+    networks: [service_net, data_net]
     healthcheck:
+      <<: *app-healthcheck
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3004/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     deploy:
       <<: *app-deploy
       replicas: 1
-      placement:
-        constraints:
-          - node.role == worker
 
-# ═══════════════════════════════════════
-# VPC NETWORKS
-# ═══════════════════════════════════════
+# ═══ VPC NETWORKS ═══
 #
 #  public_net ── nginx <-> api-gateway
-#                              |
-#  service_net ── api-gateway <-> user/product/cart/order
-#                                        |
-#  data_net ── 微服务 <-> postgres/redis  (internal)
-#
-#  nginx 无法触达微服务和数据库
-#  数据库对外完全不可达
+#  service_net ── api-gateway <-> 微服务
+#  data_net ── 微服务 <-> PG/Redis (internal, 无外部路由)
 
 networks:
-  public_net:
-    driver: overlay
-  service_net:
-    driver: overlay
-  data_net:
-    driver: overlay
-    internal: true
-
-# ═══════════════════════════════════════
-# VOLUMES
-# ═══════════════════════════════════════
+  public_net:  { driver: overlay }
+  service_net: { driver: overlay }
+  data_net:    { driver: overlay, internal: true }
 
 volumes:
   pg_primary_data:
@@ -558,38 +400,19 @@ volumes:
   certbot_certs:
   certbot_webroot:
 
-# ═══════════════════════════════════════
-# SECRETS — deploy.sh setup 创建
-# ═══════════════════════════════════════
-
 secrets:
-  postgres_password:
-    external: true
-  jwt_access_secret:
-    external: true
-  jwt_refresh_secret:
-    external: true
-  internal_secret:
-    external: true
-
-# ═══════════════════════════════════════
-# CONFIGS
-# ═══════════════════════════════════════
+  postgres_password: { external: true }
+  jwt_access_secret: { external: true }
+  jwt_refresh_secret: { external: true }
+  internal_secret: { external: true }
 
 configs:
-  pg_conf:
-    file: ../postgres/postgresql.conf
-  pg_init_sql:
-    file: ../postgres/init.sql
-  pg_init_replication:
-    file: ./pg-init-replication.sh
-  pg_replica_conf:
-    file: ./pg-replica.conf
-  redis_conf:
-    file: ../redis/redis.conf
-  redis_sentinel_conf:
-    file: ./redis-sentinel.conf
-  nginx_conf:
-    file: ./nginx.conf
-  certbot_entrypoint:
-    file: ./certbot-entrypoint.sh
+  pg_conf:            { file: ../postgres/postgresql.conf }
+  pg_init_sql:        { file: ../postgres/init.sql }
+  pg_init_replication: { file: ./pg-init-replication.sh }
+  pg_replica_conf:    { file: ./pg-replica.conf }
+  redis_conf:         { file: ../redis/redis.conf }
+  redis_sentinel_conf: { file: ./redis-sentinel.conf }
+  nginx_conf:         { file: ./nginx.conf }
+  certbot_entrypoint: { file: ./certbot-entrypoint.sh }
+  app_entrypoint:     { file: ./app-entrypoint.sh }

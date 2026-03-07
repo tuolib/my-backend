@@ -95,21 +95,32 @@ for i in "${!ALL_NODES[@]}"; do
     install_and_configure "${ALL_NODES[$i]}" "S$((i+1))"
 done
 
-# ── Step 2: 初始化 Swarm（S1 为首个 Manager） ──
+# ── Step 2: 清理旧 Swarm 状态 ──
+
+echo ""
+echo "── Clearing old Swarm state on all nodes ──"
+
+# 远程节点先离开
+for IP in "${ALL_NODES[@]:1}"; do
+    ssh ${SSH_OPTS} root@"${IP}" "docker swarm leave --force 2>/dev/null || true"
+    echo "  ${IP} left swarm"
+done
+
+# S1 最后离开（可能是旧 manager）
+docker swarm leave --force 2>/dev/null || true
+echo "  ${S1} left swarm"
+
+# ── Step 3: 初始化 Swarm（S1 为首个 Manager） ──
 
 echo ""
 echo "── Initializing Swarm on S1 (${S1}) ──"
 
-if docker info 2>/dev/null | grep -q "Swarm: active"; then
-    echo "Swarm already active, skipping init"
-else
-    docker swarm init --advertise-addr "${S1}"
-fi
+docker swarm init --advertise-addr "${S1}"
 
 MANAGER_TOKEN=$(docker swarm join-token -q manager)
 WORKER_TOKEN=$(docker swarm join-token -q worker)
 
-# ── Step 3: S2/S3 加入为 Manager ──
+# ── Step 4: S2/S3 加入为 Manager ──
 
 echo ""
 echo "── Joining Managers ──"
@@ -117,10 +128,10 @@ echo "── Joining Managers ──"
 for IP in "${MANAGERS[@]}"; do
     echo "  Joining ${IP} as manager..."
     ssh ${SSH_OPTS} root@"${IP}" \
-        "docker swarm join --token ${MANAGER_TOKEN} ${S1}:2377 2>/dev/null || echo 'Already in swarm'"
+        "docker swarm join --token ${MANAGER_TOKEN} ${S1}:2377"
 done
 
-# ── Step 4: S4/S5 加入为 Worker ──
+# ── Step 5: S4/S5 加入为 Worker ──
 
 echo ""
 echo "── Joining Workers ──"
@@ -128,10 +139,10 @@ echo "── Joining Workers ──"
 for IP in "${WORKERS[@]}"; do
     echo "  Joining ${IP} as worker..."
     ssh ${SSH_OPTS} root@"${IP}" \
-        "docker swarm join --token ${WORKER_TOKEN} ${S1}:2377 2>/dev/null || echo 'Already in swarm'"
+        "docker swarm join --token ${WORKER_TOKEN} ${S1}:2377"
 done
 
-# ── Step 5: 按 IP 分配节点标签 ──
+# ── Step 6: 按 IP 分配节点标签 ──
 
 echo ""
 echo "── Labeling nodes ──"
@@ -155,7 +166,7 @@ for NODE_ID in $(docker node ls -q); do
     fi
 done
 
-# ── Step 6: 创建自签名 SSL 证书（让 Nginx 首次启动能监听 443） ──
+# ── Step 7: 创建自签名 SSL 证书（让 Nginx 首次启动能监听 443） ──
 
 echo ""
 echo "── Creating self-signed SSL certificate ──"
@@ -172,7 +183,7 @@ else
     echo "Self-signed SSL secrets created"
 fi
 
-# ── Step 7: Docker 垃圾清理 cron（所有节点） ──
+# ── Step 8: Docker 垃圾清理 cron（所有节点） ──
 
 echo ""
 echo "── Setting up Docker cleanup cron ──"
@@ -190,7 +201,7 @@ for IP in "${ALL_NODES[@]:1}"; do
 done
 echo "Docker cleanup cron configured on all nodes"
 
-# ── Step 8: PG 备份 cron（S1） ──
+# ── Step 9: PG 备份 cron（S1） ──
 
 echo ""
 echo "── Setting up PG backup cron ──"

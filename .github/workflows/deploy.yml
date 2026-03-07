@@ -663,7 +663,7 @@ jobs:
               -c docker-stack.yml \
               --with-registry-auth \
               --prune \
-              --detach=false \
+              --detach=true \
               ecom
           REMOTE_DEPLOY
 

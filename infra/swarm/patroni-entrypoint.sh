@@ -34,26 +34,42 @@ export PATRONI_POSTGRESQL_CONNECT_ADDRESS="${PATRONI_NAME}:5432"
 echo "REST API: ${PATRONI_RESTAPI_CONNECT_ADDRESS}"
 echo "PG Connect: ${PATRONI_POSTGRESQL_CONNECT_ADDRESS}"
 
-# 确保数据目录权限正确
+# 确保数据目录权限正确，清理失败的初始化残留
 DATA_DIR="/var/lib/postgresql/data/pgdata"
 if [ ! -d "${DATA_DIR}" ]; then
     echo "Creating data directory: ${DATA_DIR}"
     mkdir -p "${DATA_DIR}"
+elif [ -n "$(ls -A "${DATA_DIR}" 2>/dev/null)" ] && [ ! -f "${DATA_DIR}/PG_VERSION" ]; then
+    echo "Data directory has partial/corrupted data (no PG_VERSION), cleaning up..."
+    rm -rf "${DATA_DIR:?}"/*
 else
     echo "Data directory exists: ${DATA_DIR}"
     echo "  Contents: $(ls -A "${DATA_DIR}" 2>/dev/null | head -20)"
 fi
 chown -R postgres:postgres /var/lib/postgresql/data
 
-# 检查 etcd 可达性
-echo "Checking etcd connectivity..."
-for ETCD_HOST in etcd-1:2379 etcd-2:2379 etcd-3:2379; do
-    if python3 -c "import urllib.request; urllib.request.urlopen('http://${ETCD_HOST}/health', timeout=3)" 2>/dev/null; then
-        echo "  ${ETCD_HOST}: reachable"
-    else
-        echo "  ${ETCD_HOST}: not reachable (may be starting)"
+# 等待 etcd 集群就绪（至少 2/3 节点可达 = 有 quorum）
+echo "Waiting for etcd cluster quorum..."
+MAX_RETRIES=30
+RETRY=0
+while [ $RETRY -lt $MAX_RETRIES ]; do
+    REACHABLE=0
+    for ETCD_HOST in etcd-1:2379 etcd-2:2379 etcd-3:2379; do
+        if python3 -c "import urllib.request; urllib.request.urlopen('http://${ETCD_HOST}/health', timeout=3)" 2>/dev/null; then
+            REACHABLE=$((REACHABLE + 1))
+        fi
+    done
+    if [ $REACHABLE -ge 2 ]; then
+        echo "  etcd quorum ready (${REACHABLE}/3 nodes reachable)"
+        break
     fi
+    RETRY=$((RETRY + 1))
+    echo "  etcd not ready (${REACHABLE}/3 reachable), retry ${RETRY}/${MAX_RETRIES}..."
+    sleep 2
 done
+if [ $RETRY -eq $MAX_RETRIES ]; then
+    echo "WARNING: etcd quorum not confirmed after ${MAX_RETRIES} retries, starting Patroni anyway..."
+fi
 
 echo "Starting Patroni..."
 exec patroni /etc/patroni/patroni.yml

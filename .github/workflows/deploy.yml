@@ -161,7 +161,7 @@ jobs:
         with:
           host: ${{ vars.SWARM_HOST }}
           username: ${{ vars.SWARM_USER }}
-          key: ${{ vars.SWARM_SSH_KEY }}
+          key: ${{ secrets.SWARM_SSH_KEY }}
           source: "infra/"
           target: /opt/ecom
 
@@ -170,7 +170,7 @@ jobs:
         with:
           host: ${{ vars.SWARM_HOST }}
           username: ${{ vars.SWARM_USER }}
-          key: ${{ vars.SWARM_SSH_KEY }}
+          key: ${{ secrets.SWARM_SSH_KEY }}
           script: |
             set -euo pipefail
 
@@ -179,9 +179,27 @@ jobs:
             STACK="ecom"
             SERVICES="api-gateway user-service product-service cart-service order-service"
 
-            echo "${{ vars.GHCR_PAT }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-            # ── 1. Docker Secrets（幂等，已存在则跳过） ──
+            # ── 1. 节点标签（幂等，按 Node ID 分配，hostname 重复也安全） ──
+            echo "══════════ Node Labels ══════════"
+            SELF_ID=$(docker node inspect self --format '{{.ID}}')
+            OTHER_MGR_IDS=$(docker node ls --filter "role=manager" --format '{{.ID}}' | grep -v "^${SELF_ID}$" | sort)
+
+            NODE_DB_PRIMARY="${SELF_ID}"
+            NODE_DB_REPLICA=$(echo "${OTHER_MGR_IDS}" | sed -n '1p')
+            NODE_GATEWAY=$(echo "${OTHER_MGR_IDS}" | sed -n '2p')
+
+            for pair in "db-primary:${NODE_DB_PRIMARY}" "db-replica:${NODE_DB_REPLICA}" "gateway:${NODE_GATEWAY}"; do
+              ROLE="${pair%%:*}"; NID="${pair#*:}"
+              if [ -n "${NID}" ]; then
+                HNAME=$(docker node inspect --format '{{.Description.Hostname}}' "${NID}" 2>/dev/null || echo "${NID}")
+                docker node update --label-add role="${ROLE}" "${NID}" >/dev/null 2>&1
+                echo "  ${HNAME} (${NID:0:12}) → ${ROLE}"
+              fi
+            done
+
+            # ── 2. Docker Secrets（幂等，已存在则跳过） ──
             create_secret() {
               if docker secret inspect "$1" >/dev/null 2>&1; then
                 echo "  $1 exists"
@@ -191,12 +209,12 @@ jobs:
               fi
             }
             echo "══════════ Secrets ══════════"
-            create_secret postgres_password   "${{ vars.SWARM_POSTGRES_PASSWORD }}"
-            create_secret jwt_access_secret   "${{ vars.SWARM_JWT_ACCESS_SECRET }}"
-            create_secret jwt_refresh_secret  "${{ vars.SWARM_JWT_REFRESH_SECRET }}"
-            create_secret internal_secret     "${{ vars.SWARM_INTERNAL_SECRET }}"
+            create_secret postgres_password   "${{ secrets.SWARM_POSTGRES_PASSWORD }}"
+            create_secret jwt_access_secret   "${{ secrets.SWARM_JWT_ACCESS_SECRET }}"
+            create_secret jwt_refresh_secret  "${{ secrets.SWARM_JWT_REFRESH_SECRET }}"
+            create_secret internal_secret     "${{ secrets.SWARM_INTERNAL_SECRET }}"
 
-            # ── 2. Deploy / Update ──
+            # ── 3. Deploy / Update ──
             if ! docker service inspect "${STACK}_api-gateway" >/dev/null 2>&1; then
               echo ""
               echo "══════════ Initial Deployment ══════════"
@@ -251,7 +269,7 @@ jobs:
               done
             fi
 
-            # ── 3. 等待所有服务就绪 ──
+            # ── 4. 等待所有服务就绪 ──
             echo ""
             echo "══════════ Waiting for convergence ══════════"
             TIMEOUT=180; ELAPSED=0
@@ -263,7 +281,7 @@ jobs:
             done
             docker stack services "${STACK}"
 
-            # ── 4. Schema 迁移 + Data 迁移 + Seed ──
+            # ── 5. Schema 迁移 + Data 迁移 + Seed ──
             echo ""
             echo "══════════ Schema Migration ══════════"
             GW_ID=$(docker ps -q --filter "name=${STACK}_api-gateway" --filter "status=running" | head -1)

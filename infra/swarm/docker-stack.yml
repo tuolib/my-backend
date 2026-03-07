@@ -472,7 +472,7 @@ services:
       - service_net
       - data_net
     healthcheck:
-      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3000/health"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -515,7 +515,7 @@ services:
       - service_net
       - data_net
     healthcheck:
-      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3001/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3001/health"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -558,7 +558,7 @@ services:
       - service_net
       - data_net
     healthcheck:
-      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3002/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3002/health"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -602,7 +602,7 @@ services:
       - service_net
       - data_net
     healthcheck:
-      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3003/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3003/health"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -648,7 +648,7 @@ services:
       - service_net
       - data_net
     healthcheck:
-      test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3004/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3004/health"]
       interval: 5s
       timeout: 3s
       retries: 3

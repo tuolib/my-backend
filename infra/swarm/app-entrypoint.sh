@@ -6,6 +6,6 @@ set -e
 export JWT_ACCESS_SECRET=$(cat /run/secrets/jwt_access_secret)
 export JWT_REFRESH_SECRET=$(cat /run/secrets/jwt_refresh_secret)
 export INTERNAL_SECRET=$(cat /run/secrets/internal_secret)
-export DATABASE_URL="postgresql://postgres:$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
+export DATABASE_URL="postgresql://postgres:$(cat /run/secrets/postgres_password)@pg-proxy:5432/ecommerce"
 
 exec "$@"

@@ -158,7 +158,7 @@ cmd_migrate() {
     --restart-condition none \
     --entrypoint sh \
     "${REGISTRY}/ecom-api-gateway:${TAG}" \
-    -c 'export DATABASE_URL="postgresql://postgres:$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce" && bun run src/db/migrate.ts'
+    -c 'export DATABASE_URL="postgresql://postgres:$(cat /run/secrets/postgres_password)@pg-proxy:5432/ecommerce" && bun run src/db/migrate.ts'
 
   local timeout=120 elapsed=0
   while [ $elapsed -lt $timeout ]; do

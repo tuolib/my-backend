@@ -1,0 +1,18 @@
+# PostgreSQL 16 + Patroni (自动故障转移)
+FROM postgres:16
+
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3-pip python3-psycopg2 curl && \
+    pip3 install --break-system-packages patroni[etcd3] && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY infra/swarm/patroni.yml /etc/patroni/patroni.yml
+COPY infra/swarm/patroni-entrypoint.sh /etc/patroni/entrypoint.sh
+COPY infra/swarm/patroni-post-bootstrap.sh /etc/patroni/post-bootstrap.sh
+COPY infra/postgres/init.sql /etc/patroni/init.sql
+RUN chmod +x /etc/patroni/entrypoint.sh /etc/patroni/post-bootstrap.sh
+
+USER postgres
+EXPOSE 5432 8008
+ENTRYPOINT ["/etc/patroni/entrypoint.sh"]

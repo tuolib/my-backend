@@ -2,9 +2,9 @@
 # Docker Swarm Stack — 电商平台生产部署
 # ═══════════════════════════════════════════════════════════════
 #
-#   S1 Manager  db-primary   PG主 + Redis主 + Sentinel
-#   S2 Manager  db-replica   PG从 + Redis从 + Sentinel
-#   S3 Manager  gateway      Nginx + Certbot + Sentinel
+#   S1 Manager  db-primary   Patroni(PG主) + etcd + Redis主 + Sentinel
+#   S2 Manager  db-replica   Patroni(PG从) + etcd + Redis从 + Sentinel
+#   S3 Manager  gateway      Nginx + Certbot + etcd + Sentinel
 #   S4 Worker   (auto)       API Gateway + 微服务
 #   S5 Worker   (auto)       微服务
 #
@@ -72,105 +72,163 @@ x-app-base: &app-base
   stop_grace_period: 30s
   logging: *logging
 
+x-etcd-env: &etcd-env
+  ALLOW_NONE_AUTHENTICATION: "yes"
+  ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+  ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+  ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
+  ETCD_INITIAL_CLUSTER_STATE: new
+  ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd
+
+x-etcd-healthcheck: &etcd-healthcheck
+  test: ["CMD", "etcdctl", "endpoint", "health"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+
+x-etcd-deploy: &etcd-deploy
+  replicas: 1
+  resources:
+    limits: { cpus: "0.2", memory: 256M }
+    reservations: { memory: 128M }
+  restart_policy: { condition: on-failure, delay: 5s }
+
+x-patroni-deploy: &patroni-deploy
+  replicas: 1
+  resources:
+    limits: { cpus: "1.0", memory: 1024M }
+    reservations: { memory: 512M }
+  restart_policy:
+    condition: on-failure
+    delay: 5s
+    max_attempts: 5
+
 services:
 
   # ═══ DATA LAYER ═══
 
-  postgres-primary:
-    image: postgres:16-alpine
-    hostname: pg-primary
+  # etcd 集群 (Patroni 分布式一致性存储 — 3 节点投票防脑裂)
+
+  etcd-1:
+    image: bitnami/etcd:3.5
+    hostname: etcd-1
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      POSTGRES_DB: ecommerce
-    secrets:
-      - postgres_password
-    configs:
-      - source: pg_conf
-        target: /etc/postgresql/postgresql.conf
-      - source: pg_init_sql
-        target: /docker-entrypoint-initdb.d/01-init.sql
-      - source: pg_init_replication
-        target: /docker-entrypoint-initdb.d/02-replication.sh
-        mode: 0755
-    volumes:
-      - pg_primary_data:/var/lib/postgresql/data
-    command: >-
-      postgres
-      -c config_file=/etc/postgresql/postgresql.conf
-      -c wal_level=replica
-      -c max_wal_senders=5
-      -c max_replication_slots=5
-      -c hot_standby=on
+      <<: *etcd-env
+      ETCD_NAME: etcd-1
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-1:2379
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-1:2380
+    volumes: [etcd_1_data:/bitnami/etcd]
+    networks: [data_net]
+    logging: *logging
+    healthcheck: *etcd-healthcheck
+    deploy:
+      <<: *etcd-deploy
+      placement:
+        constraints: [node.labels.role == db-primary]
+
+  etcd-2:
+    image: bitnami/etcd:3.5
+    hostname: etcd-2
+    environment:
+      <<: *etcd-env
+      ETCD_NAME: etcd-2
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-2:2379
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-2:2380
+    volumes: [etcd_2_data:/bitnami/etcd]
+    networks: [data_net]
+    logging: *logging
+    healthcheck: *etcd-healthcheck
+    deploy:
+      <<: *etcd-deploy
+      placement:
+        constraints: [node.labels.role == db-replica]
+
+  etcd-3:
+    image: bitnami/etcd:3.5
+    hostname: etcd-3
+    environment:
+      <<: *etcd-env
+      ETCD_NAME: etcd-3
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-3:2379
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-3:2380
+    volumes: [etcd_3_data:/bitnami/etcd]
+    networks: [data_net]
+    logging: *logging
+    healthcheck: *etcd-healthcheck
+    deploy:
+      <<: *etcd-deploy
+      placement:
+        constraints: [node.labels.role == gateway]
+
+  # PostgreSQL HA (Patroni — 主库宕机自动切换到从库)
+
+  patroni-1:
+    image: ${REGISTRY}/ecom-patroni:${TAG:-latest}
+    hostname: patroni-1
+    environment:
+      PATRONI_NAME: patroni-1
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: patroni-1:5432
+      PATRONI_RESTAPI_CONNECT_ADDRESS: patroni-1:8008
+    secrets: [postgres_password]
+    volumes: [patroni_1_data:/var/lib/postgresql/data]
     networks: [data_net]
     stop_grace_period: 60s
     logging: *logging
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8008/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
     deploy:
-      replicas: 1
+      <<: *patroni-deploy
       placement:
         constraints: [node.labels.role == db-primary]
-      resources:
-        limits:   { cpus: "1.0", memory: 1024M }
-        reservations: { memory: 512M }
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
 
-  postgres-replica:
-    image: postgres:16-alpine
-    hostname: pg-replica
+  patroni-2:
+    image: ${REGISTRY}/ecom-patroni:${TAG:-latest}
+    hostname: patroni-2
+    environment:
+      PATRONI_NAME: patroni-2
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: patroni-2:5432
+      PATRONI_RESTAPI_CONNECT_ADDRESS: patroni-2:8008
     secrets: [postgres_password]
-    configs:
-      - source: pg_replica_conf
-        target: /etc/postgresql/postgresql.conf
-    volumes:
-      - pg_replica_data:/var/lib/postgresql/data
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        set -e
-        chown -R postgres:postgres /var/lib/postgresql/data
-        chmod 700 /var/lib/postgresql/data
-        if [ ! -s "/var/lib/postgresql/data/PG_VERSION" ]; then
-          echo "=== Initializing replica from primary ==="
-          until PGPASSWORD=$$(cat /run/secrets/postgres_password) pg_isready -h postgres-primary -U postgres; do
-            echo "Waiting for primary..."
-            sleep 3
-          done
-          rm -rf /var/lib/postgresql/data/*
-          PGPASSWORD=$$(cat /run/secrets/postgres_password) gosu postgres pg_basebackup \
-            -h postgres-primary -U postgres -D /var/lib/postgresql/data \
-            -Fp -Xs -R -P
-          echo "=== Replica initialized ==="
-        fi
-        exec gosu postgres postgres -c config_file=/etc/postgresql/postgresql.conf
+    volumes: [patroni_2_data:/var/lib/postgresql/data]
     networks: [data_net]
     stop_grace_period: 60s
     logging: *logging
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8008/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: 30s
     deploy:
-      replicas: 1
+      <<: *patroni-deploy
       placement:
         constraints: [node.labels.role == db-replica]
+
+  # PG 连接代理 (HAProxy — 自动路由到当前 Primary)
+
+  pg-proxy:
+    image: haproxy:2.9-alpine
+    configs:
+      - source: haproxy_pg_cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+    networks: [data_net]
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      replicas: 1
       resources:
-        limits:   { cpus: "1.0", memory: 1024M }
-        reservations: { memory: 512M }
-      restart_policy:
-        condition: on-failure
-        delay: 10s
-        max_attempts: 5
+        limits: { cpus: "0.2", memory: 128M }
+        reservations: { memory: 64M }
+      restart_policy: { condition: on-failure, delay: 5s }
 
   redis-primary:
     image: redis:7-alpine
@@ -393,8 +451,11 @@ networks:
   data_net:    { driver: overlay, internal: true }
 
 volumes:
-  pg_primary_data:
-  pg_replica_data:
+  etcd_1_data:
+  etcd_2_data:
+  etcd_3_data:
+  patroni_1_data:
+  patroni_2_data:
   redis_primary_data:
   redis_replica_data:
   certbot_certs:
@@ -407,10 +468,7 @@ secrets:
   internal_secret: { external: true }
 
 configs:
-  pg_conf:            { file: ../postgres/postgresql.conf }
-  pg_init_sql:        { file: ../postgres/init.sql }
-  pg_init_replication: { file: ./pg-init-replication.sh }
-  pg_replica_conf:    { file: ./pg-replica.conf }
+  haproxy_pg_cfg:     { file: ./haproxy-pg.cfg }
   redis_conf:         { file: ../redis/redis.conf }
   redis_sentinel_conf: { file: ./redis-sentinel.conf }
   nginx_conf:         { file: ./nginx.conf }

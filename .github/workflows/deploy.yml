@@ -84,6 +84,8 @@ jobs:
             dockerfile: services/cart-service/Dockerfile
           - name: order-service
             dockerfile: services/order-service/Dockerfile
+          - name: patroni
+            dockerfile: infra/swarm/Dockerfile.patroni
 
     steps:
       - name: Checkout
@@ -248,6 +250,13 @@ jobs:
                 CERTBOT_EMAIL="${{ vars.CERTBOT_EMAIL || 'admin@find345.site' }}" \
                 CORS_ORIGINS="${{ vars.CORS_ORIGINS || '' }}" \
                 docker stack deploy -c docker-stack.yml --with-registry-auth "${STACK}"
+
+              # 更新 Patroni 镜像（两个节点共用同一镜像）
+              PATRONI_IMAGE="${REGISTRY}/ecom-patroni:${TAG}"
+              for P in patroni-1 patroni-2; do
+                echo "Updating ${STACK}_${P} → ${PATRONI_IMAGE}"
+                docker service update --with-registry-auth --image "${PATRONI_IMAGE}" "${STACK}_${P}" || true
+              done
 
               # 逐个滚动更新应用镜像
               for SVC in ${SERVICES}; do

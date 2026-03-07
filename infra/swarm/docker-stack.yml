@@ -1,9 +1,21 @@
 # Docker Swarm Stack — 企业级电商平台生产部署
 # 5 节点集群：S1/S2 数据层(Manager), S3 入口层(Manager), S4/S5 应用层(Worker)
 #
+# VPC 网络分层：
+#   frontend_net — DMZ 入口层（nginx <-> api-gateway）
+#   app_net      — 应用通信层（api-gateway <-> 微服务）
+#   data_net     — 数据层（微服务 <-> PG/Redis）
+#
+# 隔离效果：
+#   - nginx 只能访问 api-gateway，无法触达数据库和微服务
+#   - api-gateway 能到微服务，但不直连数据库
+#   - 只有微服务能访问 PG/Redis
+#   - 数据库对外完全不可达
+#
 # 前置要求：
 #   1. 构建并推送镜像到 Registry（设置 REGISTRY 环境变量）
 #   2. 运行 deploy.sh 初始化集群、创建 Secrets
+#   3. SSL 证书由 certbot 服务自动申请和续签（无需手动管理）
 #
 # 部署命令：
 #   REGISTRY=your-registry.com/org TAG=v1.0.0 \
@@ -43,7 +55,7 @@ services:
       -c max_replication_slots=5
       -c hot_standby=on
     networks:
-      - app_net
+      - data_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -93,7 +105,7 @@ services:
         fi
         exec gosu postgres postgres -c config_file=/etc/postgresql/postgresql.conf
     networks:
-      - app_net
+      - data_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -127,7 +139,7 @@ services:
       - redis_primary_data:/data
     command: redis-server /usr/local/etc/redis/redis.conf
     networks:
-      - app_net
+      - data_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -156,7 +168,7 @@ services:
       - redis_replica_data:/data
     command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-primary 6379
     networks:
-      - app_net
+      - data_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -189,7 +201,7 @@ services:
         cp /etc/redis/sentinel.conf /tmp/sentinel.conf
         exec redis-sentinel /tmp/sentinel.conf
     networks:
-      - app_net
+      - data_net
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "26379", "ping"]
       interval: 10s
@@ -211,26 +223,33 @@ services:
         delay: 5s
 
   # ══════════════════════════════════════════════════
-  # 入口层 — Caddy 反向代理（约束到 Gateway 节点 S3）
+  # 入口层 — Nginx + Certbot（约束到 Gateway 节点 S3）
+  # mode: ingress — 任意节点 IP 均可接入（Swarm 路由网格）
+  # nginx 和 certbot 共享证书卷，必须在同一节点
   # ══════════════════════════════════════════════════
 
-  caddy:
-    image: caddy:2-alpine
+  nginx:
+    image: nginx:1-alpine
     configs:
-      - source: caddyfile
-        target: /etc/caddy/Caddyfile
+      - source: nginx_conf
+        target: /etc/nginx/nginx.conf
     volumes:
-      - caddy_data:/data
-      - caddy_config:/config
+      - certbot_certs:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
     ports:
       - target: 80
         published: 80
-        mode: host
+        mode: ingress
       - target: 443
         published: 443
-        mode: host
+        mode: ingress
     networks:
-      - app_net
+      - frontend_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     deploy:
       replicas: 1
       placement:
@@ -243,6 +262,32 @@ services:
       restart_policy:
         condition: on-failure
         delay: 5s
+
+  certbot:
+    image: certbot/certbot
+    configs:
+      - source: certbot_entrypoint
+        target: /entrypoint.sh
+        mode: 0755
+    environment:
+      CERTBOT_DOMAIN: ${CERTBOT_DOMAIN:-api.find345.site}
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:-admin@find345.site}
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    entrypoint: /entrypoint.sh
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.role == gateway
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        delay: 30s
 
   # ══════════════════════════════════════════════════
   # 应用层 — 微服务（约束到 Worker 节点 S4/S5）
@@ -276,7 +321,9 @@ services:
         export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
         exec bun run apps/api-gateway/src/index.ts
     networks:
+      - frontend_net
       - app_net
+      - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -329,6 +376,7 @@ services:
         exec bun run services/user-service/src/index.ts
     networks:
       - app_net
+      - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3001/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -381,6 +429,7 @@ services:
         exec bun run services/product-service/src/index.ts
     networks:
       - app_net
+      - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3002/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -434,6 +483,7 @@ services:
         exec bun run services/cart-service/src/index.ts
     networks:
       - app_net
+      - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3003/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -489,6 +539,7 @@ services:
         exec bun run services/order-service/src/index.ts
     networks:
       - app_net
+      - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3004/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -520,13 +571,31 @@ services:
         max_attempts: 5
 
 # ══════════════════════════════════════════════════
-# 网络 — Overlay 跨节点通信
+# VPC 网络 — 三层 Overlay 隔离
 # ══════════════════════════════════════════════════
+#
+#  frontend_net ──┐
+#    nginx ←→ api-gateway
+#                 ├── app_net
+#           api-gateway ←→ user/product/cart/order-service
+#                              ├── data_net
+#                         微服务 ←→ postgres / redis
+#
+#  nginx 无法访问微服务和数据库
+#  api-gateway 无法直连数据库（需经微服务）
+#  数据库对外完全隔离
 
 networks:
+  frontend_net:
+    driver: overlay
+    attachable: false
   app_net:
     driver: overlay
-    attachable: true
+    attachable: false
+  data_net:
+    driver: overlay
+    attachable: false
+    internal: true
 
 # ══════════════════════════════════════════════════
 # 持久化卷 — 本地卷（通过 placement 约束固定到特定节点）
@@ -537,8 +606,8 @@ volumes:
   pg_replica_data:
   redis_primary_data:
   redis_replica_data:
-  caddy_data:
-  caddy_config:
+  certbot_certs:
+  certbot_webroot:
 
 # ══════════════════════════════════════════════════
 # Secrets — 部署前通过 deploy.sh 创建
@@ -571,5 +640,7 @@ configs:
     file: ../redis/redis.conf
   redis_sentinel_conf:
     file: ./redis-sentinel.conf
-  caddyfile:
-    file: ./Caddyfile.prod
+  nginx_conf:
+    file: ./nginx.conf
+  certbot_entrypoint:
+    file: ./certbot-entrypoint.sh

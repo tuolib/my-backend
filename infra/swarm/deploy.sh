@@ -94,7 +94,7 @@ set_labels() {
   echo "请为每个节点分配角色："
   echo "  db-primary  — S1: PG 主 + Redis 主（数据层）"
   echo "  db-replica  — S2: PG 从 + Redis 从（数据层）"
-  echo "  gateway     — S3: Caddy 反向代理（入口层）"
+  echo "  gateway     — S3: Nginx 反向代理（入口层）"
   echo "  (Worker 节点 S4/S5 无需标签，仅需 worker 角色)"
   echo ""
 
@@ -169,6 +169,7 @@ create_secrets() {
 
   echo ""
   log_ok "所有 Secrets 就绪"
+  log_info "SSL 证书由 certbot 服务自动申请，无需手动管理"
 }
 
 # 构建并推送镜像

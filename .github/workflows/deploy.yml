@@ -644,48 +644,9 @@ jobs:
               -c docker-stack.yml \
               --with-registry-auth \
               --prune \
+              --detach=false \
               ecom
-
-            echo "Stack deployed, waiting for services to converge..."
           REMOTE_DEPLOY
-
-          # ── 5. 等待服务收敛 ──
-          echo "Waiting for services to converge (max 180s)..."
-          ${SSH_CMD} bash <<'REMOTE_WAIT'
-            set -euo pipefail
-            TIMEOUT=180
-            ELAPSED=0
-
-            while [ ${ELAPSED} -lt ${TIMEOUT} ]; do
-              ALL_READY=true
-
-              # 检查所有服务的副本数
-              while IFS= read -r LINE; do
-                SVC=$(echo "${LINE}" | awk '{print $2}')
-                REPLICAS=$(echo "${LINE}" | awk '{print $4}')
-                CURRENT=$(echo "${REPLICAS}" | cut -d'/' -f1)
-                DESIRED=$(echo "${REPLICAS}" | cut -d'/' -f2)
-                if [ "${CURRENT}" != "${DESIRED}" ]; then
-                  ALL_READY=false
-                fi
-              done < <(docker stack services ecom --format "{{.ID}} {{.Name}} {{.Mode}} {{.Replicas}}" 2>/dev/null)
-
-              if ${ALL_READY}; then
-                echo "All services converged!"
-                docker stack services ecom
-                break
-              fi
-
-              echo "  [${ELAPSED}s] Waiting..."
-              sleep 5
-              ELAPSED=$((ELAPSED + 5))
-            done
-
-            if [ ${ELAPSED} -ge ${TIMEOUT} ]; then
-              echo "::warning::Timeout waiting for convergence"
-              docker stack services ecom
-            fi
-          REMOTE_WAIT
 
           # ── 6. 数据库迁移 ──
           echo "Running database migration..."

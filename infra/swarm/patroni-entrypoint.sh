@@ -34,6 +34,22 @@ export PATRONI_POSTGRESQL_CONNECT_ADDRESS="${PATRONI_NAME}:5432"
 echo "REST API: ${PATRONI_RESTAPI_CONNECT_ADDRESS}"
 echo "PG Connect: ${PATRONI_POSTGRESQL_CONNECT_ADDRESS}"
 
+# 将密码注入 Patroni YAML（避免依赖 env var override 机制）
+PATRONI_YML="/etc/patroni/patroni.yml"
+cp "${PATRONI_YML}" /tmp/patroni.yml
+python3 -c "
+import yaml, os
+with open('/tmp/patroni.yml') as f:
+    cfg = yaml.safe_load(f)
+auth = cfg['postgresql']['authentication']
+auth['superuser']['password'] = os.environ['PATRONI_SUPERUSER_PASSWORD']
+auth['replication']['password'] = os.environ['PATRONI_REPLICATION_PASSWORD']
+with open('/tmp/patroni.yml', 'w') as f:
+    yaml.dump(cfg, f, default_flow_style=False)
+"
+PATRONI_YML="/tmp/patroni.yml"
+echo "Passwords injected into Patroni config"
+
 # 数据目录
 DATA_DIR="/var/lib/postgresql/data/pgdata"
 SCOPE="ecom-pg"
@@ -105,4 +121,4 @@ echo "Data directory: ${DATA_DIR}"
 echo "  Contents: $(ls -A "${DATA_DIR}" 2>/dev/null | head -5 || echo "(empty)")"
 
 echo "Starting Patroni as postgres user..."
-exec gosu postgres patroni /etc/patroni/patroni.yml
+exec gosu postgres patroni /tmp/patroni.yml

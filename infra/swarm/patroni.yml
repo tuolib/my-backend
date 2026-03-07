@@ -70,5 +70,7 @@ postgresql:
   authentication:
     replication:
       username: replicator
+      password: __REPLICATION_PASSWORD__
     superuser:
       username: postgres
+      password: __SUPERUSER_PASSWORD__

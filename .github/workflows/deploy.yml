@@ -674,31 +674,36 @@ jobs:
               done
             }
 
-            # 等待 etcd 集群就绪（最多 60s）
+            # 等待 etcd 集群就绪（最多 60s，每秒检查）
             echo "Waiting for etcd cluster..."
             ETCD_READY=false
-            for i in \$(seq 1 12); do
-              # 通过 HTTP API 检查 etcd 健康（distroless 镜像无法 docker exec）
-              HEALTH=\$(curl -sf http://localhost:2379/health 2>/dev/null || true)
-              if echo "\${HEALTH}" | grep -q '"health":"true"'; then
-                echo "etcd cluster is healthy"
-                ETCD_READY=true
-                break
-              fi
-              # 备选：通过容器内网检查
+            for i in \$(seq 1 60); do
               for ETCD_SVC in ecom_etcd-1 ecom_etcd-2 ecom_etcd-3; do
                 ETCD_ID=\$(docker ps -qf name=\${ETCD_SVC} 2>/dev/null | head -1)
                 if [ -n "\${ETCD_ID}" ]; then
-                  ETCD_IP=\$(docker inspect "\${ETCD_ID}" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1)
-                  if [ -n "\${ETCD_IP}" ] && curl -sf "http://\${ETCD_IP}:2379/health" 2>/dev/null | grep -q '"health":"true"'; then
-                    echo "etcd cluster is healthy (via \${ETCD_SVC})"
+                  HEALTH_OUT=\$(docker exec "\${ETCD_ID}" etcdctl endpoint health 2>&1 || true)
+                  if echo "\${HEALTH_OUT}" | grep -q "is healthy"; then
+                    echo "etcd cluster is healthy (via \${ETCD_SVC}, \${i}s)"
                     ETCD_READY=true
                     break 2
                   fi
                 fi
               done
-              echo "  Waiting for etcd... (\${i}/12)"
-              sleep 5
+              # 每 10 秒打印详细状态
+              if [ \$((i % 10)) -eq 0 ]; then
+                echo "── etcd status (\${i}s) ──"
+                for ETCD_SVC in ecom_etcd-1 ecom_etcd-2 ecom_etcd-3; do
+                  ETCD_ID=\$(docker ps -qf name=\${ETCD_SVC} 2>/dev/null | head -1)
+                  if [ -z "\${ETCD_ID}" ]; then
+                    echo "  \${ETCD_SVC}: no container"
+                    docker service ps "\${ETCD_SVC}" --no-trunc --format "    {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -2
+                  else
+                    HEALTH_OUT=\$(docker exec "\${ETCD_ID}" etcdctl endpoint health 2>&1 || true)
+                    echo "  \${ETCD_SVC}: \${HEALTH_OUT}"
+                  fi
+                done
+              fi
+              sleep 1
             done
             if [ "\${ETCD_READY}" != "true" ]; then
               echo "::error::etcd cluster failed to start"
@@ -709,17 +714,28 @@ jobs:
             # 等待 Patroni 选出 Leader（最多 90s）
             echo "Waiting for Patroni leader election..."
             PATRONI_READY=false
-            for i in \$(seq 1 18); do
+            for i in \$(seq 1 90); do
               PATRONI_ID=\$(docker ps -qf name=ecom_patroni-1 2>/dev/null | head -1)
               if [ -n "\${PATRONI_ID}" ]; then
-                if docker exec "\${PATRONI_ID}" patronictl list 2>/dev/null | grep -q Leader; then
-                  echo "Patroni cluster is ready"
+                PATRONI_OUT=\$(docker exec "\${PATRONI_ID}" patronictl list 2>&1 || true)
+                if echo "\${PATRONI_OUT}" | grep -q Leader; then
+                  echo "Patroni cluster is ready (\${i}s)"
+                  echo "\${PATRONI_OUT}"
                   PATRONI_READY=true
                   break
                 fi
               fi
-              echo "  Waiting for Patroni... (\${i}/18)"
-              sleep 5
+              # 每 10 秒打印详细状态
+              if [ \$((i % 10)) -eq 0 ]; then
+                echo "── patroni status (\${i}s) ──"
+                if [ -z "\${PATRONI_ID}" ]; then
+                  echo "  patroni-1: no container"
+                  docker service ps ecom_patroni-1 --no-trunc --format "    {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -2
+                else
+                  echo "\${PATRONI_OUT}" | sed 's/^/  /'
+                fi
+              fi
+              sleep 1
             done
             if [ "\${PATRONI_READY}" != "true" ]; then
               echo "::error::Patroni failed to elect leader"
@@ -727,16 +743,19 @@ jobs:
               exit 1
             fi
 
-            # 等待 API Gateway 健康（最多 60s）
+            # 等待 API Gateway 健康（最多 60s，每秒检查）
             echo "Waiting for API Gateway..."
-            for i in \$(seq 1 12); do
+            for i in \$(seq 1 60); do
               GW_ID=\$(docker ps -qf name=ecom_api-gateway --filter "health=healthy" 2>/dev/null | head -1)
               if [ -n "\${GW_ID}" ]; then
-                echo "API Gateway is ready"
+                echo "API Gateway is ready (\${i}s)"
                 break
               fi
-              echo "  Waiting for API Gateway... (\${i}/12)"
-              sleep 5
+              if [ \$((i % 10)) -eq 0 ]; then
+                echo "  API Gateway not healthy yet (\${i}s)..."
+                docker service ps ecom_api-gateway --no-trunc --format "    {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -2
+              fi
+              sleep 1
             done
             GW_ID=\$(docker ps -qf name=ecom_api-gateway 2>/dev/null | head -1)
             if [ -n "\${GW_ID}" ]; then

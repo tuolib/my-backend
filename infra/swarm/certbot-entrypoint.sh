@@ -1,55 +1,60 @@
 #!/bin/sh
-# certbot-entrypoint.sh — SSL 证书自动申请与续签
-# 与 nginx 共享 certbot_certs 和 certbot_webroot 卷
+# certbot — SSL 自动签发 & 续签
 #
-# 流程：
-#   1. 首次部署：生成临时自签名证书 → nginx 可启动
-#   2. 等待 nginx 就绪
-#   3. 通过 HTTP-01 验证申请 Let's Encrypt 真实证书
-#   4. 每 12 小时检查续签
+# 流程:
+#   1. 首次: 生成自签名证书 -> nginx 能立即启动 443
+#   2. 等 nginx 就绪 -> HTTP-01 验证申请 Let's Encrypt 真实证书
+#   3. 每 12h 检查续签（到期前 30 天自动续签）
+#
+# 环境变量:
+#   CERTBOT_DOMAIN  域名
+#   CERTBOT_EMAIL   通知邮箱
 
 set -e
 
-DOMAIN="${CERTBOT_DOMAIN:-api.find345.site}"
-EMAIL="${CERTBOT_EMAIL:-admin@find345.site}"
+DOMAIN="${CERTBOT_DOMAIN:?CERTBOT_DOMAIN is required}"
+EMAIL="${CERTBOT_EMAIL:?CERTBOT_EMAIL is required}"
 CERT_DIR="/etc/letsencrypt/live/${DOMAIN}"
 
-echo "=== Certbot: domain=${DOMAIN}, email=${EMAIL} ==="
+log() { echo "[certbot] $(date '+%H:%M:%S') $*"; }
 
-# ── 1. 首次启动：生成临时自签名证书（让 nginx 能启动 443） ──
+# ── 1. 自签名兜底（让 nginx 先起来） ──
 if [ ! -f "${CERT_DIR}/fullchain.pem" ]; then
-  echo "=== Generating temporary self-signed certificate ==="
+  log "Generating self-signed certificate for ${DOMAIN}..."
   mkdir -p "${CERT_DIR}"
   openssl req -x509 -nodes -days 7 -newkey rsa:2048 \
     -keyout "${CERT_DIR}/privkey.pem" \
     -out "${CERT_DIR}/fullchain.pem" \
-    -subj "/CN=${DOMAIN}"
-  echo "=== Temporary certificate ready ==="
+    -subj "/CN=${DOMAIN}" 2>/dev/null
+  log "Self-signed certificate ready"
 fi
 
-# ── 2. 等待 nginx 就绪（需要 nginx 处理 ACME HTTP-01 验证请求） ──
-echo "=== Waiting for nginx to be ready ==="
-sleep 15
+# ── 2. 等 nginx 就绪 ──
+log "Waiting for nginx..."
+sleep 20
 
-# ── 3. 申请真实证书（如果还没有） ──
-# 检查是否已经有 Let's Encrypt 签发的证书（非自签名）
+# ── 3. 申请真实证书（带重试） ──
 if [ ! -f "/etc/letsencrypt/renewal/${DOMAIN}.conf" ]; then
-  echo "=== Requesting Let's Encrypt certificate ==="
-  certbot certonly --webroot \
-    -w /var/www/certbot \
-    -d "${DOMAIN}" \
-    --email "${EMAIL}" \
-    --agree-tos \
-    --no-eff-email \
-    --non-interactive \
-    --force-renewal \
-    || echo "=== Certificate request failed, will retry on next cycle ==="
+  log "Requesting Let's Encrypt certificate for ${DOMAIN}..."
+  for attempt in 1 2 3 4 5; do
+    if certbot certonly --webroot \
+      -w /var/www/certbot \
+      -d "${DOMAIN}" \
+      --email "${EMAIL}" \
+      --agree-tos --no-eff-email --non-interactive \
+      --force-renewal; then
+      log "Certificate obtained successfully"
+      break
+    fi
+    log "Attempt ${attempt}/5 failed, retrying in 30s..."
+    sleep 30
+  done
 fi
 
-# ── 4. 循环续签（每 12 小时检查一次，到期前 30 天自动续签） ──
-echo "=== Starting renewal loop ==="
+# ── 4. 续签循环 ──
+log "Entering renewal loop (every 12h)"
 while true; do
-  echo "=== Checking certificate renewal: $(date) ==="
-  certbot renew --quiet
   sleep 43200
+  log "Checking renewal..."
+  certbot renew --quiet || log "Renewal check completed with warnings"
 done

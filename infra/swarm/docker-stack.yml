@@ -1,36 +1,67 @@
-# Docker Swarm Stack — 企业级电商平台生产部署
-# 5 节点集群：S1/S2 数据层(Manager), S3 入口层(Manager), S4/S5 应用层(Worker)
+# ═══════════════════════════════════════════════════════════════
+# Docker Swarm Stack — 电商平台生产部署
+# ═══════════════════════════════════════════════════════════════
 #
-# VPC 网络分层：
-#   frontend_net — DMZ 入口层（nginx <-> api-gateway）
-#   app_net      — 应用通信层（api-gateway <-> 微服务）
-#   data_net     — 数据层（微服务 <-> PG/Redis）
+# 集群拓扑（5 节点）:
+#   S1 Manager  db-primary   PG主 + Redis主 + Sentinel
+#   S2 Manager  db-replica   PG从 + Redis从 + Sentinel
+#   S3 Manager  gateway      Nginx + Certbot + Sentinel
+#   S4 Worker   (auto)       API Gateway + 微服务
+#   S5 Worker   (auto)       微服务
 #
-# 隔离效果：
-#   - nginx 只能访问 api-gateway，无法触达数据库和微服务
-#   - api-gateway 能到微服务，但不直连数据库
-#   - 只有微服务能访问 PG/Redis
-#   - 数据库对外完全不可达
+# VPC 网络隔离:
+#   public_net   nginx <-> api-gateway          (DMZ)
+#   service_net  api-gateway <-> 微服务          (内部通信)
+#   data_net     微服务 <-> PG/Redis             (internal, 无外部路由)
 #
-# 前置要求：
-#   1. 构建并推送镜像到 Registry（设置 REGISTRY 环境变量）
-#   2. 运行 deploy.sh 初始化集群、创建 Secrets
-#   3. SSL 证书由 certbot 服务自动申请和续签（无需手动管理）
-#
-# 部署命令：
-#   REGISTRY=your-registry.com/org TAG=v1.0.0 \
-#     docker stack deploy -c docker-stack.yml ecom
+# 部署:
+#   ./deploy.sh deploy
+# ═══════════════════════════════════════════════════════════════
 
-version: "3.8"
+# ── 共享配置（YAML 锚点复用） ──
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app-deploy: &app-deploy
+  update_config:
+    parallelism: 1
+    delay: 15s
+    order: start-first
+    failure_action: rollback
+    monitor: 30s
+  rollback_config:
+    parallelism: 1
+    order: stop-first
+  resources:
+    limits:
+      cpus: "0.5"
+      memory: 512M
+    reservations:
+      memory: 256M
+  restart_policy:
+    condition: on-failure
+    delay: 5s
+    max_attempts: 5
+
+x-app-secrets: &app-secrets
+  - jwt_access_secret
+  - jwt_refresh_secret
+  - internal_secret
+  - postgres_password
 
 services:
-  # ══════════════════════════════════════════════════
-  # 基础设施层 — PostgreSQL（约束到 Manager/数据节点）
-  # ══════════════════════════════════════════════════
+
+  # ═══════════════════════════════════════
+  # DATA LAYER — S1 (primary) / S2 (replica)
+  # ═══════════════════════════════════════
 
   postgres-primary:
     image: postgres:16-alpine
-    hostname: postgres-primary
+    hostname: pg-primary
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
@@ -56,11 +87,14 @@ services:
       -c hot_standby=on
     networks:
       - data_net
+    stop_grace_period: 60s
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     deploy:
       replicas: 1
       placement:
@@ -70,6 +104,8 @@ services:
         limits:
           cpus: "1.0"
           memory: 1024M
+        reservations:
+          memory: 512M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -77,7 +113,7 @@ services:
 
   postgres-replica:
     image: postgres:16-alpine
-    hostname: postgres-replica
+    hostname: pg-replica
     secrets:
       - postgres_password
     configs:
@@ -94,23 +130,26 @@ services:
         if [ ! -s "/var/lib/postgresql/data/PG_VERSION" ]; then
           echo "=== Initializing replica from primary ==="
           until PGPASSWORD=$$(cat /run/secrets/postgres_password) pg_isready -h postgres-primary -U postgres; do
-            echo "Waiting for primary to be ready..."
+            echo "Waiting for primary..."
             sleep 3
           done
           rm -rf /var/lib/postgresql/data/*
           PGPASSWORD=$$(cat /run/secrets/postgres_password) gosu postgres pg_basebackup \
             -h postgres-primary -U postgres -D /var/lib/postgresql/data \
             -Fp -Xs -R -P
-          echo "=== Replica initialized successfully ==="
+          echo "=== Replica initialized ==="
         fi
         exec gosu postgres postgres -c config_file=/etc/postgresql/postgresql.conf
     networks:
       - data_net
+    stop_grace_period: 60s
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 60s
     deploy:
       replicas: 1
       placement:
@@ -120,14 +159,12 @@ services:
         limits:
           cpus: "1.0"
           memory: 1024M
+        reservations:
+          memory: 512M
       restart_policy:
         condition: on-failure
         delay: 10s
         max_attempts: 5
-
-  # ══════════════════════════════════════════════════
-  # 基础设施层 — Redis（约束到 Manager/数据节点）
-  # ══════════════════════════════════════════════════
 
   redis-primary:
     image: redis:7-alpine
@@ -140,6 +177,7 @@ services:
     command: redis-server /usr/local/etc/redis/redis.conf
     networks:
       - data_net
+    logging: *logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -154,6 +192,8 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
+        reservations:
+          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -169,6 +209,7 @@ services:
     command: redis-server /usr/local/etc/redis/redis.conf --replicaof redis-primary 6379
     networks:
       - data_net
+    logging: *logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -183,18 +224,17 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
+        reservations:
+          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s
 
-  # Sentinel: 3 实例分布在 3 个 Manager 节点（S1/S2/S3）
-  # quorum=2，需要至少 2 个 Sentinel 同意才触发故障转移
   redis-sentinel:
     image: redis:7-alpine
     configs:
       - source: redis_sentinel_conf
         target: /etc/redis/sentinel.conf
-    # Sentinel 运行时会修改自身配置文件，需要可写副本
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -202,6 +242,7 @@ services:
         exec redis-sentinel /tmp/sentinel.conf
     networks:
       - data_net
+    logging: *logging
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "26379", "ping"]
       interval: 10s
@@ -222,11 +263,11 @@ services:
         condition: on-failure
         delay: 5s
 
-  # ══════════════════════════════════════════════════
-  # 入口层 — Nginx + Certbot（约束到 Gateway 节点 S3）
-  # mode: ingress — 任意节点 IP 均可接入（Swarm 路由网格）
-  # nginx 和 certbot 共享证书卷，必须在同一节点
-  # ══════════════════════════════════════════════════
+  # ═══════════════════════════════════════
+  # GATEWAY LAYER — S3
+  # mode: ingress -> 任意节点 IP 可接入
+  # nginx + certbot 共享证书卷，同节点部署
+  # ═══════════════════════════════════════
 
   nginx:
     image: nginx:1-alpine
@@ -244,12 +285,14 @@ services:
         published: 443
         mode: ingress
     networks:
-      - frontend_net
+      - public_net
+    logging: *logging
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost/nginx-health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 15s
     deploy:
       replicas: 1
       placement:
@@ -259,9 +302,15 @@ services:
         limits:
           cpus: "0.5"
           memory: 256M
+        reservations:
+          memory: 128M
+      update_config:
+        order: start-first
+        failure_action: rollback
       restart_policy:
         condition: on-failure
         delay: 5s
+        max_attempts: 10
 
   certbot:
     image: certbot/certbot
@@ -276,6 +325,7 @@ services:
       - certbot_certs:/etc/letsencrypt
       - certbot_webroot:/var/www/certbot
     entrypoint: /entrypoint.sh
+    logging: *logging
     deploy:
       replicas: 1
       placement:
@@ -289,11 +339,10 @@ services:
         condition: on-failure
         delay: 30s
 
-  # ══════════════════════════════════════════════════
-  # 应用层 — 微服务（约束到 Worker 节点 S4/S5）
-  # 单副本部署，start-first 滚动更新
-  # 扩容时调整 replicas: 2 并添加 reservations
-  # ══════════════════════════════════════════════════
+  # ═══════════════════════════════════════
+  # APPLICATION LAYER — S4 / S5 (Workers)
+  # start-first 滚动更新，失败自动回滚
+  # ═══════════════════════════════════════
 
   api-gateway:
     image: ${REGISTRY}/ecom-api-gateway:${TAG:-latest}
@@ -307,11 +356,7 @@ services:
       CART_SERVICE_URL: http://cart-service:3003
       ORDER_SERVICE_URL: http://order-service:3004
       CORS_ORIGINS: ${CORS_ORIGINS:-}
-    secrets:
-      - jwt_access_secret
-      - jwt_refresh_secret
-      - internal_secret
-      - postgres_password
+    secrets: *app-secrets
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -321,9 +366,11 @@ services:
         export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
         exec bun run apps/api-gateway/src/index.ts
     networks:
-      - frontend_net
-      - app_net
+      - public_net
+      - service_net
       - data_net
+    stop_grace_period: 30s
+    logging: *logging
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -331,28 +378,11 @@ services:
       retries: 3
       start_period: 30s
     deploy:
+      <<: *app-deploy
       replicas: 1
       placement:
         constraints:
           - node.role == worker
-      update_config:
-        parallelism: 1
-        delay: 15s
-        order: start-first
-        failure_action: rollback
-        monitor: 30s
-      rollback_config:
-        parallelism: 1
-        delay: 10s
-        order: stop-first
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
 
   user-service:
     image: ${REGISTRY}/ecom-user-service:${TAG:-latest}
@@ -361,11 +391,7 @@ services:
       REDIS_URL: redis://redis-primary:6379
       NODE_ENV: production
       LOG_LEVEL: info
-    secrets:
-      - jwt_access_secret
-      - jwt_refresh_secret
-      - internal_secret
-      - postgres_password
+    secrets: *app-secrets
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -375,8 +401,10 @@ services:
         export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
         exec bun run services/user-service/src/index.ts
     networks:
-      - app_net
+      - service_net
       - data_net
+    stop_grace_period: 30s
+    logging: *logging
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3001/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -384,28 +412,11 @@ services:
       retries: 3
       start_period: 30s
     deploy:
+      <<: *app-deploy
       replicas: 1
       placement:
         constraints:
           - node.role == worker
-      update_config:
-        parallelism: 1
-        delay: 15s
-        order: start-first
-        failure_action: rollback
-        monitor: 30s
-      rollback_config:
-        parallelism: 1
-        delay: 10s
-        order: stop-first
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
 
   product-service:
     image: ${REGISTRY}/ecom-product-service:${TAG:-latest}
@@ -414,11 +425,7 @@ services:
       REDIS_URL: redis://redis-primary:6379
       NODE_ENV: production
       LOG_LEVEL: info
-    secrets:
-      - jwt_access_secret
-      - jwt_refresh_secret
-      - internal_secret
-      - postgres_password
+    secrets: *app-secrets
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -428,8 +435,10 @@ services:
         export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
         exec bun run services/product-service/src/index.ts
     networks:
-      - app_net
+      - service_net
       - data_net
+    stop_grace_period: 30s
+    logging: *logging
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3002/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -437,28 +446,11 @@ services:
       retries: 3
       start_period: 30s
     deploy:
+      <<: *app-deploy
       replicas: 1
       placement:
         constraints:
           - node.role == worker
-      update_config:
-        parallelism: 1
-        delay: 15s
-        order: start-first
-        failure_action: rollback
-        monitor: 30s
-      rollback_config:
-        parallelism: 1
-        delay: 10s
-        order: stop-first
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
 
   cart-service:
     image: ${REGISTRY}/ecom-cart-service:${TAG:-latest}
@@ -468,11 +460,7 @@ services:
       NODE_ENV: production
       LOG_LEVEL: info
       PRODUCT_SERVICE_URL: http://product-service:3002
-    secrets:
-      - jwt_access_secret
-      - jwt_refresh_secret
-      - internal_secret
-      - postgres_password
+    secrets: *app-secrets
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -482,8 +470,10 @@ services:
         export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
         exec bun run services/cart-service/src/index.ts
     networks:
-      - app_net
+      - service_net
       - data_net
+    stop_grace_period: 30s
+    logging: *logging
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3003/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -491,28 +481,11 @@ services:
       retries: 3
       start_period: 30s
     deploy:
+      <<: *app-deploy
       replicas: 1
       placement:
         constraints:
           - node.role == worker
-      update_config:
-        parallelism: 1
-        delay: 15s
-        order: start-first
-        failure_action: rollback
-        monitor: 30s
-      rollback_config:
-        parallelism: 1
-        delay: 10s
-        order: stop-first
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
 
   order-service:
     image: ${REGISTRY}/ecom-order-service:${TAG:-latest}
@@ -524,11 +497,7 @@ services:
       PRODUCT_SERVICE_URL: http://product-service:3002
       CART_SERVICE_URL: http://cart-service:3003
       USER_SERVICE_URL: http://user-service:3001
-    secrets:
-      - jwt_access_secret
-      - jwt_refresh_secret
-      - internal_secret
-      - postgres_password
+    secrets: *app-secrets
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -538,8 +507,10 @@ services:
         export DATABASE_URL="postgresql://postgres:$$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce"
         exec bun run services/order-service/src/index.ts
     networks:
-      - app_net
+      - service_net
       - data_net
+    stop_grace_period: 30s
+    logging: *logging
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3004/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
@@ -547,59 +518,37 @@ services:
       retries: 3
       start_period: 30s
     deploy:
+      <<: *app-deploy
       replicas: 1
       placement:
         constraints:
           - node.role == worker
-      update_config:
-        parallelism: 1
-        delay: 15s
-        order: start-first
-        failure_action: rollback
-        monitor: 30s
-      rollback_config:
-        parallelism: 1
-        delay: 10s
-        order: stop-first
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
 
-# ══════════════════════════════════════════════════
-# VPC 网络 — 三层 Overlay 隔离
-# ══════════════════════════════════════════════════
+# ═══════════════════════════════════════
+# VPC NETWORKS
+# ═══════════════════════════════════════
 #
-#  frontend_net ──┐
-#    nginx ←→ api-gateway
-#                 ├── app_net
-#           api-gateway ←→ user/product/cart/order-service
-#                              ├── data_net
-#                         微服务 ←→ postgres / redis
+#  public_net ── nginx <-> api-gateway
+#                              |
+#  service_net ── api-gateway <-> user/product/cart/order
+#                                        |
+#  data_net ── 微服务 <-> postgres/redis  (internal)
 #
-#  nginx 无法访问微服务和数据库
-#  api-gateway 无法直连数据库（需经微服务）
-#  数据库对外完全隔离
+#  nginx 无法触达微服务和数据库
+#  数据库对外完全不可达
 
 networks:
-  frontend_net:
+  public_net:
     driver: overlay
-    attachable: false
-  app_net:
+  service_net:
     driver: overlay
-    attachable: false
   data_net:
     driver: overlay
-    attachable: false
     internal: true
 
-# ══════════════════════════════════════════════════
-# 持久化卷 — 本地卷（通过 placement 约束固定到特定节点）
-# ══════════════════════════════════════════════════
+# ═══════════════════════════════════════
+# VOLUMES
+# ═══════════════════════════════════════
 
 volumes:
   pg_primary_data:
@@ -609,9 +558,9 @@ volumes:
   certbot_certs:
   certbot_webroot:
 
-# ══════════════════════════════════════════════════
-# Secrets — 部署前通过 deploy.sh 创建
-# ══════════════════════════════════════════════════
+# ═══════════════════════════════════════
+# SECRETS — deploy.sh setup 创建
+# ═══════════════════════════════════════
 
 secrets:
   postgres_password:
@@ -623,9 +572,9 @@ secrets:
   internal_secret:
     external: true
 
-# ══════════════════════════════════════════════════
-# Configs — 配置文件挂载（路径相对于本文件位置）
-# ══════════════════════════════════════════════════
+# ═══════════════════════════════════════
+# CONFIGS
+# ═══════════════════════════════════════
 
 configs:
   pg_conf:

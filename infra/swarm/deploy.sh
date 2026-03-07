@@ -1,376 +1,384 @@
 #!/usr/bin/env bash
-# deploy.sh — Docker Swarm 一键部署脚本
-# 用法：
-#   初始化集群 + 部署:  ./deploy.sh init
-#   仅部署/更新 Stack:  ./deploy.sh deploy
-#   构建并推送镜像:     ./deploy.sh build
-#   查看状态:           ./deploy.sh status
-#   销毁 Stack:         ./deploy.sh destroy
+# ═══════════════════════════════════════════════════════════════
+# deploy.sh — Docker Swarm 部署管理
+# ═══════════════════════════════════════════════════════════════
+#
+# 命令:
+#   init      初始化 Swarm 集群（仅首次）
+#   setup     设置节点标签 + 创建 Secrets（交互式）
+#   deploy    部署/更新 Stack
+#   migrate   运行数据库迁移
+#   status    查看服务状态
+#   logs      查看服务日志     (deploy.sh logs <service>)
+#   rollback  回滚指定服务     (deploy.sh rollback <service>)
+#   destroy   销毁 Stack
+#
+# 环境变量:
+#   REGISTRY        镜像仓库（必须）
+#   TAG             镜像标签（默认: latest）
+#   CERTBOT_DOMAIN  域名（默认: api.find345.site）
+#   CERTBOT_EMAIL   邮箱（默认: admin@find345.site）
+#   CORS_ORIGINS    CORS 来源
+#   STACK_NAME      Stack 名称（默认: ecom）
 
 set -euo pipefail
 
-# ── 颜色输出 ──
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-log_info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
-log_ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
-
 # ── 配置 ──
-STACK_NAME="ecom"
+STACK_NAME="${STACK_NAME:-ecom}"
+REGISTRY="${REGISTRY:-}"
+TAG="${TAG:-latest}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+STACK_FILE="$SCRIPT_DIR/docker-stack.yml"
 
-# 镜像 Registry（部署前必须设置）
-: "${REGISTRY:=registry.example.com/ecom}"
-: "${TAG:=latest}"
+# ── 输出 ──
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
+ok()    { echo -e "${GREEN}[ OK ]${NC}  $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+err()   { echo -e "${RED}[ERR]${NC}   $*"; }
 
-# 服务列表
-SERVICES=(api-gateway user-service product-service cart-service order-service)
-
-# ══════════════════════════════════════════════════
-# 函数定义
-# ══════════════════════════════════════════════════
-
-check_docker() {
-  if ! command -v docker &>/dev/null; then
-    log_error "Docker 未安装"
+require_swarm() {
+  if ! docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "active"; then
+    err "当前节点不在 Swarm 模式，请先执行: $0 init"
     exit 1
   fi
-  log_ok "Docker 已安装: $(docker --version)"
 }
 
-# 初始化 Swarm 集群
-init_swarm() {
-  log_info "═══ 初始化 Docker Swarm 集群 ═══"
+require_registry() {
+  if [ -z "$REGISTRY" ]; then
+    err "REGISTRY 未设置，例: REGISTRY=ghcr.io/your-org $0 deploy"
+    exit 1
+  fi
+}
 
-  # 检查是否已经是 Swarm 模式
+# ═══════════════════════════════════════
+# init — 初始化 Swarm
+# ═══════════════════════════════════════
+
+cmd_init() {
   if docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "active"; then
-    log_warn "当前节点已在 Swarm 模式中"
+    warn "已在 Swarm 模式中"
   else
-    log_info "初始化 Swarm Manager..."
-    # 使用当前节点的 IP 初始化（生产中需指定 --advertise-addr）
-    docker swarm init --advertise-addr "${MANAGER_IP:-$(hostname -I | awk '{print $1}')}" || {
-      log_error "Swarm 初始化失败，请检查网络配置"
-      exit 1
-    }
-    log_ok "Swarm Manager 初始化成功"
+    info "初始化 Swarm..."
+    docker swarm init --advertise-addr "${MANAGER_IP:-$(hostname -I | awk '{print $1}')}"
+    ok "Swarm 初始化完成"
   fi
 
   echo ""
-  log_info "═══ 加入集群的 Token ═══"
-  echo ""
-  log_info "Manager 节点加入命令（S2, S3 执行）："
+  info "Manager 加入命令（S2, S3 执行）："
   docker swarm join-token manager 2>/dev/null || true
   echo ""
-  log_info "Worker 节点加入命令（S4, S5 执行）："
+  info "Worker 加入命令（S4, S5 执行）："
   docker swarm join-token worker 2>/dev/null || true
   echo ""
-  log_warn "请先让所有节点加入集群，再执行: $0 labels"
+  warn "所有节点加入后，执行: $0 setup"
 }
 
-# 设置节点标签
-set_labels() {
-  log_info "═══ 设置节点标签 ═══"
+# ═══════════════════════════════════════
+# setup — 节点标签 + Secrets
+# ═══════════════════════════════════════
+
+cmd_setup() {
+  require_swarm
+  setup_labels
   echo ""
-  log_info "当前集群节点："
+  setup_secrets
+}
+
+setup_labels() {
+  info "═══ 节点标签 ═══"
   docker node ls
   echo ""
-
-  # 获取节点列表
-  local nodes
-  nodes=$(docker node ls --format '{{.Hostname}}' 2>/dev/null)
-
-  if [ -z "$nodes" ]; then
-    log_error "未找到集群节点"
-    exit 1
-  fi
-
-  echo "请为每个节点分配角色："
-  echo "  db-primary  — S1: PG 主 + Redis 主（数据层）"
-  echo "  db-replica  — S2: PG 从 + Redis 从（数据层）"
-  echo "  gateway     — S3: Nginx 反向代理（入口层）"
-  echo "  (Worker 节点 S4/S5 无需标签，仅需 worker 角色)"
+  echo "角色说明:"
+  echo "  db-primary  — PG主 + Redis主（S1）"
+  echo "  db-replica  — PG从 + Redis从（S2）"
+  echo "  gateway     — Nginx 入口（S3）"
+  echo "  skip        — 应用节点，无需标签（S4/S5）"
   echo ""
 
-  # 交互式设置标签
+  local nodes
+  nodes=$(docker node ls --format '{{.Hostname}}')
   for node in $nodes; do
-    read -rp "节点 ${node} 的角色 [db-primary/db-replica/gateway/skip]: " role
+    read -rp "  $node -> [db-primary/db-replica/gateway/skip]: " role
     case "$role" in
-      db-primary)
-        docker node update --label-add role=db-primary "$node"
-        log_ok "$node → db-primary"
+      db-primary|db-replica|gateway)
+        docker node update --label-add role="$role" "$node"
+        ok "$node -> $role"
         ;;
-      db-replica)
-        docker node update --label-add role=db-replica "$node"
-        log_ok "$node → db-replica"
-        ;;
-      gateway)
-        docker node update --label-add role=gateway "$node"
-        log_ok "$node → gateway"
-        ;;
-      skip|"")
-        log_info "$node → 跳过（Worker 节点无需标签）"
-        ;;
-      *)
-        log_warn "$node → 未知角色 '$role'，跳过"
-        ;;
+      *) info "$node -> 跳过" ;;
     esac
   done
-
-  echo ""
-  log_info "当前节点标签："
-  docker node ls -q | while read -r nid; do
-    local hostname labels
-    hostname=$(docker node inspect --format '{{.Description.Hostname}}' "$nid")
-    labels=$(docker node inspect --format '{{range $k,$v := .Spec.Labels}}{{$k}}={{$v}} {{end}}' "$nid")
-    echo "  $hostname: ${labels:-（无标签）}"
-  done
 }
 
-# 创建 Docker Secrets
-create_secrets() {
-  log_info "═══ 创建 Docker Secrets ═══"
-
+setup_secrets() {
+  info "═══ Secrets ═══"
   local secrets=(postgres_password jwt_access_secret jwt_refresh_secret internal_secret)
+  local min_lens=(8 16 16 8)
 
-  for secret in "${secrets[@]}"; do
-    if docker secret inspect "$secret" &>/dev/null; then
-      log_warn "Secret '$secret' 已存在，跳过（如需更新请先删除: docker secret rm $secret）"
-    else
-      read -rsp "请输入 ${secret} 的值: " value
-      echo ""
-      if [ -z "$value" ]; then
-        log_error "Secret 值不能为空"
-        exit 1
-      fi
+  for i in "${!secrets[@]}"; do
+    local name="${secrets[$i]}"
+    local min="${min_lens[$i]}"
 
-      # 密钥长度校验
-      local min_len=8
-      case "$secret" in
-        jwt_access_secret|jwt_refresh_secret) min_len=16 ;;
-        internal_secret) min_len=8 ;;
-      esac
-
-      if [ ${#value} -lt $min_len ]; then
-        log_error "$secret 长度不能少于 $min_len 字符"
-        exit 1
-      fi
-
-      echo -n "$value" | docker secret create "$secret" -
-      log_ok "Secret '$secret' 创建成功"
-    fi
-  done
-
-  echo ""
-  log_ok "所有 Secrets 就绪"
-  log_info "SSL 证书由 certbot 服务自动申请，无需手动管理"
-}
-
-# 构建并推送镜像
-build_images() {
-  log_info "═══ 构建并推送镜像 ═══"
-  log_info "Registry: $REGISTRY"
-  log_info "Tag: $TAG"
-  echo ""
-
-  cd "$REPO_ROOT"
-
-  for service in "${SERVICES[@]}"; do
-    local image_name="${REGISTRY}/ecom-${service}:${TAG}"
-
-    # 根据服务确定 Dockerfile 路径
-    local dockerfile
-    if [ "$service" = "api-gateway" ]; then
-      dockerfile="apps/api-gateway/Dockerfile"
-    else
-      dockerfile="services/${service}/Dockerfile"
+    if docker secret inspect "$name" &>/dev/null; then
+      ok "$name 已存在"
+      continue
     fi
 
-    log_info "构建 $service → $image_name"
-    docker build -t "$image_name" -f "$dockerfile" . || {
-      log_error "构建 $service 失败"
-      exit 1
-    }
+    read -rsp "  $name (最少 ${min} 字符): " value
+    echo ""
 
-    log_info "推送 $image_name"
-    docker push "$image_name" || {
-      log_error "推送 $service 失败，请确认已登录 Registry: docker login $REGISTRY"
+    if [ ${#value} -lt "$min" ]; then
+      err "$name 长度不足 $min 字符"
       exit 1
-    }
+    fi
 
-    log_ok "$service 构建并推送成功"
+    echo -n "$value" | docker secret create "$name" -
+    ok "$name 已创建"
   done
 
   echo ""
-  log_ok "所有镜像构建并推送完成"
+  ok "Secrets 就绪（SSL 证书由 certbot 自动管理）"
 }
 
-# 部署 Stack
-deploy_stack() {
-  log_info "═══ 部署 Stack: $STACK_NAME ═══"
+# ═══════════════════════════════════════
+# deploy — 部署/更新 Stack
+# ═══════════════════════════════════════
 
-  # 检查 Swarm 模式
-  if ! docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "active"; then
-    log_error "当前节点不在 Swarm 模式中，请先执行: $0 init"
-    exit 1
-  fi
+cmd_deploy() {
+  require_swarm
+  require_registry
 
-  # 检查 Secrets 是否存在
+  # 检查 Secrets
   local secrets=(postgres_password jwt_access_secret jwt_refresh_secret internal_secret)
-  for secret in "${secrets[@]}"; do
-    if ! docker secret inspect "$secret" &>/dev/null; then
-      log_error "Secret '$secret' 不存在，请先执行: $0 secrets"
+  for s in "${secrets[@]}"; do
+    if ! docker secret inspect "$s" &>/dev/null; then
+      err "Secret '$s' 不存在，请先执行: $0 setup"
       exit 1
     fi
   done
 
   # 检查节点标签
-  local has_primary has_replica has_gateway
-  has_primary=$(docker node ls -q | xargs -I{} docker node inspect --format '{{index .Spec.Labels "role"}}' {} 2>/dev/null | grep -c "db-primary" || true)
-  has_replica=$(docker node ls -q | xargs -I{} docker node inspect --format '{{index .Spec.Labels "role"}}' {} 2>/dev/null | grep -c "db-replica" || true)
-  has_gateway=$(docker node ls -q | xargs -I{} docker node inspect --format '{{index .Spec.Labels "role"}}' {} 2>/dev/null | grep -c "gateway" || true)
+  local labels
+  labels=$(docker node ls -q | xargs -I{} docker node inspect --format '{{range $k,$v := .Spec.Labels}}{{$v}} {{end}}' {} 2>/dev/null | tr ' ' '\n')
+  for role in db-primary db-replica gateway; do
+    if ! echo "$labels" | grep -q "^${role}$"; then
+      err "缺少 '${role}' 节点标签，请先执行: $0 setup"
+      exit 1
+    fi
+  done
 
-  if [ "$has_primary" -eq 0 ] || [ "$has_replica" -eq 0 ] || [ "$has_gateway" -eq 0 ]; then
-    log_error "缺少必要的节点标签（需要 db-primary, db-replica, gateway），请先执行: $0 labels"
-    exit 1
-  fi
+  info "部署 Stack: $STACK_NAME"
+  info "  Registry: $REGISTRY"
+  info "  Tag:      $TAG"
+  info "  Domain:   ${CERTBOT_DOMAIN:-api.find345.site}"
 
-  # 检查 Worker 节点
-  local worker_count
-  worker_count=$(docker node ls --filter "role=worker" -q | wc -l | tr -d ' ')
-  if [ "$worker_count" -lt 2 ]; then
-    log_warn "Worker 节点不足 2 个（当前 $worker_count 个），应用服务副本可能无法均匀分布"
-  fi
+  REGISTRY="$REGISTRY" TAG="$TAG" \
+    CORS_ORIGINS="${CORS_ORIGINS:-}" \
+    CERTBOT_DOMAIN="${CERTBOT_DOMAIN:-api.find345.site}" \
+    CERTBOT_EMAIL="${CERTBOT_EMAIL:-admin@find345.site}" \
+    docker stack deploy -c "$STACK_FILE" "$STACK_NAME" --with-registry-auth
 
-  log_info "Registry: $REGISTRY"
-  log_info "Tag: $TAG"
-
-  # 部署
-  REGISTRY="$REGISTRY" TAG="$TAG" CORS_ORIGINS="${CORS_ORIGINS:-}" \
-    docker stack deploy -c "$SCRIPT_DIR/docker-stack.yml" "$STACK_NAME"
+  wait_for_services
 
   echo ""
-  log_ok "Stack '$STACK_NAME' 部署命令已发送"
-  log_info "等待服务启动..."
-  sleep 5
-
-  # 显示服务状态
-  docker stack services "$STACK_NAME"
-  echo ""
-  log_info "查看详细状态: docker stack services $STACK_NAME"
-  log_info "查看服务日志: docker service logs ${STACK_NAME}_<service-name>"
-  log_info "查看任务状态: docker stack ps $STACK_NAME"
+  info "DNS 配置: 将域名 A 记录指向 S3/S4/S5 的公网 IP"
+  info "SSL 证书: certbot 自动申请（首次约 1-2 分钟）"
 }
 
-# 查看状态
-show_status() {
-  log_info "═══ Stack 状态: $STACK_NAME ═══"
+wait_for_services() {
+  info "等待服务收敛..."
+  local timeout=180
+  local elapsed=0
+
+  while [ $elapsed -lt $timeout ]; do
+    local not_ready
+    not_ready=$(docker stack services "$STACK_NAME" --format '{{.Replicas}}' 2>/dev/null \
+      | awk -F'/' '$1 != $2 { n++ } END { print n+0 }')
+
+    if [ "$not_ready" -eq 0 ]; then
+      echo ""
+      ok "所有服务就绪"
+      docker stack services "$STACK_NAME"
+      return 0
+    fi
+
+    printf "."
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+
   echo ""
+  warn "部分服务未就绪（${timeout}s 超时）"
+  docker stack services "$STACK_NAME"
+  echo ""
+  info "查看失败任务: docker stack ps $STACK_NAME --no-trunc | grep -v Running"
+}
+
+# ═══════════════════════════════════════
+# migrate — 数据库迁移
+# ═══════════════════════════════════════
+
+cmd_migrate() {
+  require_swarm
+  require_registry
+  info "运行数据库迁移..."
+
+  # 清理上次残留
+  docker service rm "${STACK_NAME}_migrate" 2>/dev/null || true
+
+  docker service create \
+    --name "${STACK_NAME}_migrate" \
+    --network "${STACK_NAME}_data_net" \
+    --secret postgres_password \
+    --restart-condition none \
+    --entrypoint sh \
+    "${REGISTRY}/ecom-api-gateway:${TAG}" \
+    -c 'export DATABASE_URL="postgresql://postgres:$(cat /run/secrets/postgres_password)@postgres-primary:5432/ecommerce" && bun run src/db/migrate.ts'
+
+  # 等待完成
+  local timeout=120
+  local elapsed=0
+  while [ $elapsed -lt $timeout ]; do
+    local state
+    state=$(docker service ps "${STACK_NAME}_migrate" --format '{{.CurrentState}}' 2>/dev/null | head -1)
+
+    if echo "$state" | grep -qi "complete"; then
+      ok "迁移完成"
+      docker service rm "${STACK_NAME}_migrate" 2>/dev/null || true
+      return 0
+    fi
+
+    if echo "$state" | grep -qi "failed\|rejected"; then
+      err "迁移失败"
+      docker service logs "${STACK_NAME}_migrate" --tail 30 2>/dev/null || true
+      docker service rm "${STACK_NAME}_migrate" 2>/dev/null || true
+      return 1
+    fi
+
+    sleep 3
+    elapsed=$((elapsed + 3))
+  done
+
+  warn "迁移超时 (${timeout}s)"
+  docker service rm "${STACK_NAME}_migrate" 2>/dev/null || true
+  return 1
+}
+
+# ═══════════════════════════════════════
+# status — 服务状态
+# ═══════════════════════════════════════
+
+cmd_status() {
+  require_swarm
 
   if ! docker stack ls 2>/dev/null | grep -q "$STACK_NAME"; then
-    log_warn "Stack '$STACK_NAME' 未部署"
+    warn "Stack '$STACK_NAME' 未部署"
     return
   fi
 
-  log_info "── 服务状态 ──"
+  info "═══ 服务 ═══"
   docker stack services "$STACK_NAME"
   echo ""
-
-  log_info "── 任务状态 ──"
-  docker stack ps "$STACK_NAME" --no-trunc 2>/dev/null | head -30
-  echo ""
-
-  log_info "── 节点状态 ──"
+  info "═══ 节点 ═══"
   docker node ls
-}
-
-# 销毁 Stack
-destroy_stack() {
-  log_warn "即将销毁 Stack: $STACK_NAME"
-  read -rp "确认删除？(输入 'yes' 确认): " confirm
-  if [ "$confirm" = "yes" ]; then
-    docker stack rm "$STACK_NAME"
-    log_ok "Stack '$STACK_NAME' 已删除"
-    log_warn "注意：持久化 Volume 不会被自动删除，如需清理请手动执行 docker volume prune"
+  echo ""
+  info "═══ 失败任务 ═══"
+  local failed
+  failed=$(docker stack ps "$STACK_NAME" --filter "desired-state=shutdown" --format "{{.Name}} {{.CurrentState}} {{.Error}}" 2>/dev/null | head -5)
+  if [ -n "$failed" ]; then
+    echo "$failed"
   else
-    log_info "取消操作"
+    ok "无失败任务"
   fi
 }
 
-# ══════════════════════════════════════════════════
+# ═══════════════════════════════════════
+# logs — 查看日志
+# ═══════════════════════════════════════
+
+cmd_logs() {
+  local service="${1:-}"
+  if [ -z "$service" ]; then
+    err "用法: $0 logs <service>"
+    echo "  可选: nginx api-gateway user-service product-service cart-service order-service"
+    echo "        postgres-primary postgres-replica redis-primary certbot"
+    exit 1
+  fi
+  docker service logs "${STACK_NAME}_${service}" --tail 100 --follow
+}
+
+# ═══════════════════════════════════════
+# rollback — 回滚服务
+# ═══════════════════════════════════════
+
+cmd_rollback() {
+  local service="${1:-}"
+  if [ -z "$service" ]; then
+    err "用法: $0 rollback <service>"
+    exit 1
+  fi
+  info "回滚 ${service}..."
+  docker service rollback "${STACK_NAME}_${service}"
+  ok "${service} 已回滚"
+}
+
+# ═══════════════════════════════════════
+# destroy — 销毁 Stack
+# ═══════════════════════════════════════
+
+cmd_destroy() {
+  require_swarm
+  warn "即将销毁 Stack: $STACK_NAME"
+  read -rp "输入 'yes' 确认: " confirm
+  if [ "$confirm" = "yes" ]; then
+    docker stack rm "$STACK_NAME"
+    ok "Stack 已删除"
+    warn "Volume 未删除，如需清理: docker volume prune"
+  else
+    info "已取消"
+  fi
+}
+
+# ═══════════════════════════════════════
 # 主入口
-# ══════════════════════════════════════════════════
+# ═══════════════════════════════════════
 
 usage() {
-  echo "用法: $0 <command>"
-  echo ""
-  echo "命令:"
-  echo "  init      初始化 Swarm 集群（仅在 S1 执行一次）"
-  echo "  labels    设置节点标签（init 后执行）"
-  echo "  secrets   创建 Docker Secrets"
-  echo "  build     构建并推送所有服务镜像"
-  echo "  deploy    部署/更新 Stack"
-  echo "  status    查看 Stack 状态"
-  echo "  destroy   销毁 Stack"
-  echo "  full      完整流程: init → labels → secrets → build → deploy"
-  echo ""
-  echo "环境变量:"
-  echo "  REGISTRY     镜像仓库地址（必须，如: registry.example.com/ecom）"
-  echo "  TAG          镜像标签（默认: latest）"
-  echo "  MANAGER_IP   Manager 节点 IP（init 时使用）"
-  echo "  CORS_ORIGINS 允许的 CORS 来源（逗号分隔）"
+  cat <<'EOF'
+用法: deploy.sh <command> [args]
+
+集群管理:
+  init          初始化 Swarm（仅 S1 执行一次）
+  setup         设置节点标签 + 创建 Secrets
+
+部署运维:
+  deploy        部署/更新 Stack
+  migrate       运行数据库迁移
+  status        查看服务状态
+  logs <svc>    查看服务日志 (e.g. logs api-gateway)
+  rollback <svc> 回滚指定服务
+
+清理:
+  destroy       销毁 Stack
+
+环境变量:
+  REGISTRY       镜像仓库（必须）
+  TAG            镜像标签（默认 latest）
+  CERTBOT_DOMAIN 域名
+  CERTBOT_EMAIL  通知邮箱
+  CORS_ORIGINS   CORS 来源
+EOF
 }
 
 case "${1:-}" in
-  init)
-    check_docker
-    init_swarm
-    ;;
-  labels)
-    check_docker
-    set_labels
-    ;;
-  secrets)
-    check_docker
-    create_secrets
-    ;;
-  build)
-    check_docker
-    build_images
-    ;;
-  deploy)
-    check_docker
-    deploy_stack
-    ;;
-  status)
-    check_docker
-    show_status
-    ;;
-  destroy)
-    check_docker
-    destroy_stack
-    ;;
-  full)
-    check_docker
-    init_swarm
-    echo ""
-    read -rp "所有节点已加入集群？按 Enter 继续设置标签..." _
-    set_labels
-    echo ""
-    create_secrets
-    echo ""
-    build_images
-    echo ""
-    deploy_stack
-    ;;
-  *)
-    usage
-    exit 1
-    ;;
+  init)     cmd_init ;;
+  setup)    cmd_setup ;;
+  deploy)   cmd_deploy ;;
+  migrate)  cmd_migrate ;;
+  status)   cmd_status ;;
+  logs)     cmd_logs "${2:-}" ;;
+  rollback) cmd_rollback "${2:-}" ;;
+  destroy)  cmd_destroy ;;
+  *)        usage; exit 1 ;;
 esac

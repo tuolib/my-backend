@@ -147,8 +147,17 @@ done
 echo ""
 echo "── Labeling nodes ──"
 
-# 等待所有节点就绪
-sleep 3
+# 等待所有 5 个节点就绪
+echo "  Waiting for all nodes to register..."
+for i in $(seq 1 30); do
+    NODE_COUNT=$(docker node ls -q 2>/dev/null | wc -l)
+    if [ "${NODE_COUNT}" -ge 5 ]; then
+        echo "  All ${NODE_COUNT} nodes registered"
+        break
+    fi
+    echo "  ${NODE_COUNT}/5 nodes ready, waiting..."
+    sleep 2
+done
 
 for NODE_ID in $(docker node ls -q); do
     NODE_ADDR=$(docker node inspect "${NODE_ID}" --format '{{.Status.Addr}}')
@@ -195,9 +204,9 @@ CLEANUP_CRON='0 3 * * * docker system prune -af --filter "until=72h" >/dev/null 
 
 # 远程节点
 for IP in "${ALL_NODES[@]:1}"; do
-    ssh ${SSH_OPTS} root@"${IP}" bash -c "'
-        (crontab -l 2>/dev/null | grep -v \"docker system prune\"; echo \"${CLEANUP_CRON}\") | crontab -
-    '"
+    ssh ${SSH_OPTS} root@"${IP}" bash <<REMOTE_CRON
+        (crontab -l 2>/dev/null | grep -v 'docker system prune'; echo '${CLEANUP_CRON}') | crontab -
+REMOTE_CRON
 done
 echo "Docker cleanup cron configured on all nodes"
 
@@ -206,7 +215,7 @@ echo "Docker cleanup cron configured on all nodes"
 echo ""
 echo "── Setting up PG backup cron ──"
 
-BACKUP_CRON='0 2 * * * docker exec $(docker ps -qf name=ecom_patroni-1 --format "{{.ID}}" | head -1) /scripts/pg-backup.sh >/dev/null 2>&1'
+BACKUP_CRON='0 2 * * * docker exec $(docker ps -qf name=ecom_patroni-1 | head -1) /scripts/pg-backup.sh >/dev/null 2>&1'
 (crontab -l 2>/dev/null | grep -v "pg-backup"; echo "${BACKUP_CRON}") | crontab -
 echo "PG backup cron configured on S1"
 

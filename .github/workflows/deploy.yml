@@ -1,8 +1,8 @@
 # CI/CD — 微服务构建 & 自动部署
 #
 # 触发方式:
-#   1. push 到 main → 自动部署到 k3s-multi
-#   2. 手动触发 workflow_dispatch → 可选平台（含 swarm）
+#   1. push 到 main → 自动部署到 swarm
+#   2. 手动触发 workflow_dispatch → 可选平台（swarm / k3s）
 
 name: Build & Deploy
 
@@ -579,6 +579,7 @@ jobs:
 
           # ── 1. 上传 Swarm 配置文件到 S1 ──
           echo "Uploading stack configs..."
+          ${SSH_CMD} 'mkdir -p /tmp/swarm-deploy'
           scp -o StrictHostKeyChecking=no -r \
               infra/swarm/ infra/redis/ \
               "${SWARM_USER}@${SWARM_HOST}:/tmp/swarm-deploy/"
@@ -613,7 +614,6 @@ jobs:
             create_or_update_secret jwt_access_secret "${JWT_ACCESS_SECRET}"
             create_or_update_secret jwt_refresh_secret "${JWT_REFRESH_SECRET}"
             create_or_update_secret internal_secret "${INTERNAL_SECRET}"
-
             # SSL 自签名证书（首次部署需要，让 Nginx 能启动 443）
             if ! docker secret inspect ssl_cert >/dev/null 2>&1; then
               echo "  Creating self-signed SSL certificate..."
@@ -706,28 +706,14 @@ jobs:
               sleep 5
             done
 
-            # 等待 API Gateway 就绪
-            echo "Waiting for API Gateway..."
-            for i in \$(seq 1 30); do
-              GW_ID=\$(docker ps -qf name=ecom_api-gateway --format "{{.ID}}" 2>/dev/null | head -1)
-              if [ -n "\${GW_ID}" ]; then
-                if docker exec "\${GW_ID}" bun run -e "fetch('http://localhost:3000/health',{method:'POST'}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
-                  echo "API Gateway is ready"
-                  break
-                fi
-              fi
-              echo "  Waiting for API Gateway... (\${i}/30)"
-              sleep 5
-            done
-
-            # Schema 迁移
-            GW_ID=\$(docker ps -qf name=ecom_api-gateway --format "{{.ID}}" 2>/dev/null | head -1)
+            # Schema 迁移（服务收敛已在上一步确认，直接查找容器）
+            GW_ID=\$(docker ps -qf name=ecom_api-gateway 2>/dev/null | head -1)
             if [ -n "\${GW_ID}" ]; then
               echo "Running schema migration..."
               docker exec "\${GW_ID}" bun run packages/database/src/migrate.ts 2>&1 || echo "::warning::Schema migration failed (may already be up to date)"
 
               echo "Running data migration..."
-              PRODUCT_ID=\$(docker ps -qf name=ecom_product-service --format "{{.ID}}" 2>/dev/null | head -1)
+              PRODUCT_ID=\$(docker ps -qf name=ecom_product-service 2>/dev/null | head -1)
               if [ -n "\${PRODUCT_ID}" ]; then
                 docker exec "\${PRODUCT_ID}" bun run packages/database/src/data-migrate.ts 2>&1 || echo "::warning::Data migration failed"
                 docker exec "\${PRODUCT_ID}" bun run packages/database/src/seed-prod.ts 2>&1 || echo "::warning::Seed failed"

@@ -8,7 +8,7 @@
 
 set -e
 
-BACKUP_DIR="/var/lib/postgresql/backups"
+BACKUP_DIR="/var/lib/postgresql/data/backups"
 RETENTION_DAYS=7
 DB_NAME="ecommerce"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)

@@ -70,12 +70,16 @@ update_ssl_secrets() {
 
 install_docker_cli
 
-# 尝试申请 Let's Encrypt 证书
+# 尝试申请 Let's Encrypt 证书（失败则重试，最多 6 次，间隔 5 分钟）
 echo "Attempting to obtain Let's Encrypt certificate for ${DOMAIN}..."
-certbot certonly --standalone --http-01-port 8080 \
-    -d "${DOMAIN}" --email "${EMAIL}" \
-    --agree-tos --non-interactive \
-    --preferred-challenges http 2>&1 || echo "Initial cert request failed (DNS may not be ready yet)"
+for ATTEMPT in $(seq 1 6); do
+    certbot certonly --standalone --http-01-port 8080 \
+        -d "${DOMAIN}" --email "${EMAIL}" \
+        --agree-tos --non-interactive \
+        --preferred-challenges http 2>&1 && break
+    echo "Cert request failed (attempt ${ATTEMPT}/6), retrying in 5 minutes..."
+    sleep 300
+done
 
 # 如果成功获取，更新 secret
 if [ -f "${CERT_DIR}/fullchain.pem" ]; then

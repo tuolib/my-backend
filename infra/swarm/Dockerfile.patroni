@@ -14,6 +14,7 @@ RUN apt-get update && \
 COPY patroni.yml /etc/patroni/patroni.yml
 COPY patroni-entrypoint.sh /scripts/patroni-entrypoint.sh
 COPY patroni-post-bootstrap.sh /scripts/patroni-post-bootstrap.sh
+COPY pg-backup.sh /scripts/pg-backup.sh
 
 RUN chmod +x /scripts/*.sh
 

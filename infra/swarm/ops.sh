@@ -47,7 +47,7 @@ cmd_status() {
 
     echo ""
     echo "═══════ Patroni Cluster ═══════"
-    PATRONI_CONTAINER=$(docker ps -qf "name=${STACK}_patroni-1" --format "{{.ID}}" 2>/dev/null | head -1)
+    PATRONI_CONTAINER=$(docker ps -qf "name=${STACK}_patroni-1" 2>/dev/null | head -1)
     if [ -n "${PATRONI_CONTAINER}" ]; then
         docker exec "${PATRONI_CONTAINER}" patronictl list 2>/dev/null || echo "Patroni not ready"
     else
@@ -56,7 +56,7 @@ cmd_status() {
 
     echo ""
     echo "═══════ Data Proxy (HAProxy) ═══════"
-    HAPROXY_CONTAINER=$(docker ps -qf "name=${STACK}_data-proxy" --format "{{.ID}}" 2>/dev/null | head -1)
+    HAPROXY_CONTAINER=$(docker ps -qf "name=${STACK}_data-proxy" 2>/dev/null | head -1)
     if [ -n "${HAPROXY_CONTAINER}" ]; then
         docker exec "${HAPROXY_CONTAINER}" sh -c 'echo "show stat" | socat stdio /var/run/haproxy.sock 2>/dev/null' \
             | awk -F',' 'NR>1 && $2!="" {printf "%-20s %-15s %s\n", $1"/"$2, $18, $17}' 2>/dev/null \

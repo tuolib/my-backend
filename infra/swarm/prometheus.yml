@@ -24,13 +24,11 @@ scrape_configs:
         type: A
         port: 8080
 
-  # HAProxy Stats — 数据代理状态
+  # HAProxy — 数据代理状态（Prometheus 原生格式）
   - job_name: "haproxy"
     dns_sd_configs:
       - names:
           - "tasks.data-proxy"
         type: A
         port: 8404
-    metrics_path: /stats
-    params:
-      stats: ["csv"]
+    metrics_path: /metrics

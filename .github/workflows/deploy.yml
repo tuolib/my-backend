@@ -584,18 +584,9 @@ jobs:
               infra/swarm/ infra/redis/ \
               "${SWARM_USER}@${SWARM_HOST}:/tmp/swarm-deploy/"
 
-          # ── 2. 登录 GHCR（所有节点拉取镜像需要认证） ──
-          echo "Logging into GHCR on all nodes..."
-          ${SSH_CMD} bash <<REMOTE_LOGIN
-            echo "${GHCR_PAT}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-            # 在所有节点登录（通过 SSH）
-            for NODE_IP in \$(docker node ls --format '{{.Hostname}}' -q 2>/dev/null | xargs -I{} docker node inspect {} --format '{{.Status.Addr}}' 2>/dev/null); do
-              if [ "\${NODE_IP}" != "\$(hostname -I | awk '{print \$1}')" ]; then
-                ssh -o StrictHostKeyChecking=no root@\${NODE_IP} \
-                  "echo '${GHCR_PAT}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin" 2>/dev/null || true
-              fi
-            done
-          REMOTE_LOGIN
+          # ── 2. 登录 GHCR（管理节点登录，--with-registry-auth 分发凭证到其他节点） ──
+          echo "Logging into GHCR..."
+          ${SSH_CMD} "echo '${GHCR_PAT}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
 
           # ── 3. 创建/更新 Docker Secrets（幂等） ──
           echo "Creating Docker secrets..."
@@ -629,23 +620,14 @@ jobs:
             fi
           REMOTE_SECRETS
 
-          # ── 4. 所有节点并行预拉取镜像 ──
-          echo "Pre-pulling images on all nodes..."
+          # ── 4. 管理节点预拉取镜像（其他节点通过 --with-registry-auth 按需拉取） ──
+          echo "Pre-pulling images on manager node..."
           ${SSH_CMD} bash <<REMOTE_PULL
             IMAGES="${REGISTRY}/ecom-api-gateway:${TAG} ${REGISTRY}/ecom-user-service:${TAG} ${REGISTRY}/ecom-product-service:${TAG} ${REGISTRY}/ecom-cart-service:${TAG} ${REGISTRY}/ecom-order-service:${TAG} ${REGISTRY}/ecom-patroni:${TAG} bitnami/etcd:3.5 redis:7-alpine haproxy:2.9-alpine nginx:1.27-alpine certbot/certbot:latest prom/node-exporter:latest gcr.io/cadvisor/cadvisor:latest"
-            NODES=\$(docker node ls --format '{{.Hostname}}' -q 2>/dev/null | xargs -I{} docker node inspect {} --format '{{.Status.Addr}}' 2>/dev/null)
-            LOCAL_IP=\$(hostname -I | awk '{print \$1}')
-            for NODE_IP in \${NODES}; do
-              (
-                if [ "\${NODE_IP}" = "\${LOCAL_IP}" ]; then
-                  for IMG in \${IMAGES}; do docker pull "\${IMG}" || echo "WARN: failed to pull \${IMG} on local"; done
-                else
-                  for IMG in \${IMAGES}; do ssh -o StrictHostKeyChecking=no root@\${NODE_IP} "docker pull \${IMG}" || echo "WARN: failed to pull \${IMG} on \${NODE_IP}"; done
-                fi
-              ) &
+            for IMG in \${IMAGES}; do
+              docker pull "\${IMG}" || echo "WARN: failed to pull \${IMG}"
             done
-            wait
-            echo "All nodes pre-pulled."
+            echo "Pre-pull done."
           REMOTE_PULL
 
           # ── 5. Docker Stack Deploy ──

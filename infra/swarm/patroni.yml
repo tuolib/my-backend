@@ -12,7 +12,7 @@ scope: ecom-pg
 restapi:
   listen: 0.0.0.0:8008
 
-etcd:
+etcd3:
   hosts: etcd-1:2379,etcd-2:2379,etcd-3:2379
 
 bootstrap:

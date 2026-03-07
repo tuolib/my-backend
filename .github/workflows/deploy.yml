@@ -638,9 +638,9 @@ jobs:
             for NODE_IP in \${NODES}; do
               (
                 if [ "\${NODE_IP}" = "\${LOCAL_IP}" ]; then
-                  for IMG in \${IMAGES}; do docker pull "\${IMG}" 2>/dev/null; done
+                  for IMG in \${IMAGES}; do docker pull "\${IMG}" || echo "WARN: failed to pull \${IMG} on local"; done
                 else
-                  for IMG in \${IMAGES}; do ssh -o StrictHostKeyChecking=no root@\${NODE_IP} "docker pull \${IMG}" 2>/dev/null; done
+                  for IMG in \${IMAGES}; do ssh -o StrictHostKeyChecking=no root@\${NODE_IP} "docker pull \${IMG}" || echo "WARN: failed to pull \${IMG} on \${NODE_IP}"; done
                 fi
               ) &
             done
@@ -667,26 +667,84 @@ jobs:
               ecom
           REMOTE_DEPLOY
 
-          # ── 6. 数据库迁移 ──
-          echo "Running database migration..."
+          # ── 6. 等待服务收敛 + 数据库迁移 ──
+          echo "Waiting for services to converge..."
           ${SSH_CMD} bash <<REMOTE_MIGRATE
             set -euo pipefail
 
-            # 等待 Patroni 就绪
-            echo "Waiting for Patroni to be ready..."
-            for i in \$(seq 1 30); do
+            # 诊断函数：打印失败服务的日志
+            dump_failing_services() {
+              echo "══════════ Service Status ══════════"
+              docker stack services ecom --format "table {{.Name}}\t{{.Replicas}}\t{{.Image}}" 2>/dev/null || true
+              echo ""
+              for SVC in etcd-1 etcd-2 etcd-3 patroni-1 patroni-2; do
+                RUNNING=\$(docker service ps "ecom_\${SVC}" --filter "desired-state=running" --format "{{.CurrentState}}" 2>/dev/null | head -1)
+                if echo "\${RUNNING}" | grep -q "Running"; then
+                  echo "✓ \${SVC}: \${RUNNING}"
+                else
+                  echo "✗ \${SVC}: NOT RUNNING"
+                  echo "  Tasks:"
+                  docker service ps "ecom_\${SVC}" --no-trunc --format "  {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -3
+                  echo "  Logs (last 10 lines):"
+                  docker service logs "ecom_\${SVC}" --tail 10 2>&1 | sed 's/^/  /' || true
+                  echo ""
+                fi
+              done
+            }
+
+            # 等待 etcd 集群就绪（最多 60s）
+            echo "Waiting for etcd cluster..."
+            ETCD_READY=false
+            for i in \$(seq 1 12); do
+              ETCD_ID=\$(docker ps -qf name=ecom_etcd-1 2>/dev/null | head -1)
+              if [ -n "\${ETCD_ID}" ]; then
+                if docker exec "\${ETCD_ID}" etcdctl endpoint health 2>/dev/null | grep -q "is healthy"; then
+                  echo "etcd cluster is healthy"
+                  ETCD_READY=true
+                  break
+                fi
+              fi
+              echo "  Waiting for etcd... (\${i}/12)"
+              sleep 5
+            done
+            if [ "\${ETCD_READY}" != "true" ]; then
+              echo "::error::etcd cluster failed to start"
+              dump_failing_services
+              exit 1
+            fi
+
+            # 等待 Patroni 选出 Leader（最多 90s）
+            echo "Waiting for Patroni leader election..."
+            PATRONI_READY=false
+            for i in \$(seq 1 18); do
               PATRONI_ID=\$(docker ps -qf name=ecom_patroni-1 2>/dev/null | head -1)
               if [ -n "\${PATRONI_ID}" ]; then
                 if docker exec "\${PATRONI_ID}" patronictl list 2>/dev/null | grep -q Leader; then
                   echo "Patroni cluster is ready"
+                  PATRONI_READY=true
                   break
                 fi
               fi
-              echo "  Waiting for Patroni... (\${i}/30)"
+              echo "  Waiting for Patroni... (\${i}/18)"
               sleep 5
             done
+            if [ "\${PATRONI_READY}" != "true" ]; then
+              echo "::error::Patroni failed to elect leader"
+              dump_failing_services
+              exit 1
+            fi
 
-            # Schema 迁移（服务收敛已在上一步确认，直接查找容器）
+            # 等待 API Gateway 健康（最多 60s）
+            echo "Waiting for API Gateway..."
+            for i in \$(seq 1 12); do
+              GW_ID=\$(docker ps -qf name=ecom_api-gateway --filter "health=healthy" 2>/dev/null | head -1)
+              if [ -n "\${GW_ID}" ]; then
+                echo "API Gateway is ready"
+                break
+              fi
+              echo "  Waiting for API Gateway... (\${i}/12)"
+              sleep 5
+            done
             GW_ID=\$(docker ps -qf name=ecom_api-gateway 2>/dev/null | head -1)
             if [ -n "\${GW_ID}" ]; then
               echo "Running schema migration..."

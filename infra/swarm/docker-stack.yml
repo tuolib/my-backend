@@ -102,7 +102,6 @@ services:
       ETCD_INITIAL_CLUSTER_STATE: new
       ETCD_AUTO_COMPACTION_RETENTION: "1"
       ALLOW_NONE_AUTHENTICATION: "yes"
-      ETCD_ENABLE_V2: "true"
     volumes:
       - etcd-1-data:/bitnami/etcd/data
     networks:
@@ -129,7 +128,6 @@ services:
       ETCD_INITIAL_CLUSTER_STATE: new
       ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
       ALLOW_NONE_AUTHENTICATION: "yes"
-      ETCD_ENABLE_V2: "true"
     volumes:
       - etcd-2-data:/bitnami/etcd/data
     networks:
@@ -156,7 +154,6 @@ services:
       ETCD_INITIAL_CLUSTER_STATE: new
       ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
       ALLOW_NONE_AUTHENTICATION: "yes"
-      ETCD_ENABLE_V2: "true"
     volumes:
       - etcd-3-data:/bitnami/etcd/data
     networks:

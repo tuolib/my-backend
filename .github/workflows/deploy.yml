@@ -613,6 +613,20 @@ jobs:
             create_or_update_secret jwt_access_secret "${JWT_ACCESS_SECRET}"
             create_or_update_secret jwt_refresh_secret "${JWT_REFRESH_SECRET}"
             create_or_update_secret internal_secret "${INTERNAL_SECRET}"
+
+            # SSL 自签名证书（首次部署需要，让 Nginx 能启动 443）
+            if ! docker secret inspect ssl_cert >/dev/null 2>&1; then
+              echo "  Creating self-signed SSL certificate..."
+              openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout /tmp/selfsigned.key -out /tmp/selfsigned.crt \
+                -subj "/CN=${DOMAIN}" 2>/dev/null
+              docker secret create ssl_cert /tmp/selfsigned.crt
+              docker secret create ssl_key /tmp/selfsigned.key
+              rm -f /tmp/selfsigned.crt /tmp/selfsigned.key
+              echo "  Self-signed SSL secrets created"
+            else
+              echo "  Secret ssl_cert already exists, skipping"
+            fi
           REMOTE_SECRETS
 
           # ── 4. Docker Stack Deploy ──

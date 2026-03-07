@@ -677,8 +677,8 @@ jobs:
               fi
 
               echo "  [${ELAPSED}s] Waiting..."
-              sleep 10
-              ELAPSED=$((ELAPSED + 10))
+              sleep 5
+              ELAPSED=$((ELAPSED + 5))
             done
 
             if [ ${ELAPSED} -ge ${TIMEOUT} ]; then

@@ -64,18 +64,25 @@ secrets:
 configs:
   app_entrypoint:
     file: ./app-entrypoint.sh
+    name: app_entrypoint_${TAG:-latest}
   nginx_conf:
     file: ./nginx.conf
+    name: nginx_conf_${TAG:-latest}
   haproxy_cfg:
     file: ./haproxy-data.cfg
+    name: haproxy_cfg_${TAG:-latest}
   redis_sentinel_conf:
     file: ./redis-sentinel.conf
+    name: redis_sentinel_conf_${TAG:-latest}
   redis_conf:
     file: ../redis/redis.conf
+    name: redis_conf_${TAG:-latest}
   certbot_entrypoint:
     file: ./certbot-entrypoint.sh
+    name: certbot_entrypoint_${TAG:-latest}
   prometheus_yml:
     file: ./prometheus.yml
+    name: prometheus_yml_${TAG:-latest}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Services
@@ -466,10 +473,10 @@ services:
       - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3000/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     deploy:
       replicas: 2
       resources:
@@ -509,10 +516,10 @@ services:
       - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3001/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     deploy:
       replicas: 2
       resources:
@@ -552,10 +559,10 @@ services:
       - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3002/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     deploy:
       replicas: 2
       resources:
@@ -596,10 +603,10 @@ services:
       - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3003/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     deploy:
       replicas: 2
       resources:
@@ -642,10 +649,10 @@ services:
       - data_net
     healthcheck:
       test: ["CMD", "bun", "run", "-e", "fetch('http://localhost:3004/health',{method:'POST'}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     deploy:
       replicas: 2
       resources:

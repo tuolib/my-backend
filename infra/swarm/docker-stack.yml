@@ -1,7 +1,7 @@
 # Docker Swarm Stack — 电商微服务平台生产部署
 #
-# 22 个服务：3 etcd + 2 patroni + 2 redis + 3 sentinel + 1 data-proxy
-#            + 2 nginx + 1 certbot + 5 应用 + 2 global 监控 + 1 prometheus
+# 20 个服务：3 etcd + 2 patroni + 2 redis + 3 sentinel + 1 data-proxy
+#            + 2 nginx + 1 certbot + 5 应用 + 2 global 监控
 #
 # 网络隔离：public_net (DMZ) / service_net (内部) / data_net (数据层，外部不可达)
 # 部署方式：docker stack deploy -c docker-stack.yml ecom
@@ -34,8 +34,6 @@ volumes:
   etcd-2-data:
   etcd-3-data:
   certbot-data:
-  prometheus-data:
-  grafana-data:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Secrets (external — 由 GitHub Actions 或 init-node.sh 创建)
@@ -80,9 +78,6 @@ configs:
   certbot_entrypoint:
     file: ./certbot-entrypoint.sh
     name: certbot_entrypoint_${TAG:-latest}
-  prometheus_yml:
-    file: ./prometheus.yml
-    name: prometheus_yml_${TAG:-latest}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Services
@@ -114,9 +109,7 @@ services:
       placement:
         constraints:
           - node.labels.role == db-primary
-      resources:
-        reservations:
-          memory: 128M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -142,9 +135,7 @@ services:
       placement:
         constraints:
           - node.labels.role == db-replica
-      resources:
-        reservations:
-          memory: 128M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -170,9 +161,7 @@ services:
       placement:
         constraints:
           - node.labels.role == gateway
-      resources:
-        reservations:
-          memory: 128M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -195,10 +184,7 @@ services:
       placement:
         constraints:
           - node.labels.role == db-primary
-      resources:
-        reservations:
-          memory: 512M
-          cpus: "0.5"
+
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -221,10 +207,7 @@ services:
       placement:
         constraints:
           - node.labels.role == db-replica
-      resources:
-        reservations:
-          memory: 512M
-          cpus: "0.5"
+
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -248,9 +231,7 @@ services:
       placement:
         constraints:
           - node.labels.role == db-primary
-      resources:
-        reservations:
-          memory: 256M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -272,9 +253,7 @@ services:
       placement:
         constraints:
           - node.labels.role == db-replica
-      resources:
-        reservations:
-          memory: 256M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -296,9 +275,7 @@ services:
       placement:
         constraints:
           - node.labels.role == db-primary
-      resources:
-        reservations:
-          memory: 64M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -318,9 +295,7 @@ services:
       placement:
         constraints:
           - node.labels.role == db-replica
-      resources:
-        reservations:
-          memory: 64M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -340,9 +315,7 @@ services:
       placement:
         constraints:
           - node.labels.role == gateway
-      resources:
-        reservations:
-          memory: 64M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -364,9 +337,7 @@ services:
       retries: 3
     deploy:
       replicas: 2
-      resources:
-        reservations:
-          memory: 128M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -401,9 +372,7 @@ services:
       - public_net
     deploy:
       replicas: 2
-      resources:
-        reservations:
-          memory: 64M
+
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -438,9 +407,7 @@ services:
       placement:
         constraints:
           - node.labels.role == gateway
-      resources:
-        reservations:
-          memory: 64M
+
       restart_policy:
         condition: on-failure
         delay: 60s
@@ -479,9 +446,7 @@ services:
       start_period: 5s
     deploy:
       replicas: 2
-      resources:
-        reservations:
-          memory: 128M
+
       update_config:
         order: stop-first
         parallelism: 0
@@ -522,9 +487,7 @@ services:
       start_period: 5s
     deploy:
       replicas: 2
-      resources:
-        reservations:
-          memory: 128M
+
       update_config:
         order: stop-first
         parallelism: 0
@@ -565,9 +528,7 @@ services:
       start_period: 5s
     deploy:
       replicas: 2
-      resources:
-        reservations:
-          memory: 128M
+
       update_config:
         order: stop-first
         parallelism: 0
@@ -609,9 +570,7 @@ services:
       start_period: 5s
     deploy:
       replicas: 2
-      resources:
-        reservations:
-          memory: 128M
+
       update_config:
         order: stop-first
         parallelism: 0
@@ -655,9 +614,7 @@ services:
       start_period: 5s
     deploy:
       replicas: 2
-      resources:
-        reservations:
-          memory: 128M
+
       update_config:
         order: stop-first
         parallelism: 0
@@ -689,9 +646,7 @@ services:
       - data_net
     deploy:
       mode: global
-      resources:
-        reservations:
-          memory: 32M
+
       restart_policy:
         condition: on-failure
 
@@ -707,57 +662,7 @@ services:
       - data_net
     deploy:
       mode: global
-      resources:
-        reservations:
-          memory: 64M
+
       restart_policy:
         condition: on-failure
 
-  prometheus:
-    image: prom/prometheus:latest
-    hostname: prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=15d"
-    configs:
-      - source: prometheus_yml
-        target: /etc/prometheus/prometheus.yml
-    volumes:
-      - prometheus-data:/prometheus
-    networks:
-      - data_net
-    deploy:
-      placement:
-        constraints:
-          - node.labels.role == gateway
-      resources:
-        reservations:
-          memory: 256M
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-
-  grafana:
-    image: grafana/grafana:latest
-    hostname: grafana
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
-      GF_SERVER_ROOT_URL: "https://${DOMAIN:-example.com}/grafana/"
-      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
-    volumes:
-      - grafana-data:/var/lib/grafana
-    networks:
-      - data_net
-      - public_net
-    deploy:
-      placement:
-        constraints:
-          - node.labels.role == gateway
-      resources:
-        reservations:
-          memory: 128M
-      restart_policy:
-        condition: on-failure
-        delay: 5s

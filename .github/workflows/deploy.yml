@@ -654,21 +654,21 @@ jobs:
           ${SSH_CMD} bash <<REMOTE_MIGRATE
             set -euo pipefail
 
-            # 诊断函数：打印失败服务的日志
+            # 诊断函数：打印所有关键服务的状态和日志
             dump_failing_services() {
               echo "══════════ Service Status ══════════"
               docker stack services ecom --format "table {{.Name}}\t{{.Replicas}}\t{{.Image}}" 2>/dev/null || true
               echo ""
-              for SVC in etcd-1 etcd-2 etcd-3 patroni-1 patroni-2; do
+              for SVC in etcd-1 etcd-2 etcd-3 patroni-1 patroni-2 redis-primary redis-replica data-proxy api-gateway user-service product-service cart-service order-service nginx; do
                 RUNNING=\$(docker service ps "ecom_\${SVC}" --filter "desired-state=running" --format "{{.CurrentState}}" 2>/dev/null | head -1)
                 if echo "\${RUNNING}" | grep -q "Running"; then
                   echo "✓ \${SVC}: \${RUNNING}"
                 else
                   echo "✗ \${SVC}: NOT RUNNING"
-                  echo "  Tasks:"
-                  docker service ps "ecom_\${SVC}" --no-trunc --format "  {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -3
-                  echo "  Logs (last 10 lines):"
-                  docker service logs "ecom_\${SVC}" --tail 10 2>&1 | sed 's/^/  /' || true
+                  echo "  Tasks (including failed):"
+                  docker service ps "ecom_\${SVC}" --no-trunc --format "  {{.DesiredState}} | {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -5
+                  echo "  Logs (last 20 lines):"
+                  docker service logs "ecom_\${SVC}" --tail 20 2>&1 | sed 's/^/  /' || true
                   echo ""
                 fi
               done
@@ -728,17 +728,31 @@ jobs:
               # 每 10 秒打印详细状态
               if [ \$((i % 10)) -eq 0 ]; then
                 echo "── patroni status (\${i}s) ──"
-                if [ -z "\${PATRONI_ID}" ]; then
-                  echo "  patroni-1: no container"
-                  docker service ps ecom_patroni-1 --no-trunc --format "    {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -2
-                else
-                  echo "\${PATRONI_OUT}" | sed 's/^/  /'
-                fi
+                for P_SVC in ecom_patroni-1 ecom_patroni-2; do
+                  P_ID=\$(docker ps -qf name=\${P_SVC} 2>/dev/null | head -1)
+                  if [ -z "\${P_ID}" ]; then
+                    echo "  \${P_SVC}: no container"
+                    docker service ps "\${P_SVC}" --no-trunc --format "    {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -3
+                  else
+                    echo "  \${P_SVC}: running"
+                    echo "    patronictl list:"
+                    docker exec "\${P_ID}" patronictl list 2>&1 | sed 's/^/      /' || true
+                  fi
+                done
+                echo "  patroni-1 logs (last 15 lines):"
+                docker service logs ecom_patroni-1 --tail 15 2>&1 | sed 's/^/    /' || true
+                echo "  patroni-2 logs (last 15 lines):"
+                docker service logs ecom_patroni-2 --tail 15 2>&1 | sed 's/^/    /' || true
               fi
               sleep 1
             done
             if [ "\${PATRONI_READY}" != "true" ]; then
               echo "::error::Patroni failed to elect leader"
+              echo "══════ Patroni Full Logs ══════"
+              echo "── patroni-1 (last 50 lines) ──"
+              docker service logs ecom_patroni-1 --tail 50 2>&1 || true
+              echo "── patroni-2 (last 50 lines) ──"
+              docker service logs ecom_patroni-2 --tail 50 2>&1 || true
               dump_failing_services
               exit 1
             fi

@@ -632,11 +632,7 @@ jobs:
           # ── 4. 所有节点并行预拉取镜像 ──
           echo "Pre-pulling images on all nodes..."
           ${SSH_CMD} bash <<REMOTE_PULL
-            # 应用镜像
-            IMAGES="${REGISTRY}/ecom-api-gateway:${TAG} ${REGISTRY}/ecom-user-service:${TAG} ${REGISTRY}/ecom-product-service:${TAG} ${REGISTRY}/ecom-cart-service:${TAG} ${REGISTRY}/ecom-order-service:${TAG} ${REGISTRY}/ecom-patroni:${TAG}"
-            # 基础设施镜像（所有节点都需要）
-            INFRA_IMAGES="bitnami/etcd:3.5 redis:7-alpine haproxy:2.9-alpine nginx:1.27-alpine certbot/certbot:latest prom/node-exporter:latest gcr.io/cadvisor/cadvisor:latest"
-            IMAGES="${IMAGES} ${INFRA_IMAGES}"
+            IMAGES="${REGISTRY}/ecom-api-gateway:${TAG} ${REGISTRY}/ecom-user-service:${TAG} ${REGISTRY}/ecom-product-service:${TAG} ${REGISTRY}/ecom-cart-service:${TAG} ${REGISTRY}/ecom-order-service:${TAG} ${REGISTRY}/ecom-patroni:${TAG} bitnami/etcd:3.5 redis:7-alpine haproxy:2.9-alpine nginx:1.27-alpine certbot/certbot:latest prom/node-exporter:latest gcr.io/cadvisor/cadvisor:latest"
             NODES=\$(docker node ls --format '{{.Hostname}}' -q 2>/dev/null | xargs -I{} docker node inspect {} --format '{{.Status.Addr}}' 2>/dev/null)
             LOCAL_IP=\$(hostname -I | awk '{print \$1}')
             for NODE_IP in \${NODES}; do

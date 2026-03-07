@@ -88,11 +88,11 @@ services:
   # ── etcd 集群（3 节点分布式共识，防脑裂） ──────────────────────────────────
 
   etcd-1:
-    image: bitnami/etcd:3.5
+    image: quay.io/coreos/etcd:v3.5.17
     hostname: etcd-1
     environment:
       ETCD_NAME: etcd-1
-      ETCD_DATA_DIR: /bitnami/etcd/data
+      ETCD_DATA_DIR: /etcd-data
       ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
       ETCD_ADVERTISE_CLIENT_URLS: http://etcd-1:2379
       ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
@@ -101,9 +101,9 @@ services:
       ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
       ETCD_INITIAL_CLUSTER_STATE: new
       ETCD_AUTO_COMPACTION_RETENTION: "1"
-      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ENABLE_V2: "true"
     volumes:
-      - etcd-1-data:/bitnami/etcd/data
+      - etcd-1-data:/etcd-data
     networks:
       - data_net
     deploy:
@@ -115,11 +115,11 @@ services:
         delay: 5s
 
   etcd-2:
-    image: bitnami/etcd:3.5
+    image: quay.io/coreos/etcd:v3.5.17
     hostname: etcd-2
     environment:
       ETCD_NAME: etcd-2
-      ETCD_DATA_DIR: /bitnami/etcd/data
+      ETCD_DATA_DIR: /etcd-data
       ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
       ETCD_ADVERTISE_CLIENT_URLS: http://etcd-2:2379
       ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
@@ -127,9 +127,9 @@ services:
       ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
       ETCD_INITIAL_CLUSTER_STATE: new
       ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
-      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ENABLE_V2: "true"
     volumes:
-      - etcd-2-data:/bitnami/etcd/data
+      - etcd-2-data:/etcd-data
     networks:
       - data_net
     deploy:
@@ -141,11 +141,11 @@ services:
         delay: 5s
 
   etcd-3:
-    image: bitnami/etcd:3.5
+    image: quay.io/coreos/etcd:v3.5.17
     hostname: etcd-3
     environment:
       ETCD_NAME: etcd-3
-      ETCD_DATA_DIR: /bitnami/etcd/data
+      ETCD_DATA_DIR: /etcd-data
       ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
       ETCD_ADVERTISE_CLIENT_URLS: http://etcd-3:2379
       ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
@@ -153,9 +153,9 @@ services:
       ETCD_INITIAL_CLUSTER: etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380
       ETCD_INITIAL_CLUSTER_STATE: new
       ETCD_INITIAL_CLUSTER_TOKEN: ecom-etcd-cluster
-      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ENABLE_V2: "true"
     volumes:
-      - etcd-3-data:/bitnami/etcd/data
+      - etcd-3-data:/etcd-data
     networks:
       - data_net
     deploy:

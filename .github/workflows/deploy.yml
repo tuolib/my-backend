@@ -15,11 +15,11 @@ on:
         description: "目标平台"
         required: true
         type: choice
-        default: "k3s-multi"
+        default: "swarm"
         options:
+          - swarm
           - k3s-single
           - k3s-multi
-          - swarm
       image_tag:
         description: "Custom image tag (leave blank = SHA)"
         required: false
@@ -35,7 +35,7 @@ permissions:
   packages: write
 
 env:
-  PLATFORM: ${{ inputs.platform || 'k3s-multi' }}
+  PLATFORM: ${{ inputs.platform || 'swarm' }}
   DOMAIN: api.find345.site
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────────
@@ -136,11 +136,10 @@ jobs:
 
   # ─── Job ③ Helm 部署到 K3s ──────────────────────────────────────────────────
   deploy-k3s:
-    name: Deploy to ${{ inputs.platform || 'k3s-multi' }}
+    name: Deploy to ${{ inputs.platform || 'swarm' }}
     needs: build-images
     if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && startsWith(inputs.platform, 'k'))
+      github.event_name == 'workflow_dispatch' && startsWith(inputs.platform, 'k')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -524,7 +523,8 @@ jobs:
     name: Deploy to Swarm
     needs: build-images
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.platform == 'swarm'
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.platform == 'swarm')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

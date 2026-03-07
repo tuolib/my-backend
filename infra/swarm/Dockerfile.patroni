@@ -10,7 +10,6 @@ RUN apt-get update && \
 COPY infra/swarm/patroni.yml /etc/patroni/patroni.yml
 COPY infra/swarm/patroni-entrypoint.sh /etc/patroni/entrypoint.sh
 COPY infra/swarm/patroni-post-bootstrap.sh /etc/patroni/post-bootstrap.sh
-COPY infra/postgres/init.sql /etc/patroni/init.sql
 RUN chmod +x /etc/patroni/entrypoint.sh /etc/patroni/post-bootstrap.sh
 
 USER postgres

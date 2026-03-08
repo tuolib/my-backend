@@ -606,6 +606,8 @@ jobs:
             create_or_update_secret jwt_access_secret "${JWT_ACCESS_SECRET}"
             create_or_update_secret jwt_refresh_secret "${JWT_REFRESH_SECRET}"
             create_or_update_secret internal_secret "${INTERNAL_SECRET}"
+
+            # SSL 证书由服务器维护，仅首次部署时自签兜底
             if ! docker secret inspect ssl_cert >/dev/null 2>&1; then
               openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
                 -keyout /tmp/selfsigned.key -out /tmp/selfsigned.crt \

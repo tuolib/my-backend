@@ -121,24 +121,40 @@ echo "Data directory: ${DATA_DIR}"
 echo "  Contents: $(ls -A "${DATA_DIR}" 2>/dev/null | head -5 || echo "(empty)")"
 
 # 密码同步：已有 PG 数据时，临时启动 PG 更新用户密码
-# 解决问题：旧 bootstrap 用了错误/旧密码 → replicator 认证失败
+# 解决问题：旧 bootstrap 用了错误/旧密码 → replica pg_basebackup 认证失败
 if [ -f "${DATA_DIR}/PG_VERSION" ] && [ ! -f "${DATA_DIR}/standby.signal" ]; then
     echo "Syncing PostgreSQL user passwords with current Docker Secrets..."
     # 仅监听 Unix socket（不开 TCP），避免外部连接干扰
-    if gosu postgres pg_ctl -D "${DATA_DIR}" start -w -t 15 \
-        -o "-c listen_addresses='' -c logging_collector=off" 2>/dev/null; then
+    if gosu postgres pg_ctl -D "${DATA_DIR}" start -w -t 30 \
+        -o "-c listen_addresses='' -c logging_collector=off"; then
 
-        PW_SU=$(echo "${PATRONI_SUPERUSER_PASSWORD}" | sed "s/'/''/g")
-        PW_REPL=$(echo "${PATRONI_REPLICATION_PASSWORD}" | sed "s/'/''/g")
+        # 转义 SQL 单引号
+        PW_SU=$(printf '%s' "${PATRONI_SUPERUSER_PASSWORD}" | sed "s/'/''/g")
+        PW_REPL=$(printf '%s' "${PATRONI_REPLICATION_PASSWORD}" | sed "s/'/''/g")
 
-        gosu postgres psql -c "ALTER USER postgres PASSWORD '${PW_SU}';" 2>/dev/null || true
-        gosu postgres psql -c "ALTER USER replicator PASSWORD '${PW_REPL}';" 2>/dev/null || true
+        echo "  Updating superuser password..."
+        gosu postgres psql -c "ALTER USER postgres PASSWORD '${PW_SU}';" 2>&1 || true
 
-        gosu postgres pg_ctl -D "${DATA_DIR}" stop -w -t 15 2>/dev/null || \
-            gosu postgres pg_ctl -D "${DATA_DIR}" stop -m immediate -w -t 5 2>/dev/null || true
+        # 确保 replicator 用户存在（初次 bootstrap 可能未完成就被杀）
+        echo "  Updating replicator password..."
+        gosu postgres psql -c "
+            DO \$\$ BEGIN
+                IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='replicator') THEN
+                    CREATE USER replicator WITH REPLICATION PASSWORD '${PW_REPL}';
+                ELSE
+                    ALTER USER replicator PASSWORD '${PW_REPL}';
+                END IF;
+            END \$\$;" 2>&1 || true
+
+        echo "  Stopping temporary PG..."
+        gosu postgres pg_ctl -D "${DATA_DIR}" stop -w -t 15 || \
+            gosu postgres pg_ctl -D "${DATA_DIR}" stop -m immediate -w -t 5 || true
         echo "Password sync completed"
     else
-        echo "WARNING: Could not start PG for password sync (may be fresh node), skipping"
+        # PG 无法启动（数据损坏 / 不完整） → 清理后让 Patroni 重新 bootstrap
+        echo "ERROR: Could not start PG for password sync"
+        echo "Cleaning data directory for fresh bootstrap..."
+        rm -rf "${DATA_DIR:?}"/*
     fi
 fi
 

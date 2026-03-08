@@ -48,20 +48,25 @@ ${PSQL_CMD} -d ecommerce -c "CREATE SCHEMA IF NOT EXISTS user_service;" 2>&1 && 
 ${PSQL_CMD} -d ecommerce -c "CREATE SCHEMA IF NOT EXISTS product_service;" 2>&1 && echo "  product_service: OK" || echo "  product_service: FAILED"
 ${PSQL_CMD} -d ecommerce -c "CREATE SCHEMA IF NOT EXISTS order_service;" 2>&1 && echo "  order_service: OK" || echo "  order_service: FAILED"
 
-# 确保 replicator 用户密码已设置（Patroni bootstrap 可能未正确设置）
+# 强制同步所有数据库密码为 Docker Secret（来源于 GitHub Secrets）
+echo "Force-syncing database passwords..."
+
+if [ -f /run/secrets/postgres_password ]; then
+    PW_SU=$(cat /run/secrets/postgres_password | sed "s/'/''/g")
+    ${PSQL_CMD} -c "ALTER USER postgres PASSWORD '${PW_SU}';" 2>&1 \
+        && echo "  postgres password: OK" || echo "  postgres password: FAILED"
+fi
+
 if [ -f /run/secrets/replication_password ]; then
-    REPL_PW=$(cat /run/secrets/replication_password | sed "s/'/''/g")
-    if [ -n "${REPL_PW}" ]; then
-        echo "Ensuring replicator user password..."
-        ${PSQL_CMD} -c "
-            DO \$\$ BEGIN
-                IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='replicator') THEN
-                    CREATE USER replicator WITH REPLICATION PASSWORD '${REPL_PW}';
-                ELSE
-                    ALTER USER replicator PASSWORD '${REPL_PW}';
-                END IF;
-            END \$\$;" 2>&1 && echo "  replicator: OK" || echo "  replicator: FAILED"
-    fi
+    PW_REPL=$(cat /run/secrets/replication_password | sed "s/'/''/g")
+    ${PSQL_CMD} -c "
+        DO \$\$ BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='replicator') THEN
+                CREATE USER replicator WITH REPLICATION PASSWORD '${PW_REPL}';
+            ELSE
+                ALTER USER replicator PASSWORD '${PW_REPL}';
+            END IF;
+        END \$\$;" 2>&1 && echo "  replicator password: OK" || echo "  replicator password: FAILED"
 fi
 
 echo "======== Post-Bootstrap Done ========"

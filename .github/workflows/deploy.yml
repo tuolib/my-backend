@@ -581,15 +581,25 @@ jobs:
           ${SSH_CMD} "echo '${GHCR_PAT}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin" >/dev/null 2>&1 \
             || { echo "::error::[2/6] GHCR login failed"; exit 1; }
 
-          # ── [3/6] 创建 Docker Secrets ──
+          # ── [3/6] 同步 Docker Secrets（每次部署用 GitHub Secrets 覆盖） ──
           echo "[3/6] Docker secrets"
           ${SSH_CMD} bash <<REMOTE_SECRETS
             set -euo pipefail
+
+            # Docker secret 不可变，需先移除 stack 释放引用，再删除重建
+            if docker stack ls --format '{{.Name}}' | grep -q '^ecom$'; then
+              docker stack rm ecom >/dev/null 2>&1 || true
+              # 等待所有服务完全停止（最多 30s）
+              for i in \$(seq 1 30); do
+                docker stack ps ecom >/dev/null 2>&1 || break
+                sleep 1
+              done
+            fi
+
             create_or_update_secret() {
               local NAME="\$1" VALUE="\$2"
-              if ! docker secret inspect "\${NAME}" >/dev/null 2>&1; then
-                echo "\${VALUE}" | docker secret create "\${NAME}" - >/dev/null
-              fi
+              docker secret rm "\${NAME}" >/dev/null 2>&1 || true
+              printf '%s' "\${VALUE}" | docker secret create "\${NAME}" - >/dev/null
             }
             create_or_update_secret postgres_password "${POSTGRES_PASSWORD}"
             create_or_update_secret replication_password "${REPLICATION_PASSWORD}"

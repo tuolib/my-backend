@@ -714,11 +714,11 @@ jobs:
             fi
             echo "  [6b] Patroni leader elected (${i}s)"
 
-            # [6c] API Gateway 健康（最多 60s）
+            # [6c] API Gateway 健康（最多 60s，通过 nginx ingress 发真实请求）
             echo "  [6c] Waiting for API Gateway..."
             GW_HEALTHY=false
             for i in $(seq 1 60); do
-              if docker service logs ecom_api-gateway --tail 10 2>&1 | grep -q '/health","status":200'; then
+              if curl -sfk -o /dev/null -X POST https://localhost/health --max-time 3 2>/dev/null; then
                 GW_HEALTHY=true
                 break
               fi
@@ -726,7 +726,10 @@ jobs:
             done
             if [ "${GW_HEALTHY}" != "true" ]; then
               echo "::error::[6c] API Gateway not healthy after 60s"
-              docker service logs ecom_api-gateway --tail 20 2>&1 || true
+              echo "--- nginx logs ---"
+              docker service logs ecom_nginx --tail 10 2>&1 || true
+              echo "--- api-gateway logs ---"
+              docker service logs ecom_api-gateway --tail 10 2>&1 || true
               dump_failing_services
               exit 1
             fi

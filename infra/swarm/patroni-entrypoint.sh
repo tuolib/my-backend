@@ -88,6 +88,7 @@ else:
 fi
 
 chown -R postgres:postgres /var/lib/postgresql/data
+chmod 700 "${DATA_DIR}"
 
 # ── 7. 密码同步：确保 PG 内用户密码与当前 Secret 一致 ──
 

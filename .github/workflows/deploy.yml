@@ -682,7 +682,7 @@ jobs:
             for i in $(seq 1 120); do
               PATRONI_ID=$(docker ps -qf name=ecom_patroni-1 2>/dev/null | head -1)
               if [ -n "${PATRONI_ID}" ]; then
-                if docker exec "${PATRONI_ID}" patronictl list 2>&1 | grep -q Leader; then
+                if docker exec "${PATRONI_ID}" patronictl -c /tmp/patroni.yml list 2>&1 | grep -q Leader; then
                   PATRONI_READY=true
                   break
                 fi

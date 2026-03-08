@@ -659,78 +659,86 @@ jobs:
               done
             }
 
-            # etcd（最多 60s）
+            # 跨节点 docker exec：本机优先，否则通过 SSH 到目标节点
+            remote_exec() {
+              local SVC="$1"; shift
+              local CID=$(docker ps -qf "name=${SVC}" 2>/dev/null | head -1)
+              if [ -n "${CID}" ]; then
+                docker exec "${CID}" "$@"
+                return $?
+              fi
+              local NODE=$(docker service ps "${SVC}" --filter "desired-state=running" --format "{{.Node}}" 2>/dev/null | head -1)
+              [ -z "${NODE}" ] && { echo "ERROR: no running task for ${SVC}"; return 1; }
+              local ADDR=$(docker node inspect "${NODE}" --format '{{.Status.Addr}}' 2>/dev/null)
+              [ -z "${ADDR}" ] && { echo "ERROR: cannot resolve address for node ${NODE}"; return 1; }
+              CID=$(DOCKER_HOST="ssh://root@${ADDR}" docker ps -qf "name=${SVC}" 2>/dev/null | head -1)
+              [ -z "${CID}" ] && { echo "ERROR: container ${SVC} not found on ${NODE}"; return 1; }
+              DOCKER_HOST="ssh://root@${ADDR}" docker exec "${CID}" "$@"
+            }
+
+            # [6a] etcd（最多 60s）
+            echo "  [6a] Waiting for etcd..."
             ETCD_READY=false
             for i in $(seq 1 60); do
-              for ETCD_SVC in ecom_etcd-1 ecom_etcd-2 ecom_etcd-3; do
-                ETCD_ID=$(docker ps -qf name=${ETCD_SVC} 2>/dev/null | head -1)
-                if [ -n "${ETCD_ID}" ] && docker exec "${ETCD_ID}" etcdctl endpoint health 2>&1 | grep -q "is healthy"; then
-                  ETCD_READY=true
-                  break 2
-                fi
-              done
+              if docker service logs ecom_etcd-1 --tail 1 2>&1 | grep -q "is healthy"; then
+                ETCD_READY=true
+                break
+              fi
               sleep 1
             done
             if [ "${ETCD_READY}" != "true" ]; then
-              echo "::error::[6/6] etcd not ready after 60s"
+              echo "::error::[6a] etcd not ready after 60s"
               dump_failing_services
               exit 1
             fi
+            echo "  [6a] etcd ready (${i}s)"
 
-            # Patroni Leader（最多 120s）
+            # [6b] Patroni Leader（最多 120s）
+            echo "  [6b] Waiting for Patroni leader..."
             PATRONI_READY=false
             for i in $(seq 1 120); do
-              PATRONI_ID=$(docker ps -qf name=ecom_patroni-1 2>/dev/null | head -1)
-              if [ -n "${PATRONI_ID}" ]; then
-                if docker exec "${PATRONI_ID}" patronictl -c /tmp/patroni.yml list 2>&1 | grep -q Leader; then
-                  PATRONI_READY=true
-                  break
-                fi
+              if docker service logs ecom_patroni-1 --tail 1 2>&1 | grep -q "the leader with the lock"; then
+                PATRONI_READY=true
+                break
               fi
               sleep 1
             done
             if [ "${PATRONI_READY}" != "true" ]; then
-              echo "::error::[6/6] Patroni no leader after 120s"
+              echo "::error::[6b] Patroni no leader after 120s"
               docker service logs ecom_patroni-1 --tail 20 2>&1 || true
               docker service logs ecom_patroni-2 --tail 20 2>&1 || true
               dump_failing_services
               exit 1
             fi
+            echo "  [6b] Patroni leader elected (${i}s)"
 
-            # API Gateway 健康（最多 60s）
+            # [6c] API Gateway 健康（最多 60s）
+            echo "  [6c] Waiting for API Gateway..."
             GW_HEALTHY=false
             for i in $(seq 1 60); do
-              GW_ID=$(docker ps -qf name=ecom_api-gateway --filter "health=healthy" 2>/dev/null | head -1)
-              if [ -n "${GW_ID}" ]; then
+              if docker service logs ecom_api-gateway --tail 3 2>&1 | grep -q "API Gateway ready"; then
                 GW_HEALTHY=true
                 break
               fi
               sleep 1
             done
             if [ "${GW_HEALTHY}" != "true" ]; then
-              echo "::error::[6/6] API Gateway not healthy after 60s"
+              echo "::error::[6c] API Gateway not healthy after 60s"
               docker service logs ecom_api-gateway --tail 20 2>&1 || true
               dump_failing_services
               exit 1
             fi
+            echo "  [6c] API Gateway healthy (${i}s)"
 
-            # 数据库迁移
-            GW_ID=$(docker ps -qf name=ecom_api-gateway 2>/dev/null | head -1)
-            if [ -z "${GW_ID}" ]; then
-              echo "::error::[6/6] API Gateway container not found, cannot migrate"
-              exit 1
-            fi
-            docker exec "${GW_ID}" bun run packages/database/src/migrate.ts 2>&1 \
-              || { echo "::error::[6/6] Schema migration failed"; exit 1; }
-            PRODUCT_ID=$(docker ps -qf name=ecom_product-service 2>/dev/null | head -1)
-            if [ -z "${PRODUCT_ID}" ]; then
-              echo "::error::[6/6] product-service container not found, cannot seed"
-              exit 1
-            fi
-            docker exec "${PRODUCT_ID}" bun run packages/database/src/data-migrate.ts 2>&1 \
-              || { echo "::error::[6/6] Data migration failed"; exit 1; }
-            docker exec "${PRODUCT_ID}" bun run packages/database/src/seed-prod.ts 2>&1 \
-              || { echo "::error::[6/6] Production seed failed"; exit 1; }
+            # [6d] 数据库迁移
+            echo "  [6d] Running database migrations..."
+            remote_exec ecom_api-gateway bun run packages/database/src/migrate.ts 2>&1 \
+              || { echo "::error::[6d] Schema migration failed"; exit 1; }
+            remote_exec ecom_product-service bun run packages/database/src/data-migrate.ts 2>&1 \
+              || { echo "::error::[6d] Data migration failed"; exit 1; }
+            remote_exec ecom_product-service bun run packages/database/src/seed-prod.ts 2>&1 \
+              || { echo "::error::[6d] Production seed failed"; exit 1; }
+            echo "  [6d] Migrations done"
           REMOTE_MIGRATE
 
       - name: Verify deployment

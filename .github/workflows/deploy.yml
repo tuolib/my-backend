@@ -732,13 +732,54 @@ jobs:
             fi
             echo "  [6c] API Gateway healthy (${i}s)"
 
-            # [6d] 数据库迁移
+            # [6d] 数据库迁移（通过一次性 Swarm service 跨节点执行）
             echo "  [6d] Running database migrations..."
-            remote_exec ecom_api-gateway bun run packages/database/src/migrate.ts 2>&1 \
+
+            ENTRYPOINT_CFG=$(docker config ls --filter name=app_entrypoint --format '{{.Name}}' | sort -r | head -1)
+            GW_IMAGE=$(docker service inspect ecom_api-gateway --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
+            PS_IMAGE=$(docker service inspect ecom_product-service --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
+
+            run_task() {
+              local NAME="$1" IMAGE="$2"; shift 2
+              docker service rm "${NAME}" >/dev/null 2>&1 || true
+              sleep 2
+              docker service create --name "${NAME}" \
+                --network ecom_data_net \
+                --network ecom_service_net \
+                --secret postgres_password \
+                --secret jwt_access_secret \
+                --secret jwt_refresh_secret \
+                --secret internal_secret \
+                --config "source=${ENTRYPOINT_CFG},target=/app/infra/swarm/app-entrypoint.sh,mode=0755" \
+                --entrypoint /app/infra/swarm/app-entrypoint.sh \
+                --restart-condition none \
+                "${IMAGE}" "$@" >/dev/null
+              # 等待任务完成（最多 120s）
+              for j in $(seq 1 120); do
+                STATE=$(docker service ps "${NAME}" --format "{{.CurrentState}}" 2>/dev/null | head -1)
+                case "${STATE}" in
+                  *Complete*)
+                    docker service logs "${NAME}" 2>&1
+                    docker service rm "${NAME}" >/dev/null 2>&1 || true
+                    return 0 ;;
+                  *Failed*|*Rejected*|*Shutdown*)
+                    docker service logs "${NAME}" 2>&1
+                    docker service rm "${NAME}" >/dev/null 2>&1 || true
+                    return 1 ;;
+                esac
+                sleep 1
+              done
+              echo "Task ${NAME} timed out"
+              docker service logs "${NAME}" 2>&1
+              docker service rm "${NAME}" >/dev/null 2>&1 || true
+              return 1
+            }
+
+            run_task ecom-schema-migrate "${GW_IMAGE}" bun run packages/database/src/migrate.ts \
               || { echo "::error::[6d] Schema migration failed"; exit 1; }
-            remote_exec ecom_product-service bun run packages/database/src/data-migrate.ts 2>&1 \
+            run_task ecom-data-migrate "${PS_IMAGE}" bun run packages/database/src/data-migrate.ts \
               || { echo "::error::[6d] Data migration failed"; exit 1; }
-            remote_exec ecom_product-service bun run packages/database/src/seed-prod.ts 2>&1 \
+            run_task ecom-seed "${PS_IMAGE}" bun run packages/database/src/seed-prod.ts \
               || { echo "::error::[6d] Production seed failed"; exit 1; }
             echo "  [6d] Migrations done"
           REMOTE_MIGRATE

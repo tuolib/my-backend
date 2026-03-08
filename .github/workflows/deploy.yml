@@ -569,18 +569,22 @@ jobs:
 
           echo "Deploying to Swarm (tag: ${TAG})"
 
-          # ── 1. 上传 Swarm 配置文件到 S1 ──
+          # ── [1/6] 上传配置 ──
+          echo "[1/6] Upload configs"
           ${SSH_CMD} 'mkdir -p /tmp/swarm-deploy'
           scp -o StrictHostKeyChecking=no -q -r \
               infra/swarm/ infra/redis/ \
               "${SWARM_USER}@${SWARM_HOST}:/tmp/swarm-deploy/"
 
-          # ── 2. 登录 GHCR ──
+          # ── [2/6] 登录 GHCR ──
+          echo "[2/6] GHCR login"
           ${SSH_CMD} "echo '${GHCR_PAT}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin" >/dev/null 2>&1 \
-            || { echo "::error::GHCR login failed"; exit 1; }
+            || { echo "::error::[2/6] GHCR login failed"; exit 1; }
 
-          # ── 3. 创建 Docker Secrets（幂等） ──
+          # ── [3/6] 创建 Docker Secrets ──
+          echo "[3/6] Docker secrets"
           ${SSH_CMD} bash <<REMOTE_SECRETS
+            set -euo pipefail
             create_or_update_secret() {
               local NAME="\$1" VALUE="\$2"
               if ! docker secret inspect "\${NAME}" >/dev/null 2>&1; then
@@ -602,33 +606,31 @@ jobs:
             fi
           REMOTE_SECRETS
 
-          # ── 4. 预拉取镜像（静默，仅输出失败） ──
+          # ── [4/6] 预拉取镜像 ──
+          echo "[4/6] Pull images"
           ${SSH_CMD} bash <<REMOTE_PULL
-            FAIL=""
+            set -euo pipefail
             IMAGES="${REGISTRY}/ecom-api-gateway:${TAG} ${REGISTRY}/ecom-user-service:${TAG} ${REGISTRY}/ecom-product-service:${TAG} ${REGISTRY}/ecom-cart-service:${TAG} ${REGISTRY}/ecom-order-service:${TAG} ${REGISTRY}/ecom-patroni:${TAG} quay.io/coreos/etcd:v3.5.17 redis:7-alpine haproxy:2.9-alpine nginx:1.27-alpine certbot/certbot:latest prom/node-exporter:latest gcr.io/cadvisor/cadvisor:latest"
             for IMG in \${IMAGES}; do
-              if ! docker pull "\${IMG}" >/dev/null 2>&1; then
-                echo "::error::Failed to pull \${IMG}"
-                FAIL="true"
-              fi
+              docker pull "\${IMG}" >/dev/null 2>&1 \
+                || { echo "::error::[4/6] Failed to pull \${IMG}"; exit 1; }
             done
-            if [ -n "\${FAIL}" ]; then exit 1; fi
           REMOTE_PULL
 
-          # ── 5. Docker Stack Deploy ──
+          # ── [5/6] Stack deploy ──
+          echo "[5/6] Stack deploy"
           ${SSH_CMD} bash <<REMOTE_DEPLOY
             set -euo pipefail
             cd /tmp/swarm-deploy/swarm
             export REGISTRY="${REGISTRY}" TAG="${TAG}" DOMAIN="${DOMAIN}" EMAIL="${EMAIL}"
-            docker stack deploy -c docker-stack.yml --with-registry-auth --prune --detach=true ecom 2>&1 \
-              | grep -v "^Creating\|^Updating" || true
+            docker stack deploy -c docker-stack.yml --with-registry-auth --prune --detach=true ecom >/dev/null 2>&1
           REMOTE_DEPLOY
 
-          # ── 6. 等待服务收敛 + 数据库迁移 ──
+          # ── [6/6] 等待服务收敛 + 数据库迁移 ──
+          echo "[6/6] Wait for convergence"
           ${SSH_CMD} bash <<'REMOTE_MIGRATE'
             set -euo pipefail
 
-            # 诊断函数：仅打印未就绪服务的状态和日志
             dump_failing_services() {
               echo "══════════ Failing Services ══════════"
               for SVC in etcd-1 etcd-2 etcd-3 patroni-1 patroni-2 redis-primary redis-replica data-proxy api-gateway user-service product-service cart-service order-service nginx; do
@@ -641,7 +643,7 @@ jobs:
               done
             }
 
-            # 等待 etcd 集群就绪（最多 60s）
+            # etcd（最多 60s）
             ETCD_READY=false
             for i in $(seq 1 60); do
               for ETCD_SVC in ecom_etcd-1 ecom_etcd-2 ecom_etcd-3; do
@@ -654,12 +656,12 @@ jobs:
               sleep 1
             done
             if [ "${ETCD_READY}" != "true" ]; then
-              echo "::error::etcd cluster failed to start after 60s"
+              echo "::error::[6/6] etcd not ready after 60s"
               dump_failing_services
               exit 1
             fi
 
-            # 等待 Patroni 选出 Leader（最多 120s）
+            # Patroni Leader（最多 120s）
             PATRONI_READY=false
             for i in $(seq 1 120); do
               PATRONI_ID=$(docker ps -qf name=ecom_patroni-1 2>/dev/null | head -1)
@@ -672,14 +674,14 @@ jobs:
               sleep 1
             done
             if [ "${PATRONI_READY}" != "true" ]; then
-              echo "::error::Patroni failed to elect leader after 120s"
+              echo "::error::[6/6] Patroni no leader after 120s"
               docker service logs ecom_patroni-1 --tail 20 2>&1 || true
               docker service logs ecom_patroni-2 --tail 20 2>&1 || true
               dump_failing_services
               exit 1
             fi
 
-            # 等待 API Gateway 健康（最多 60s）
+            # API Gateway 健康（最多 60s）
             GW_HEALTHY=false
             for i in $(seq 1 60); do
               GW_ID=$(docker ps -qf name=ecom_api-gateway --filter "health=healthy" 2>/dev/null | head -1)
@@ -690,7 +692,7 @@ jobs:
               sleep 1
             done
             if [ "${GW_HEALTHY}" != "true" ]; then
-              echo "::error::API Gateway not healthy after 60s"
+              echo "::error::[6/6] API Gateway not healthy after 60s"
               docker service logs ecom_api-gateway --tail 20 2>&1 || true
               dump_failing_services
               exit 1
@@ -698,16 +700,21 @@ jobs:
 
             # 数据库迁移
             GW_ID=$(docker ps -qf name=ecom_api-gateway 2>/dev/null | head -1)
-            if [ -n "${GW_ID}" ]; then
-              docker exec "${GW_ID}" bun run packages/database/src/migrate.ts 2>&1 || echo "::warning::Schema migration failed"
-              PRODUCT_ID=$(docker ps -qf name=ecom_product-service 2>/dev/null | head -1)
-              if [ -n "${PRODUCT_ID}" ]; then
-                docker exec "${PRODUCT_ID}" bun run packages/database/src/data-migrate.ts 2>&1 || echo "::warning::Data migration failed"
-                docker exec "${PRODUCT_ID}" bun run packages/database/src/seed-prod.ts 2>&1 || echo "::warning::Seed failed"
-              fi
-            else
-              echo "::error::API Gateway container not found, skipping migration"
+            if [ -z "${GW_ID}" ]; then
+              echo "::error::[6/6] API Gateway container not found, cannot migrate"
+              exit 1
             fi
+            docker exec "${GW_ID}" bun run packages/database/src/migrate.ts 2>&1 \
+              || { echo "::error::[6/6] Schema migration failed"; exit 1; }
+            PRODUCT_ID=$(docker ps -qf name=ecom_product-service 2>/dev/null | head -1)
+            if [ -z "${PRODUCT_ID}" ]; then
+              echo "::error::[6/6] product-service container not found, cannot seed"
+              exit 1
+            fi
+            docker exec "${PRODUCT_ID}" bun run packages/database/src/data-migrate.ts 2>&1 \
+              || { echo "::error::[6/6] Data migration failed"; exit 1; }
+            docker exec "${PRODUCT_ID}" bun run packages/database/src/seed-prod.ts 2>&1 \
+              || { echo "::error::[6/6] Production seed failed"; exit 1; }
           REMOTE_MIGRATE
 
       - name: Verify deployment

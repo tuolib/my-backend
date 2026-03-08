@@ -718,7 +718,7 @@ jobs:
             echo "  [6c] Waiting for API Gateway..."
             GW_HEALTHY=false
             for i in $(seq 1 60); do
-              if docker service logs ecom_api-gateway --tail 3 2>&1 | grep -q "API Gateway ready"; then
+              if docker service logs ecom_api-gateway 2>&1 | grep -q "API Gateway ready"; then
                 GW_HEALTHY=true
                 break
               fi

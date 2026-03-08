@@ -676,14 +676,16 @@ jobs:
               DOCKER_HOST="ssh://root@${ADDR}" docker exec "${CID}" "$@"
             }
 
-            # [6a] etcd（最多 60s）
+            # [6a] etcd（最多 60s，任一节点 healthy 即通过）
             echo "  [6a] Waiting for etcd..."
             ETCD_READY=false
             for i in $(seq 1 60); do
-              if docker service logs ecom_etcd-1 --tail 1 2>&1 | grep -q "is healthy"; then
-                ETCD_READY=true
-                break
-              fi
+              for ETCD_SVC in ecom_etcd-1 ecom_etcd-2 ecom_etcd-3; do
+                if remote_exec "${ETCD_SVC}" etcdctl endpoint health 2>/dev/null | grep -q "is healthy"; then
+                  ETCD_READY=true
+                  break 2
+                fi
+              done
               sleep 1
             done
             if [ "${ETCD_READY}" != "true" ]; then
@@ -697,7 +699,7 @@ jobs:
             echo "  [6b] Waiting for Patroni leader..."
             PATRONI_READY=false
             for i in $(seq 1 120); do
-              if docker service logs ecom_patroni-1 --tail 1 2>&1 | grep -q "the leader with the lock"; then
+              if remote_exec ecom_patroni-1 patronictl -c /tmp/patroni.yml list 2>/dev/null | grep -q Leader; then
                 PATRONI_READY=true
                 break
               fi

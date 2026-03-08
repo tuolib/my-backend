@@ -302,13 +302,9 @@ jobs:
           # 智能部署监控：检测终态错误立即终止 Helm（仅检测新增失败 Pod，忽略部署前已存在的）
           monitor_helm_deploy() {
             local HELM_PID=$1
-            local PRE_EXISTING="$2"  # 部署前已失败的 Pod 列表（换行分隔）
+            local PRE_EXISTING="$2"
             while kill -0 ${HELM_PID} 2>/dev/null; do
-              echo "---- deploy progress $(date -u +'%Y-%m-%dT%H:%M:%SZ') ----"
-              kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, $2, $3}' || true
-              kubectl get deploy -n "${NAMESPACE}" --no-headers 2>/dev/null | awk '{print $1, "ready=" $2, "up-to-date=" $3, "available=" $4}' || true
-
-              # 检测 Pod 终态错误 → 过滤掉部署前已存在的 + Init 容器重试（Init:CrashLoopBackOff 是正常重试）
+              # 仅检测终态错误，不打印进度
               ALL_FAILED=$(kubectl get pods -n "${NAMESPACE}" --no-headers 2>/dev/null \
                 | awk '$3 ~ /ImagePullBackOff|ErrImagePull|InvalidImageName|CreateContainerConfigError/ || $3 == "CrashLoopBackOff" {print $1, $3}' || true)
               NEW_FAILED=""
@@ -322,16 +318,14 @@ jobs:
               fi
               NEW_FAILED=$(echo -n "${NEW_FAILED}" | sed '/^$/d')
               if [[ -n "${NEW_FAILED}" ]]; then
-                echo "::error::Pod terminal failure detected (new pods only):"
+                echo "::error::Pod terminal failure detected:"
                 echo "${NEW_FAILED}"
                 for POD in $(echo "${NEW_FAILED}" | awk '{print $1}'); do
-                  echo "--- ${POD} events ---"
                   kubectl get events -n "${NAMESPACE}" --field-selector involvedObject.name="${POD}" --sort-by=.lastTimestamp 2>/dev/null | tail -5 || true
                 done
                 kill ${HELM_PID} 2>/dev/null || true
                 return 1
               fi
-
               sleep 5
             done
             return 0
@@ -674,35 +668,17 @@ jobs:
               done
             }
 
-            # 等待 etcd 集群就绪（最多 60s，每秒检查）
-            echo "Waiting for etcd cluster..."
+            # 等待 etcd 集群就绪（最多 60s）
             ETCD_READY=false
             for i in \$(seq 1 60); do
               for ETCD_SVC in ecom_etcd-1 ecom_etcd-2 ecom_etcd-3; do
                 ETCD_ID=\$(docker ps -qf name=\${ETCD_SVC} 2>/dev/null | head -1)
-                if [ -n "\${ETCD_ID}" ]; then
-                  HEALTH_OUT=\$(docker exec "\${ETCD_ID}" etcdctl endpoint health 2>&1 || true)
-                  if echo "\${HEALTH_OUT}" | grep -q "is healthy"; then
-                    echo "etcd cluster is healthy (via \${ETCD_SVC}, \${i}s)"
-                    ETCD_READY=true
-                    break 2
-                  fi
+                if [ -n "\${ETCD_ID}" ] && docker exec "\${ETCD_ID}" etcdctl endpoint health 2>&1 | grep -q "is healthy"; then
+                  echo "etcd ready (\${i}s)"
+                  ETCD_READY=true
+                  break 2
                 fi
               done
-              # 每 10 秒打印详细状态
-              if [ \$((i % 10)) -eq 0 ]; then
-                echo "── etcd status (\${i}s) ──"
-                for ETCD_SVC in ecom_etcd-1 ecom_etcd-2 ecom_etcd-3; do
-                  ETCD_ID=\$(docker ps -qf name=\${ETCD_SVC} 2>/dev/null | head -1)
-                  if [ -z "\${ETCD_ID}" ]; then
-                    echo "  \${ETCD_SVC}: no container"
-                    docker service ps "\${ETCD_SVC}" --no-trunc --format "    {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -2
-                  else
-                    HEALTH_OUT=\$(docker exec "\${ETCD_ID}" etcdctl endpoint health 2>&1 || true)
-                    echo "  \${ETCD_SVC}: \${HEALTH_OUT}"
-                  fi
-                done
-              fi
               sleep 1
             done
             if [ "\${ETCD_READY}" != "true" ]; then
@@ -711,79 +687,45 @@ jobs:
               exit 1
             fi
 
-            # 等待 Patroni 选出 Leader（最多 90s）
-            echo "Waiting for Patroni leader election..."
+            # 等待 Patroni 选出 Leader（最多 120s）
             PATRONI_READY=false
-            for i in \$(seq 1 90); do
+            for i in \$(seq 1 120); do
               PATRONI_ID=\$(docker ps -qf name=ecom_patroni-1 2>/dev/null | head -1)
               if [ -n "\${PATRONI_ID}" ]; then
                 PATRONI_OUT=\$(docker exec "\${PATRONI_ID}" patronictl list 2>&1 || true)
                 if echo "\${PATRONI_OUT}" | grep -q Leader; then
-                  echo "Patroni cluster is ready (\${i}s)"
-                  echo "\${PATRONI_OUT}"
+                  echo "Patroni ready (\${i}s)"
                   PATRONI_READY=true
                   break
                 fi
-              fi
-              # 每 10 秒打印详细状态
-              if [ \$((i % 10)) -eq 0 ]; then
-                echo "── patroni status (\${i}s) ──"
-                for P_SVC in ecom_patroni-1 ecom_patroni-2; do
-                  P_ID=\$(docker ps -qf name=\${P_SVC} 2>/dev/null | head -1)
-                  if [ -z "\${P_ID}" ]; then
-                    echo "  \${P_SVC}: no container"
-                    docker service ps "\${P_SVC}" --no-trunc --format "    {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -3
-                  else
-                    echo "  \${P_SVC}: running"
-                    echo "    patronictl list:"
-                    docker exec "\${P_ID}" patronictl list 2>&1 | sed 's/^/      /' || true
-                  fi
-                done
-                echo "  patroni-1 logs (last 15 lines):"
-                docker service logs ecom_patroni-1 --tail 15 2>&1 | sed 's/^/    /' || true
-                echo "  patroni-2 logs (last 15 lines):"
-                docker service logs ecom_patroni-2 --tail 15 2>&1 | sed 's/^/    /' || true
               fi
               sleep 1
             done
             if [ "\${PATRONI_READY}" != "true" ]; then
               echo "::error::Patroni failed to elect leader"
-              echo "══════ Patroni Full Logs ══════"
-              echo "── patroni-1 (last 50 lines) ──"
-              docker service logs ecom_patroni-1 --tail 50 2>&1 || true
-              echo "── patroni-2 (last 50 lines) ──"
-              docker service logs ecom_patroni-2 --tail 50 2>&1 || true
+              docker service logs ecom_patroni-1 --tail 30 2>&1 || true
+              docker service logs ecom_patroni-2 --tail 30 2>&1 || true
               dump_failing_services
               exit 1
             fi
 
-            # 等待 API Gateway 健康（最多 60s，每秒检查）
-            echo "Waiting for API Gateway..."
+            # 等待 API Gateway 健康（最多 60s）
             for i in \$(seq 1 60); do
               GW_ID=\$(docker ps -qf name=ecom_api-gateway --filter "health=healthy" 2>/dev/null | head -1)
               if [ -n "\${GW_ID}" ]; then
-                echo "API Gateway is ready (\${i}s)"
+                echo "API Gateway ready (\${i}s)"
                 break
-              fi
-              if [ \$((i % 10)) -eq 0 ]; then
-                echo "  API Gateway not healthy yet (\${i}s)..."
-                docker service ps ecom_api-gateway --no-trunc --format "    {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -2
               fi
               sleep 1
             done
             GW_ID=\$(docker ps -qf name=ecom_api-gateway 2>/dev/null | head -1)
             if [ -n "\${GW_ID}" ]; then
-              echo "Running schema migration..."
-              docker exec "\${GW_ID}" bun run packages/database/src/migrate.ts 2>&1 || echo "::warning::Schema migration failed (may already be up to date)"
-
-              echo "Running data migration..."
+              docker exec "\${GW_ID}" bun run packages/database/src/migrate.ts 2>&1 || echo "::warning::Schema migration failed"
               PRODUCT_ID=\$(docker ps -qf name=ecom_product-service 2>/dev/null | head -1)
               if [ -n "\${PRODUCT_ID}" ]; then
                 docker exec "\${PRODUCT_ID}" bun run packages/database/src/data-migrate.ts 2>&1 || echo "::warning::Data migration failed"
                 docker exec "\${PRODUCT_ID}" bun run packages/database/src/seed-prod.ts 2>&1 || echo "::warning::Seed failed"
               fi
-            else
-              echo "::warning::API Gateway not found, skipping migration"
             fi
           REMOTE_MIGRATE
 

@@ -23,18 +23,23 @@ export DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@data-proxy:5432/
 export REDIS_URL="redis://data-proxy:6379"
 export JWT_ACCESS_SECRET JWT_REFRESH_SECRET INTERNAL_SECRET
 
-# ── 等待 data-proxy PG 端口可用（最多 30s） ──
+# ── 等待 data-proxy 端口可用（PG:5432 + Redis:6379，最多各 30s） ──
 
-RETRY=0
-while [ $RETRY -lt 30 ]; do
-    if bun -e "const s=require('net').connect(5432,'data-proxy');s.on('connect',()=>{s.destroy();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000)" 2>/dev/null; then
-        break
-    fi
-    RETRY=$((RETRY + 1))
-    sleep 1
-done
-if [ $RETRY -ge 30 ]; then
-    echo "WARNING: data-proxy:5432 not reachable after 30s, starting anyway..."
-fi
+wait_for_port() {
+    local PORT=$1
+    local RETRY=0
+    while [ $RETRY -lt 30 ]; do
+        if bun -e "const s=require('net').connect(${PORT},'data-proxy');s.on('connect',()=>{s.destroy();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000)" 2>/dev/null; then
+            return 0
+        fi
+        RETRY=$((RETRY + 1))
+        sleep 1
+    done
+    echo "WARNING: data-proxy:${PORT} not reachable after 30s, starting anyway..."
+    return 1
+}
+
+wait_for_port 5432
+wait_for_port 6379
 
 exec "$@"

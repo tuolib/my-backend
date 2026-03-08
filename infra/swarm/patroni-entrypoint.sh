@@ -120,5 +120,27 @@ chown -R postgres:postgres /var/lib/postgresql/data
 echo "Data directory: ${DATA_DIR}"
 echo "  Contents: $(ls -A "${DATA_DIR}" 2>/dev/null | head -5 || echo "(empty)")"
 
+# 密码同步：已有 PG 数据时，临时启动 PG 更新用户密码
+# 解决问题：旧 bootstrap 用了错误/旧密码 → replicator 认证失败
+if [ -f "${DATA_DIR}/PG_VERSION" ] && [ ! -f "${DATA_DIR}/standby.signal" ]; then
+    echo "Syncing PostgreSQL user passwords with current Docker Secrets..."
+    # 仅监听 Unix socket（不开 TCP），避免外部连接干扰
+    if gosu postgres pg_ctl -D "${DATA_DIR}" start -w -t 15 \
+        -o "-c listen_addresses='' -c logging_collector=off" 2>/dev/null; then
+
+        PW_SU=$(echo "${PATRONI_SUPERUSER_PASSWORD}" | sed "s/'/''/g")
+        PW_REPL=$(echo "${PATRONI_REPLICATION_PASSWORD}" | sed "s/'/''/g")
+
+        gosu postgres psql -c "ALTER USER postgres PASSWORD '${PW_SU}';" 2>/dev/null || true
+        gosu postgres psql -c "ALTER USER replicator PASSWORD '${PW_REPL}';" 2>/dev/null || true
+
+        gosu postgres pg_ctl -D "${DATA_DIR}" stop -w -t 15 2>/dev/null || \
+            gosu postgres pg_ctl -D "${DATA_DIR}" stop -m immediate -w -t 5 2>/dev/null || true
+        echo "Password sync completed"
+    else
+        echo "WARNING: Could not start PG for password sync (may be fresh node), skipping"
+    fi
+fi
+
 echo "Starting Patroni as postgres user..."
 exec gosu postgres patroni /tmp/patroni.yml

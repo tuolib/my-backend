@@ -869,7 +869,7 @@ jobs:
           ${SSH_CMD} docker service logs ecom_certbot --tail 30 2>&1 || true
           echo ""
           echo "══════════ SSL Certificate Status ══════════"
-          ${SSH_CMD} 'echo | openssl s_client -connect localhost:443 -servername '"${DOMAIN}"' 2>/dev/null | openssl x509 -noout -subject -issuer -dates 2>/dev/null || echo "No valid certificate detected"' || true
+          ${SSH_CMD} 'timeout 5 sh -c '"'"'echo | openssl s_client -connect localhost:443 -servername '"${DOMAIN}"' 2>/dev/null | openssl x509 -noout -subject -issuer -dates 2>/dev/null'"'"' || echo "No valid certificate detected (nginx may be restarting)"' || true
 
       - name: Cleanup SSH key
         if: always()

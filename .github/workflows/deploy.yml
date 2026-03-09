@@ -702,7 +702,7 @@ jobs:
               docker service ps "ecom_${SVC}" --no-trunc --format "{{.CurrentState}} | {{.Error}}" 2>/dev/null | head -3
             done
             exit 1
-STEP_6A
+          STEP_6A
           echo "  [6a] etcd ready"
 
           # [6b] Patroni Leader（最多 120s）
@@ -732,7 +732,7 @@ STEP_6A
             docker service logs ecom_patroni-1 --tail 20 2>&1 || true
             docker service logs ecom_patroni-2 --tail 20 2>&1 || true
             exit 1
-STEP_6B
+          STEP_6B
           echo "  [6b] Patroni leader elected"
 
           # [6c] API Gateway 健康（最多 60s）
@@ -752,7 +752,7 @@ STEP_6B
             echo "--- api-gateway logs ---"
             docker service logs ecom_api-gateway --tail 10 2>&1 || true
             exit 1
-STEP_6C
+          STEP_6C
           echo "  [6c] API Gateway healthy"
 
           # [6d] 数据库迁移（迁移脚本幂等，断线重连后安全重跑）
@@ -807,7 +807,7 @@ STEP_6C
             run_task ecom-seed "${PS_IMAGE}" bun run packages/database/src/seed-prod.ts \
               || { echo "::error::[6d] Production seed failed"; exit 1; }
             echo "Migrations done"
-STEP_6D
+          STEP_6D
           echo "  [6d] Migrations done"
 
       - name: Verify deployment

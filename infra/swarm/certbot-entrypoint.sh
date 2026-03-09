@@ -70,20 +70,61 @@ update_ssl_secrets() {
 
 install_docker_cli
 
-# 尝试申请 Let's Encrypt 证书（失败则重试，最多 6 次，间隔 5 分钟）
+# 如果 volume 中已有有效证书（上次部署申请过），先恢复到 Docker Secret
+# 每次部署 step [3/6] 会重建 ssl_cert/ssl_key 为自签证书，需要用真实证书覆盖
+if [ -f "${CERT_DIR}/fullchain.pem" ] && [ -f "${CERT_DIR}/privkey.pem" ]; then
+    echo "Found existing certificate in volume, restoring to Docker Secrets..."
+    # 验证证书未过期
+    if openssl x509 -checkend 86400 -noout -in "${CERT_DIR}/fullchain.pem" 2>/dev/null; then
+        update_ssl_secrets "${CERT_DIR}/fullchain.pem" "${CERT_DIR}/privkey.pem"
+        echo "Existing certificate restored successfully"
+    else
+        echo "Existing certificate expired or invalid, will request new one"
+    fi
+fi
+
+# 等待 Nginx ready（ACME challenge 需要 Nginx 代理 :80 → certbot:8080）
+echo "Waiting for Nginx to be ready..."
+for i in $(seq 1 60); do
+    # 通过 Docker 内部 DNS 检查 nginx 是否可达
+    if wget -q --spider --timeout=2 "http://nginx:80/" 2>/dev/null ||
+       wget -q --spider --timeout=2 "http://nginx:80/health" 2>/dev/null; then
+        echo "Nginx ready (${i}s)"
+        break
+    fi
+    # 备选：检查 nginx 服务是否有 running task
+    if command -v docker >/dev/null 2>&1; then
+        NGINX_STATE=$(docker service ps "${STACK_NAME}_nginx" --filter "desired-state=running" --format "{{.CurrentState}}" 2>/dev/null | head -1)
+        if echo "${NGINX_STATE}" | grep -q "Running"; then
+            echo "Nginx service running (${i}s)"
+            break
+        fi
+    fi
+    sleep 1
+done
+
+# 申请 Let's Encrypt 证书（--keep-existing 避免重复申请未过期的证书）
 echo "Attempting to obtain Let's Encrypt certificate for ${DOMAIN}..."
 for ATTEMPT in $(seq 1 6); do
     certbot certonly --standalone --http-01-port 8080 \
         -d "${DOMAIN}" --email "${EMAIL}" \
         --agree-tos --non-interactive \
+        --keep-until-expiring \
         --preferred-challenges http 2>&1 && break
     echo "Cert request failed (attempt ${ATTEMPT}/6), retrying in 5 minutes..."
     sleep 300
 done
 
-# 如果成功获取，更新 secret
+# 如果获取到新证书，更新 secret
 if [ -f "${CERT_DIR}/fullchain.pem" ]; then
-    update_ssl_secrets "${CERT_DIR}/fullchain.pem" "${CERT_DIR}/privkey.pem"
+    # 检查证书是否在最近 5 分钟内更新（本次申请产生的新证书）
+    CERT_MOD=$(stat -c %Y "${CERT_DIR}/fullchain.pem" 2>/dev/null || echo 0)
+    NOW=$(date +%s)
+    AGE=$((NOW - CERT_MOD))
+    if [ ${AGE} -lt 300 ]; then
+        echo "New certificate obtained, updating secrets..."
+        update_ssl_secrets "${CERT_DIR}/fullchain.pem" "${CERT_DIR}/privkey.pem"
+    fi
 fi
 
 # 续签循环（每 12 小时）

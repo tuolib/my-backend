@@ -807,6 +807,7 @@ jobs:
                 --entrypoint /app/infra/swarm/app-entrypoint.sh \
                 --restart-condition none \
                 --with-registry-auth \
+                --detach \
                 "${IMAGE}" "$@"
 
               for j in $(seq 1 120); do

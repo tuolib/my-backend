@@ -589,9 +589,11 @@ jobs:
             # Docker secret 不可变，需先移除 stack 释放引用，再删除重建
             if docker stack ls --format '{{.Name}}' | grep -q '^ecom$'; then
               docker stack rm ecom >/dev/null 2>&1 || true
-              # 等待所有服务完全停止（最多 30s）
-              for i in \$(seq 1 30); do
-                docker stack ps ecom >/dev/null 2>&1 || break
+              # 等待所有 ecom_ 服务完全移除（不仅是 stack 元数据）
+              for i in \$(seq 1 60); do
+                if ! docker service ls --filter "name=ecom_" --format "{{.Name}}" 2>/dev/null | grep -q .; then
+                  break
+                fi
                 sleep 1
               done
             fi
@@ -602,7 +604,13 @@ jobs:
                 echo "ERROR: secret '\${NAME}' is empty — check GitHub Secrets config"
                 exit 1
               fi
-              docker secret rm "\${NAME}" >/dev/null 2>&1 || true
+              # 等待 secret 引用释放后再删除重建（服务可能仍在 draining）
+              for RETRY in \$(seq 1 30); do
+                docker secret rm "\${NAME}" >/dev/null 2>&1 && break
+                # secret 不存在也算成功
+                docker secret inspect "\${NAME}" >/dev/null 2>&1 || break
+                sleep 1
+              done
               printf '%s' "\${VALUE}" | docker secret create "\${NAME}" - >/dev/null
             }
             create_or_update_secret postgres_password "${POSTGRES_PASSWORD}"

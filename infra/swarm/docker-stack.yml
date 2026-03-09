@@ -425,6 +425,7 @@ services:
       PRODUCT_SERVICE_URL: http://product-service:3002
       CART_SERVICE_URL: http://cart-service:3003
       ORDER_SERVICE_URL: http://order-service:3004
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     secrets:
       - postgres_password
       - jwt_access_secret

@@ -7,6 +7,7 @@ import { getConfig } from '@repo/shared';
 
 export function createCorsMiddleware() {
   const config = getConfig();
+  const allowAll = config.cors.origins.includes('*');
   const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:5173',
@@ -16,6 +17,8 @@ export function createCorsMiddleware() {
   return cors({
     origin: (origin) => {
       if (!origin) return '';
+      // CORS_ORIGINS 包含 * 时允许所有域名（回显 origin，兼容 credentials: true）
+      if (allowAll) return origin;
       return allowedOrigins.includes(origin) ? origin : '';
     },
     allowMethods: ['POST', 'OPTIONS'],

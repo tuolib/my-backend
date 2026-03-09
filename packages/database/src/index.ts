@@ -4,7 +4,7 @@
  */
 
 // ── Client ──
-export { db, connection, warmupDb } from './client';
+export { db, dbRead, connection, readConnection, warmupDb } from './client';
 
 // ── Redis ──
 export { redis, createRedis, warmupRedis } from './redis';

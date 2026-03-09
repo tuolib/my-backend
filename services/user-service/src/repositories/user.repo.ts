@@ -2,7 +2,7 @@
  * 用户数据访问层 — users 表操作
  */
 import { eq, inArray, isNull, and, ilike, or, desc, count } from 'drizzle-orm';
-import { db, users } from '@repo/database';
+import { db, dbRead, users } from '@repo/database';
 import type { User, NewUser } from '@repo/database';
 
 /** 按邮箱查找（排除软删除） */
@@ -23,10 +23,10 @@ export async function findById(id: string): Promise<User | null> {
   return row ?? null;
 }
 
-/** 批量按 ID 查找（内部服务间调用） */
+/** 批量按 ID 查找（内部服务间调用，走从库） */
 export async function findByIds(ids: string[]): Promise<User[]> {
   if (ids.length === 0) return [];
-  return db
+  return dbRead
     .select()
     .from(users)
     .where(and(inArray(users.id, ids), isNull(users.deletedAt)));
@@ -73,14 +73,14 @@ export async function findAll(params: {
   const where = and(...conditions);
 
   const [items, [totalRow]] = await Promise.all([
-    db
+    dbRead
       .select()
       .from(users)
       .where(where)
       .orderBy(desc(users.createdAt))
       .limit(pageSize)
       .offset(offset),
-    db
+    dbRead
       .select({ value: count() })
       .from(users)
       .where(where),

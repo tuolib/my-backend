@@ -2,21 +2,21 @@
  * 商品图片数据访问层 — product_images 表操作
  */
 import { eq, asc, inArray } from 'drizzle-orm';
-import { db, productImages } from '@repo/database';
+import { db, dbRead, productImages } from '@repo/database';
 import type { ProductImage, NewProductImage } from '@repo/database';
 
-/** 按商品 ID 查找所有图片 */
+/** 按商品 ID 查找所有图片（走从库） */
 export async function findByProductId(productId: string): Promise<ProductImage[]> {
-  return db
+  return dbRead
     .select()
     .from(productImages)
     .where(eq(productImages.productId, productId))
     .orderBy(asc(productImages.sortOrder));
 }
 
-/** 按 ID 查找单张图片 */
+/** 按 ID 查找单张图片（走从库） */
 export async function findById(id: string): Promise<ProductImage | null> {
-  const [row] = await db.select().from(productImages).where(eq(productImages.id, id));
+  const [row] = await dbRead.select().from(productImages).where(eq(productImages.id, id));
   return row ?? null;
 }
 

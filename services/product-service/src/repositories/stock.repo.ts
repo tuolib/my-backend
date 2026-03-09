@@ -3,7 +3,7 @@
  * DB 层操作：乐观锁确认扣减/释放、管理员调整、操作日志
  */
 import { eq, and, sql } from 'drizzle-orm';
-import { db, skus, stockOperations } from '@repo/database';
+import { db, dbRead, skus, stockOperations } from '@repo/database';
 import { generateId } from '@repo/shared';
 
 // ── SKU 库存（DB 层）──
@@ -74,11 +74,11 @@ export async function adjustStock(
     .where(eq(skus.id, skuId));
 }
 
-/** 查询所有 active SKU 的库存（用于 Redis 同步） */
+/** 查询所有 active SKU 的库存（用于 Redis 同步，走从库） */
 export async function getAllActiveSkuStocks(): Promise<
   Array<{ id: string; stock: number }>
 > {
-  return db
+  return dbRead
     .select({ id: skus.id, stock: skus.stock })
     .from(skus)
     .where(eq(skus.status, 'active'));

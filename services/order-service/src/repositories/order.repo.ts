@@ -3,7 +3,7 @@
  * 包含乐观锁更新、幂等查询、分页列表
  */
 import { eq, and, desc, count, lt, sql } from 'drizzle-orm';
-import { db, orders } from '@repo/database';
+import { db, dbRead, orders } from '@repo/database';
 import type { Order, NewOrder } from '@repo/database';
 import { OrderStatus } from '../state-machine/order-status';
 
@@ -46,14 +46,14 @@ export async function findByUserId(params: {
   const where = conditions.length === 1 ? conditions[0] : and(...conditions);
 
   const [items, [totalRow]] = await Promise.all([
-    db
+    dbRead
       .select()
       .from(orders)
       .where(where)
       .orderBy(desc(orders.createdAt))
       .limit(pageSize)
       .offset(offset),
-    db
+    dbRead
       .select({ value: count() })
       .from(orders)
       .where(where),
@@ -74,14 +74,14 @@ export async function findAll(params: {
   const where = status ? eq(orders.status, status) : undefined;
 
   const [items, [totalRow]] = await Promise.all([
-    db
+    dbRead
       .select()
       .from(orders)
       .where(where)
       .orderBy(desc(orders.createdAt))
       .limit(pageSize)
       .offset(offset),
-    db
+    dbRead
       .select({ value: count() })
       .from(orders)
       .where(where),

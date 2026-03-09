@@ -50,10 +50,25 @@ CloudNativePG 读写 Service 地址
 {{- end }}
 
 {{/*
-DATABASE_URL 连接字符串
+DATABASE_URL 连接字符串（读写 → Primary）
 */}}
 {{- define "ecom.databaseUrl" -}}
 postgresql://postgres:$(POSTGRES_PASSWORD)@{{ include "ecom.pgRwHost" . }}:5432/{{ .Values.postgresql.database }}
+{{- end }}
+
+{{/*
+CloudNativePG 只读 Service 地址（指向所有 Replica）
+用法: {{ include "ecom.pgRoHost" . }}
+*/}}
+{{- define "ecom.pgRoHost" -}}
+{{ include "ecom.fullname" . }}-pg-r
+{{- end }}
+
+{{/*
+DATABASE_READ_URL 连接字符串（只读 → Replica）
+*/}}
+{{- define "ecom.databaseReadUrl" -}}
+postgresql://postgres:$(POSTGRES_PASSWORD)@{{ include "ecom.pgRoHost" . }}:5432/{{ .Values.postgresql.database }}
 {{- end }}
 
 {{/*
@@ -125,6 +140,11 @@ imagePullSecrets:
     secretKeyRef:
       name: {{ include "ecom.secretName" . }}
       key: database-url
+- name: DATABASE_READ_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "ecom.secretName" . }}
+      key: database-read-url
 - name: REDIS_URL
   value: {{ include "ecom.redisUrl" . }}
 - name: REDIS_SENTINELS

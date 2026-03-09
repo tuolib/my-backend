@@ -2,12 +2,12 @@
  * 地址数据访问层 — user_addresses 表操作
  */
 import { eq, and, desc, ne, count } from 'drizzle-orm';
-import { db, userAddresses } from '@repo/database';
+import { db, dbRead, userAddresses } from '@repo/database';
 import type { UserAddress, NewUserAddress } from '@repo/database';
 
-/** 按用户 ID 查找所有地址 */
+/** 按用户 ID 查找所有地址（走从库） */
 export async function findByUserId(userId: string): Promise<UserAddress[]> {
-  return db
+  return dbRead
     .select()
     .from(userAddresses)
     .where(eq(userAddresses.userId, userId))
@@ -55,9 +55,9 @@ export async function clearDefault(userId: string): Promise<void> {
     .where(and(eq(userAddresses.userId, userId), eq(userAddresses.isDefault, true)));
 }
 
-/** 统计用户地址数量 */
+/** 统计用户地址数量（走从库） */
 export async function countByUserId(userId: string): Promise<number> {
-  const [row] = await db
+  const [row] = await dbRead
     .select({ value: count() })
     .from(userAddresses)
     .where(eq(userAddresses.userId, userId));

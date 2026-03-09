@@ -2,7 +2,7 @@
  * 管理员数据访问层 — admins 表操作
  */
 import { eq, and, like, sql, desc } from 'drizzle-orm';
-import { db, admins } from '@repo/database';
+import { db, dbRead, admins } from '@repo/database';
 import type { Admin, NewAdmin } from '@repo/database';
 
 /** 按用户名查找 */
@@ -73,14 +73,14 @@ export async function list(params: {
     : [];
 
   const [items, countResult] = await Promise.all([
-    db
+    dbRead
       .select()
       .from(admins)
       .where(conditions.length ? and(...conditions) : undefined)
       .orderBy(desc(admins.createdAt))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
-    db
+    dbRead
       .select({ count: sql<number>`count(*)::int` })
       .from(admins)
       .where(conditions.length ? and(...conditions) : undefined),

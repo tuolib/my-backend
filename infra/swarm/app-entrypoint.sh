@@ -20,6 +20,7 @@ JWT_REFRESH_SECRET=$(cat /run/secrets/jwt_refresh_secret)
 INTERNAL_SECRET=$(cat /run/secrets/internal_secret)
 
 export DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@data-proxy:5432/ecommerce"
+export DATABASE_READ_URL="postgresql://postgres:${POSTGRES_PASSWORD}@data-proxy:5433/ecommerce"
 export REDIS_URL="redis://data-proxy:6379"
 export JWT_ACCESS_SECRET JWT_REFRESH_SECRET INTERNAL_SECRET
 
@@ -40,6 +41,7 @@ wait_for_port() {
 }
 
 wait_for_port 5432
+wait_for_port 5433
 wait_for_port 6379
 
 exec "$@"

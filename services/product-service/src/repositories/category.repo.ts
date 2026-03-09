@@ -2,40 +2,40 @@
  * 分类数据访问层 — categories 表操作
  */
 import { eq, isNull, asc, ilike, and, count } from 'drizzle-orm';
-import { db, categories, productCategories } from '@repo/database';
+import { db, dbRead, categories, productCategories } from '@repo/database';
 import type { Category, NewCategory } from '@repo/database';
 import type { AdminCategoryListInput } from '../types';
 
-/** 按 ID 查找 */
+/** 按 ID 查找（走从库） */
 export async function findById(id: string): Promise<Category | null> {
-  const [row] = await db.select().from(categories).where(eq(categories.id, id));
+  const [row] = await dbRead.select().from(categories).where(eq(categories.id, id));
   return row ?? null;
 }
 
-/** 按 slug 查找 */
+/** 按 slug 查找（走从库） */
 export async function findBySlug(slug: string): Promise<Category | null> {
-  const [row] = await db.select().from(categories).where(eq(categories.slug, slug));
+  const [row] = await dbRead.select().from(categories).where(eq(categories.slug, slug));
   return row ?? null;
 }
 
-/** 查全部分类（service 层组装树） */
+/** 查全部分类（service 层组装树，走从库） */
 export async function findAll(): Promise<Category[]> {
-  return db
+  return dbRead
     .select()
     .from(categories)
     .orderBy(asc(categories.sortOrder), asc(categories.createdAt));
 }
 
-/** 按 parentId 查子分类 */
+/** 按 parentId 查子分类（走从库） */
 export async function findByParentId(parentId: string | null): Promise<Category[]> {
   if (parentId === null) {
-    return db
+    return dbRead
       .select()
       .from(categories)
       .where(isNull(categories.parentId))
       .orderBy(asc(categories.sortOrder));
   }
-  return db
+  return dbRead
     .select()
     .from(categories)
     .where(eq(categories.parentId, parentId))
@@ -70,14 +70,14 @@ export async function findAdminList(params: AdminCategoryListInput): Promise<{ i
   const offset = (params.page - 1) * params.pageSize;
 
   const [items, [{ value: total }]] = await Promise.all([
-    db
+    dbRead
       .select()
       .from(categories)
       .where(where)
       .orderBy(asc(categories.sortOrder), asc(categories.createdAt))
       .limit(params.pageSize)
       .offset(offset),
-    db
+    dbRead
       .select({ value: count() })
       .from(categories)
       .where(where),
@@ -86,18 +86,18 @@ export async function findAdminList(params: AdminCategoryListInput): Promise<{ i
   return { items, total };
 }
 
-/** 查该分类关联的商品数量 */
+/** 查该分类关联的商品数量（走从库） */
 export async function countProductsByCategoryId(categoryId: string): Promise<number> {
-  const [row] = await db
+  const [row] = await dbRead
     .select({ value: count() })
     .from(productCategories)
     .where(eq(productCategories.categoryId, categoryId));
   return row.value;
 }
 
-/** 查子分类数量 */
+/** 查子分类数量（走从库） */
 export async function countChildren(parentId: string): Promise<number> {
-  const [row] = await db
+  const [row] = await dbRead
     .select({ value: count() })
     .from(categories)
     .where(eq(categories.parentId, parentId));

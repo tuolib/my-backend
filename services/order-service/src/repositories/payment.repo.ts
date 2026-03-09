@@ -2,12 +2,12 @@
  * 支付记录数据访问层 — payment_records 表操作
  */
 import { eq } from 'drizzle-orm';
-import { db, paymentRecords } from '@repo/database';
+import { db, dbRead, paymentRecords } from '@repo/database';
 import type { PaymentRecord, NewPaymentRecord } from '@repo/database';
 
-/** 按订单 ID 查找支付记录 */
+/** 按订单 ID 查找支付记录（走从库） */
 export async function findByOrderId(orderId: string): Promise<PaymentRecord[]> {
-  return db
+  return dbRead
     .select()
     .from(paymentRecords)
     .where(eq(paymentRecords.orderId, orderId));

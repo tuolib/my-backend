@@ -5,6 +5,7 @@
 import { eq, and, isNull, inArray, sql, desc, asc, ilike, SQL } from 'drizzle-orm';
 import {
   db,
+  dbRead,
   products,
   productCategories,
   skus,
@@ -13,12 +14,12 @@ import {
 import type { Product, NewProduct } from '@repo/database';
 
 /**
- * 递归收集分类及其所有后代分类 ID
+ * 递归收集分类及其所有后代分类 ID（走从库）
  * 用于父分类筛选时包含子分类下的商品
  */
 async function collectCategoryIds(categoryId: string): Promise<string[]> {
   const result = [categoryId];
-  const children = await db
+  const children = await dbRead
     .select({ id: categories.id })
     .from(categories)
     .where(eq(categories.parentId, categoryId));
@@ -29,18 +30,18 @@ async function collectCategoryIds(categoryId: string): Promise<string[]> {
   return result;
 }
 
-/** 按 ID 查找（排除软删除） */
+/** 按 ID 查找（排除软删除，走从库） */
 export async function findById(id: string): Promise<Product | null> {
-  const [row] = await db
+  const [row] = await dbRead
     .select()
     .from(products)
     .where(and(eq(products.id, id), isNull(products.deletedAt)));
   return row ?? null;
 }
 
-/** 按 slug 查找（排除软删除） */
+/** 按 slug 查找（排除软删除，走从库） */
 export async function findBySlug(slug: string): Promise<Product | null> {
-  const [row] = await db
+  const [row] = await dbRead
     .select()
     .from(products)
     .where(and(eq(products.slug, slug), isNull(products.deletedAt)));
@@ -95,13 +96,13 @@ export async function findList(params: {
       orderBy = orderFn(products.createdAt);
   }
 
-  const [countResult] = await db
+  const [countResult] = await dbRead
     .select({ count: sql<number>`count(*)` })
     .from(products)
     .where(and(...conditions));
   const total = Number(countResult.count);
 
-  const items = await db
+  const items = await dbRead
     .select()
     .from(products)
     .where(and(...conditions))
@@ -184,8 +185,8 @@ export async function search(params: {
       ) DESC`;
   }
 
-  // 始终 LEFT JOIN 分类表以支持分类名搜索
-  const [countResult] = await db
+  // 始终 LEFT JOIN 分类表以支持分类名搜索（走从库）
+  const [countResult] = await dbRead
     .select({ count: sql<number>`count(DISTINCT ${products.id})` })
     .from(products)
     .leftJoin(productCategories, eq(products.id, productCategories.productId))
@@ -193,7 +194,7 @@ export async function search(params: {
     .where(and(...conditions));
   const total = Number(countResult.count);
 
-  const items = await db
+  const items = await dbRead
     .selectDistinctOn([products.id])
     .from(products)
     .leftJoin(productCategories, eq(products.id, productCategories.productId))
@@ -259,13 +260,13 @@ export async function findAdminList(params: {
       orderBy = orderFn(products.createdAt);
   }
 
-  const [countResult] = await db
+  const [countResult] = await dbRead
     .select({ count: sql<number>`count(*)` })
     .from(products)
     .where(and(...conditions));
   const total = Number(countResult.count);
 
-  const items = await db
+  const items = await dbRead
     .select()
     .from(products)
     .where(and(...conditions))

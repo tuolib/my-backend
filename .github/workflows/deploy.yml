@@ -565,7 +565,7 @@ jobs:
           INTERNAL_SECRET: ${{ secrets.SWARM_INTERNAL_SECRET }}
         run: |
           set -euo pipefail
-          SSH_CMD="ssh -o StrictHostKeyChecking=no ${SWARM_USER}@${SWARM_HOST}"
+          SSH_CMD="ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ${SWARM_USER}@${SWARM_HOST}"
 
           echo "Deploying to Swarm (tag: ${TAG})"
 
@@ -643,100 +643,122 @@ jobs:
           REMOTE_DEPLOY
 
           # ── [6/6] 等待服务收敛 + 数据库迁移 ──
+          # 拆分为独立子步骤，每步检测当前状态（幂等）
+          # SSH 断线后自动重连，从当前进度继续（类似断点续传）
           echo "[6/6] Wait for convergence"
-          ${SSH_CMD} bash <<'REMOTE_MIGRATE'
+
+          # SSH 断线重试器：捕获 heredoc 到变量，断连后重发执行
+          ssh_with_retry() {
+            local STEP="$1"
+            local SCRIPT
+            SCRIPT=$(cat)
+            local N=0
+            while true; do
+              N=$((N + 1))
+              set +e
+              printf '%s' "${SCRIPT}" | ${SSH_CMD} bash
+              RC=$?
+              set -e
+              if [ ${RC} -ne 255 ]; then
+                return ${RC}
+              fi
+              if [ ${N} -ge 3 ]; then
+                echo "::error::SSH connection lost for ${STEP} after 3 attempts"
+                return 255
+              fi
+              echo "  SSH disconnected during ${STEP} (${N}/3), reconnecting in 5s..."
+              sleep 5
+            done
+          }
+
+          # [6a] etcd（任一节点 healthy 即通过，最多 60s）
+          echo "  [6a] Waiting for etcd..."
+          ssh_with_retry "[6a] etcd" <<'STEP_6A'
             set -euo pipefail
-
-            dump_failing_services() {
-              echo "══════════ Failing Services ══════════"
-              for SVC in etcd-1 etcd-2 etcd-3 patroni-1 patroni-2 redis-primary redis-replica data-proxy api-gateway user-service product-service cart-service order-service nginx; do
-                RUNNING=$(docker service ps "ecom_${SVC}" --filter "desired-state=running" --format "{{.CurrentState}}" 2>/dev/null | head -1)
-                if ! echo "${RUNNING}" | grep -q "Running"; then
-                  echo "✗ ${SVC}:"
-                  docker service ps "ecom_${SVC}" --no-trunc --format "  {{.CurrentState}} | {{.Error}}" 2>/dev/null | head -3
-                  docker service logs "ecom_${SVC}" --tail 10 2>&1 | sed 's/^/  /' || true
-                fi
-              done
-            }
-
-            # 跨节点 docker exec：本机优先，否则通过 SSH 到目标节点
             remote_exec() {
               local SVC="$1"; shift
               local CID=$(docker ps -qf "name=${SVC}" 2>/dev/null | head -1)
-              if [ -n "${CID}" ]; then
-                docker exec "${CID}" "$@"
-                return $?
-              fi
+              if [ -n "${CID}" ]; then docker exec "${CID}" "$@"; return $?; fi
               local NODE=$(docker service ps "${SVC}" --filter "desired-state=running" --format "{{.Node}}" 2>/dev/null | head -1)
-              [ -z "${NODE}" ] && { echo "ERROR: no running task for ${SVC}"; return 1; }
+              [ -z "${NODE}" ] && return 1
               local ADDR=$(docker node inspect "${NODE}" --format '{{.Status.Addr}}' 2>/dev/null)
-              [ -z "${ADDR}" ] && { echo "ERROR: cannot resolve address for node ${NODE}"; return 1; }
+              [ -z "${ADDR}" ] && return 1
               CID=$(DOCKER_HOST="ssh://root@${ADDR}" docker ps -qf "name=${SVC}" 2>/dev/null | head -1)
-              [ -z "${CID}" ] && { echo "ERROR: container ${SVC} not found on ${NODE}"; return 1; }
+              [ -z "${CID}" ] && return 1
               DOCKER_HOST="ssh://root@${ADDR}" docker exec "${CID}" "$@"
             }
-
-            # [6a] etcd（最多 60s，任一节点 healthy 即通过）
-            echo "  [6a] Waiting for etcd..."
-            ETCD_READY=false
             for i in $(seq 1 60); do
               for ETCD_SVC in ecom_etcd-1 ecom_etcd-2 ecom_etcd-3; do
                 if remote_exec "${ETCD_SVC}" etcdctl endpoint health 2>/dev/null | grep -q "is healthy"; then
-                  ETCD_READY=true
-                  break 2
+                  echo "etcd ready (${i}s)"
+                  exit 0
                 fi
               done
               sleep 1
             done
-            if [ "${ETCD_READY}" != "true" ]; then
-              echo "::error::[6a] etcd not ready after 60s"
-              dump_failing_services
-              exit 1
-            fi
-            echo "  [6a] etcd ready (${i}s)"
+            echo "::error::[6a] etcd not ready after 60s"
+            for SVC in etcd-1 etcd-2 etcd-3; do
+              echo "--- ecom_${SVC} ---"
+              docker service ps "ecom_${SVC}" --no-trunc --format "{{.CurrentState}} | {{.Error}}" 2>/dev/null | head -3
+            done
+            exit 1
+STEP_6A
+          echo "  [6a] etcd ready"
 
-            # [6b] Patroni Leader（最多 120s）
-            echo "  [6b] Waiting for Patroni leader..."
-            PATRONI_READY=false
+          # [6b] Patroni Leader（最多 120s）
+          echo "  [6b] Waiting for Patroni leader..."
+          ssh_with_retry "[6b] patroni" <<'STEP_6B'
+            set -euo pipefail
+            remote_exec() {
+              local SVC="$1"; shift
+              local CID=$(docker ps -qf "name=${SVC}" 2>/dev/null | head -1)
+              if [ -n "${CID}" ]; then docker exec "${CID}" "$@"; return $?; fi
+              local NODE=$(docker service ps "${SVC}" --filter "desired-state=running" --format "{{.Node}}" 2>/dev/null | head -1)
+              [ -z "${NODE}" ] && return 1
+              local ADDR=$(docker node inspect "${NODE}" --format '{{.Status.Addr}}' 2>/dev/null)
+              [ -z "${ADDR}" ] && return 1
+              CID=$(DOCKER_HOST="ssh://root@${ADDR}" docker ps -qf "name=${SVC}" 2>/dev/null | head -1)
+              [ -z "${CID}" ] && return 1
+              DOCKER_HOST="ssh://root@${ADDR}" docker exec "${CID}" "$@"
+            }
             for i in $(seq 1 120); do
               if remote_exec ecom_patroni-1 patronictl -c /tmp/patroni.yml list 2>/dev/null | grep -q Leader; then
-                PATRONI_READY=true
-                break
+                echo "Patroni leader elected (${i}s)"
+                exit 0
               fi
               sleep 1
             done
-            if [ "${PATRONI_READY}" != "true" ]; then
-              echo "::error::[6b] Patroni no leader after 120s"
-              docker service logs ecom_patroni-1 --tail 20 2>&1 || true
-              docker service logs ecom_patroni-2 --tail 20 2>&1 || true
-              dump_failing_services
-              exit 1
-            fi
-            echo "  [6b] Patroni leader elected (${i}s)"
+            echo "::error::[6b] Patroni no leader after 120s"
+            docker service logs ecom_patroni-1 --tail 20 2>&1 || true
+            docker service logs ecom_patroni-2 --tail 20 2>&1 || true
+            exit 1
+STEP_6B
+          echo "  [6b] Patroni leader elected"
 
-            # [6c] API Gateway 健康（最多 60s，通过 nginx ingress 发真实请求）
-            echo "  [6c] Waiting for API Gateway..."
-            GW_HEALTHY=false
+          # [6c] API Gateway 健康（最多 60s）
+          echo "  [6c] Waiting for API Gateway..."
+          ssh_with_retry "[6c] gateway" <<'STEP_6C'
+            set -euo pipefail
             for i in $(seq 1 60); do
               if curl -sfk -o /dev/null -X POST https://localhost/health --max-time 3 2>/dev/null; then
-                GW_HEALTHY=true
-                break
+                echo "API Gateway healthy (${i}s)"
+                exit 0
               fi
               sleep 1
             done
-            if [ "${GW_HEALTHY}" != "true" ]; then
-              echo "::error::[6c] API Gateway not healthy after 60s"
-              echo "--- nginx logs ---"
-              docker service logs ecom_nginx --tail 10 2>&1 || true
-              echo "--- api-gateway logs ---"
-              docker service logs ecom_api-gateway --tail 10 2>&1 || true
-              dump_failing_services
-              exit 1
-            fi
-            echo "  [6c] API Gateway healthy (${i}s)"
+            echo "::error::[6c] API Gateway not healthy after 60s"
+            echo "--- nginx logs ---"
+            docker service logs ecom_nginx --tail 10 2>&1 || true
+            echo "--- api-gateway logs ---"
+            docker service logs ecom_api-gateway --tail 10 2>&1 || true
+            exit 1
+STEP_6C
+          echo "  [6c] API Gateway healthy"
 
-            # [6d] 数据库迁移（通过一次性 Swarm service 跨节点执行）
-            echo "  [6d] Running database migrations..."
+          # [6d] 数据库迁移（迁移脚本幂等，断线重连后安全重跑）
+          echo "  [6d] Running database migrations..."
+          ssh_with_retry "[6d] migrations" <<'STEP_6D'
+            set -euo pipefail
 
             ENTRYPOINT_CFG=$(docker config ls --filter name=app_entrypoint --format '{{.Name}}' | sort -r | head -1)
             GW_IMAGE=$(docker service inspect ecom_api-gateway --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
@@ -756,8 +778,8 @@ jobs:
                 --config "source=${ENTRYPOINT_CFG},target=/app/infra/swarm/app-entrypoint.sh,mode=0755" \
                 --entrypoint /app/infra/swarm/app-entrypoint.sh \
                 --restart-condition none \
+                --with-registry-auth \
                 "${IMAGE}" "$@" >/dev/null
-              # 等待任务完成（最多 120s）
               for j in $(seq 1 120); do
                 STATE=$(docker service ps "${NAME}" --format "{{.CurrentState}}" 2>/dev/null | head -1)
                 case "${STATE}" in
@@ -784,8 +806,9 @@ jobs:
               || { echo "::error::[6d] Data migration failed"; exit 1; }
             run_task ecom-seed "${PS_IMAGE}" bun run packages/database/src/seed-prod.ts \
               || { echo "::error::[6d] Production seed failed"; exit 1; }
-            echo "  [6d] Migrations done"
-          REMOTE_MIGRATE
+            echo "Migrations done"
+STEP_6D
+          echo "  [6d] Migrations done"
 
       - name: Verify deployment
         if: always()
@@ -793,7 +816,7 @@ jobs:
           SWARM_HOST: ${{ vars.SWARM_HOST }}
           SWARM_USER: ${{ vars.SWARM_USER || 'root' }}
         run: |
-          SSH_CMD="ssh -o StrictHostKeyChecking=no ${SWARM_USER}@${SWARM_HOST}"
+          SSH_CMD="ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ${SWARM_USER}@${SWARM_HOST}"
           echo "══════════ Stack Services ══════════"
           ${SSH_CMD} docker stack services ecom 2>/dev/null || true
           echo ""

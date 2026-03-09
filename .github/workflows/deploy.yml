@@ -556,7 +556,7 @@ jobs:
           SWARM_HOST: ${{ vars.SWARM_HOST }}
           SWARM_USER: ${{ vars.SWARM_USER || 'root' }}
           DOMAIN: ${{ vars.SWARM_DOMAIN || env.DOMAIN }}
-          EMAIL: ${{ vars.SWARM_EMAIL || 'admin@example.com' }}
+          EMAIL: ${{ vars.CERTBOT_EMAIL || vars.SWARM_EMAIL || 'admin@example.com' }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
           POSTGRES_PASSWORD: ${{ secrets.SWARM_POSTGRES_PASSWORD }}
           REPLICATION_PASSWORD: ${{ secrets.SWARM_REPLICATION_PASSWORD }}

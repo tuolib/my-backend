@@ -100,8 +100,9 @@ fi
 echo "Waiting for Nginx to be ready..."
 NGINX_READY=false
 for i in $(seq 1 90); do
-    # certbot/certbot 镜像基于 Alpine，有 wget
-    if wget -q --spider --timeout=2 "http://nginx:80/" 2>/dev/null; then
+    # nginx :80 返回 301 重定向到 HTTPS，wget --spider 跟随后因自签证书失败
+    # 用 -S 捕获 server response header，grep 匹配任何 HTTP 响应即表示 nginx 在线
+    if wget -S --spider --timeout=2 "http://nginx:80/" 2>&1 | grep -q "HTTP/"; then
         NGINX_READY=true
         echo "Nginx ready (${i}s)"
         break

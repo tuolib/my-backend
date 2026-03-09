@@ -775,13 +775,27 @@ jobs:
             set -euo pipefail
 
             ENTRYPOINT_CFG=$(docker config ls --filter name=app_entrypoint --format '{{.Name}}' | sort -r | head -1)
-            GW_IMAGE=$(docker service inspect ecom_api-gateway --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
-            PS_IMAGE=$(docker service inspect ecom_product-service --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
+            if [ -z "${ENTRYPOINT_CFG}" ]; then
+              echo "::error::Docker config app_entrypoint not found"
+              exit 1
+            fi
+
+            # 剥离 @sha256: digest，避免 Swarm 调度时强制联系 registry 验证
+            # 镜像已在 [4/6] 预拉取，使用 tag 即可
+            GW_IMAGE=$(docker service inspect ecom_api-gateway --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' | cut -d@ -f1)
+            PS_IMAGE=$(docker service inspect ecom_product-service --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' | cut -d@ -f1)
 
             run_task() {
               local NAME="$1" IMAGE="$2"; shift 2
+
+              # 确保旧服务完全移除
               docker service rm "${NAME}" >/dev/null 2>&1 || true
-              sleep 2
+              for WAIT in $(seq 1 15); do
+                docker service inspect "${NAME}" >/dev/null 2>&1 || break
+                sleep 1
+              done
+
+              echo "  Creating task ${NAME} (image: ${IMAGE})"
               docker service create --name "${NAME}" \
                 --network ecom_data_net \
                 --network ecom_service_net \
@@ -793,23 +807,36 @@ jobs:
                 --entrypoint /app/infra/swarm/app-entrypoint.sh \
                 --restart-condition none \
                 --with-registry-auth \
-                "${IMAGE}" "$@" >/dev/null
+                "${IMAGE}" "$@"
+
               for j in $(seq 1 120); do
+                # 服务消失则立即退出
+                if ! docker service inspect "${NAME}" >/dev/null 2>&1; then
+                  echo "ERROR: service ${NAME} disappeared"
+                  return 1
+                fi
                 STATE=$(docker service ps "${NAME}" --format "{{.CurrentState}}" 2>/dev/null | head -1)
                 case "${STATE}" in
                   *Complete*)
-                    docker service logs "${NAME}" 2>&1
+                    docker service logs "${NAME}" 2>&1 || true
                     docker service rm "${NAME}" >/dev/null 2>&1 || true
                     return 0 ;;
                   *Failed*|*Rejected*|*Shutdown*)
-                    docker service logs "${NAME}" 2>&1
+                    echo "Task ${NAME} state: ${STATE}"
+                    docker service ps "${NAME}" --no-trunc --format "{{.Error}}" 2>/dev/null || true
+                    docker service logs "${NAME}" 2>&1 || true
                     docker service rm "${NAME}" >/dev/null 2>&1 || true
                     return 1 ;;
                 esac
+                # 每 15s 输出当前状态，便于诊断
+                if [ $((j % 15)) -eq 0 ]; then
+                  echo "  ${NAME}: waiting... (${j}s, state: ${STATE:-unknown})"
+                fi
                 sleep 1
               done
-              echo "Task ${NAME} timed out"
-              docker service logs "${NAME}" 2>&1
+              echo "Task ${NAME} timed out (last state: ${STATE:-unknown})"
+              docker service ps "${NAME}" --no-trunc 2>&1 || true
+              docker service logs "${NAME}" 2>&1 || true
               docker service rm "${NAME}" >/dev/null 2>&1 || true
               return 1
             }

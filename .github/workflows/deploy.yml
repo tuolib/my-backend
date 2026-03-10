@@ -605,15 +605,15 @@ jobs:
           # ── [4/7] 写入 .env ──
           echo "[4/7] Write .env"
           {
-            echo "REGISTRY=${REGISTRY}"
-            echo "TAG=${TAG}"
-            echo "DOMAIN=${DOMAIN}"
-            echo "EMAIL=${EMAIL}"
-            echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
-            echo "JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}"
-            echo "JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}"
-            echo "INTERNAL_SECRET=${INTERNAL_SECRET}"
-            echo "CORS_ORIGINS=https://${DOMAIN}"
+            echo "REGISTRY='${REGISTRY}'"
+            echo "TAG='${TAG}'"
+            echo "DOMAIN='${DOMAIN}'"
+            echo "EMAIL='${EMAIL}'"
+            echo "POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'"
+            echo "JWT_ACCESS_SECRET='${JWT_ACCESS_SECRET}'"
+            echo "JWT_REFRESH_SECRET='${JWT_REFRESH_SECRET}'"
+            echo "INTERNAL_SECRET='${INTERNAL_SECRET}'"
+            echo "CORS_ORIGINS='https://${DOMAIN}'"
           } | ${SSH_CMD} "cat > ${DEPLOY_DIR}/.env && chmod 600 ${DEPLOY_DIR}/.env"
 
           # ── [5/7] 拉取镜像 ──
@@ -687,12 +687,6 @@ jobs:
           ssh_with_retry "[7b] migrations" <<'STEP_7B'
             set -euo pipefail
             cd /opt/ecom
-
-            # 从 .env 读取变量
-            set -a; source .env; set +a
-
-            GW_IMAGE="${REGISTRY}/ecom-api-gateway:${TAG}"
-            PS_IMAGE="${REGISTRY}/ecom-product-service:${TAG}"
 
             echo "  Running schema migration..."
             docker compose -f docker-compose.prod.yml exec -T api-gateway \

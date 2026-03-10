@@ -2,7 +2,7 @@
 #
 # 触发方式:
 #   1. push 到 main → 自动部署到 swarm
-#   2. 手动触发 workflow_dispatch → 可选平台（swarm / k3s）
+#   2. 手动触发 workflow_dispatch → 可选平台（swarm / single-server / k3s）
 
 name: Build & Deploy
 
@@ -18,6 +18,7 @@ on:
         default: "swarm"
         options:
           - swarm
+          - single-server
           - k3s-single
           - k3s-multi
       image_tag:
@@ -512,7 +513,225 @@ jobs:
         if: always()
         run: rm -f "${HOME}/.kube/config"
 
-  # ─── Job ③-B Docker Swarm 部署 ──────────────────────────────────────────────
+  # ─── Job ③-B 单机 Docker Compose 部署 ────────────────────────────────────────
+  deploy-single:
+    name: Deploy to Single Server
+    needs: build-images
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.platform == 'single-server'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production-single
+      url: https://${{ vars.SINGLE_DOMAIN || env.DOMAIN }}
+
+    steps:
+      - name: Checkout (single-server configs)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            infra/single-server
+            infra/postgres/init.sql
+            infra/redis/redis.conf
+
+      - name: Compute image tag
+        id: vars
+        run: |
+          OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          CUSTOM_TAG="${{ inputs.image_tag }}"
+          TAG="${CUSTOM_TAG:-${GITHUB_SHA::12}}"
+          echo "registry=ghcr.io/${OWNER_LC}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SINGLE_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ vars.SINGLE_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy to Single Server
+        env:
+          REGISTRY: ${{ steps.vars.outputs.registry }}
+          TAG: ${{ steps.vars.outputs.tag }}
+          HOST: ${{ vars.SINGLE_HOST }}
+          USER: ${{ vars.SINGLE_USER || 'root' }}
+          DOMAIN: ${{ vars.SINGLE_DOMAIN || env.DOMAIN }}
+          EMAIL: ${{ vars.SINGLE_EMAIL || 'admin@example.com' }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          POSTGRES_PASSWORD: ${{ secrets.SINGLE_POSTGRES_PASSWORD }}
+          JWT_ACCESS_SECRET: ${{ secrets.SINGLE_JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.SINGLE_JWT_REFRESH_SECRET }}
+          INTERNAL_SECRET: ${{ secrets.SINGLE_INTERNAL_SECRET }}
+        run: |
+          set -euo pipefail
+          SSH_CMD="ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ${USER}@${HOST}"
+          DEPLOY_DIR="/opt/ecom"
+
+          echo "Deploying to Single Server (tag: ${TAG})"
+
+          # ── [1/7] 上传配置 ──
+          echo "[1/7] Upload configs"
+          ${SSH_CMD} "mkdir -p ${DEPLOY_DIR}/ssl"
+          scp -o StrictHostKeyChecking=no -q -r \
+              infra/single-server/docker-compose.prod.yml \
+              infra/single-server/nginx.conf \
+              infra/single-server/certbot-renew.sh \
+              infra/single-server/postgresql.conf \
+              infra/postgres/init.sql \
+              infra/redis/redis.conf \
+              "${USER}@${HOST}:${DEPLOY_DIR}/"
+
+          # ── [2/7] 自签 SSL 证书（首次部署兜底） ──
+          echo "[2/7] Self-signed SSL (if needed)"
+          ${SSH_CMD} bash <<REMOTE_SSL
+            set -euo pipefail
+            if [ ! -f "${DEPLOY_DIR}/ssl/fullchain.pem" ]; then
+              openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout "${DEPLOY_DIR}/ssl/privkey.pem" \
+                -out "${DEPLOY_DIR}/ssl/fullchain.pem" \
+                -subj "/CN=${DOMAIN}" 2>/dev/null
+              echo "Self-signed SSL created"
+            else
+              echo "SSL cert exists, skipping"
+            fi
+          REMOTE_SSL
+
+          # ── [3/7] 登录 GHCR ──
+          echo "[3/7] GHCR login"
+          ${SSH_CMD} "echo '${GHCR_PAT}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin" >/dev/null 2>&1 \
+            || { echo "::error::[3/7] GHCR login failed"; exit 1; }
+
+          # ── [4/7] 写入 .env ──
+          echo "[4/7] Write .env"
+          {
+            echo "REGISTRY=${REGISTRY}"
+            echo "TAG=${TAG}"
+            echo "DOMAIN=${DOMAIN}"
+            echo "EMAIL=${EMAIL}"
+            echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+            echo "JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}"
+            echo "JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}"
+            echo "INTERNAL_SECRET=${INTERNAL_SECRET}"
+            echo "CORS_ORIGINS=https://${DOMAIN}"
+          } | ${SSH_CMD} "cat > ${DEPLOY_DIR}/.env && chmod 600 ${DEPLOY_DIR}/.env"
+
+          # ── [5/7] 拉取镜像 ──
+          echo "[5/7] Pull images"
+          ${SSH_CMD} bash <<REMOTE_PULL
+            set -euo pipefail
+            IMAGES="${REGISTRY}/ecom-api-gateway:${TAG} ${REGISTRY}/ecom-user-service:${TAG} ${REGISTRY}/ecom-product-service:${TAG} ${REGISTRY}/ecom-cart-service:${TAG} ${REGISTRY}/ecom-order-service:${TAG} postgres:16-alpine redis:7-alpine nginx:1.27-alpine certbot/certbot:latest"
+            for IMG in \${IMAGES}; do
+              docker pull "\${IMG}" >/dev/null 2>&1 \
+                || { echo "::error::Failed to pull \${IMG}"; exit 1; }
+            done
+            echo "Images pulled"
+          REMOTE_PULL
+
+          # ── [6/7] Docker Compose 部署 ──
+          echo "[6/7] Docker Compose up"
+          ${SSH_CMD} bash <<REMOTE_DEPLOY
+            set -euo pipefail
+            cd "${DEPLOY_DIR}"
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans 2>&1
+          REMOTE_DEPLOY
+
+          # ── [7/7] 等待健康 + 数据库迁移 ──
+          echo "[7/7] Wait for convergence"
+
+          # SSH 断线重试器
+          ssh_with_retry() {
+            local STEP="$1"
+            local SCRIPT
+            SCRIPT=$(cat)
+            local N=0
+            while true; do
+              N=$((N + 1))
+              set +e
+              printf '%s' "${SCRIPT}" | ${SSH_CMD} bash
+              RC=$?
+              set -e
+              if [ ${RC} -ne 255 ]; then
+                return ${RC}
+              fi
+              if [ ${N} -ge 3 ]; then
+                echo "::error::SSH connection lost for ${STEP} after 3 attempts"
+                return 255
+              fi
+              echo "  SSH disconnected during ${STEP} (${N}/3), reconnecting in 5s..."
+              sleep 5
+            done
+          }
+
+          # [7a] API Gateway 健康检查
+          echo "  [7a] Waiting for API Gateway..."
+          ssh_with_retry "[7a] gateway" <<'STEP_7A'
+            set -euo pipefail
+            for i in $(seq 1 90); do
+              if curl -sfk -o /dev/null -X POST https://localhost/health --max-time 3 2>/dev/null; then
+                echo "API Gateway healthy (${i}s)"
+                exit 0
+              fi
+              sleep 1
+            done
+            echo "::error::API Gateway not healthy after 90s"
+            cd /opt/ecom
+            docker compose -f docker-compose.prod.yml logs --tail 20 api-gateway 2>&1 || true
+            docker compose -f docker-compose.prod.yml logs --tail 10 nginx 2>&1 || true
+            exit 1
+          STEP_7A
+          echo "  [7a] API Gateway healthy"
+
+          # [7b] 数据库迁移
+          echo "  [7b] Running database migrations..."
+          ssh_with_retry "[7b] migrations" <<'STEP_7B'
+            set -euo pipefail
+            cd /opt/ecom
+
+            # 从 .env 读取变量
+            set -a; source .env; set +a
+
+            GW_IMAGE="${REGISTRY}/ecom-api-gateway:${TAG}"
+            PS_IMAGE="${REGISTRY}/ecom-product-service:${TAG}"
+
+            echo "  Running schema migration..."
+            docker compose -f docker-compose.prod.yml exec -T api-gateway \
+              bun run packages/database/src/migrate.ts 2>&1 \
+              || echo "::warning::Schema migration failed (may already be up to date)"
+
+            echo "  Running data migration..."
+            docker compose -f docker-compose.prod.yml exec -T product-service \
+              bun run packages/database/src/data-migrate.ts 2>&1 \
+              || echo "::warning::Data migration failed (may already be up to date)"
+
+            echo "  Running production seed..."
+            docker compose -f docker-compose.prod.yml exec -T product-service \
+              bun run packages/database/src/seed-prod.ts 2>&1 \
+              || echo "::warning::Production seed failed"
+
+            echo "Migrations done"
+          STEP_7B
+          echo "  [7b] Migrations done"
+
+      - name: Verify deployment
+        if: always()
+        env:
+          HOST: ${{ vars.SINGLE_HOST }}
+          USER: ${{ vars.SINGLE_USER || 'root' }}
+        run: |
+          SSH_CMD="ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ${USER}@${HOST}"
+          echo "══════════ Container Status ══════════"
+          ${SSH_CMD} "cd /opt/ecom && docker compose -f docker-compose.prod.yml ps" 2>/dev/null || true
+          echo ""
+          echo "══════════ SSL Certificate Status ══════════"
+          DOMAIN="${{ vars.SINGLE_DOMAIN || env.DOMAIN }}"
+          ${SSH_CMD} "timeout 5 sh -c 'echo | openssl s_client -connect localhost:443 -servername ${DOMAIN} 2>/dev/null | openssl x509 -noout -subject -issuer -dates 2>/dev/null'" || echo "No valid certificate detected"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519
+
+  # ─── Job ③-C Docker Swarm 部署 ──────────────────────────────────────────────
   deploy-swarm:
     name: Deploy to Swarm
     needs: build-images
@@ -878,18 +1097,26 @@ jobs:
   # ─── Job ④ 外部健康检查 ─────────────────────────────────────────────────────
   smoke-test:
     name: Smoke test
-    needs: [deploy-k3s, deploy-swarm]
+    needs: [deploy-k3s, deploy-single, deploy-swarm]
     if: >-
       always() &&
       github.event_name != 'pull_request' &&
-      (needs.deploy-k3s.result == 'success' || needs.deploy-swarm.result == 'success')
+      (needs.deploy-k3s.result == 'success' || needs.deploy-single.result == 'success' || needs.deploy-swarm.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
       - name: Health check
         run: |
-          URL="https://${{ env.DOMAIN }}/health"
+          PLATFORM="${{ env.PLATFORM }}"
+          if [ "${PLATFORM}" = "single-server" ]; then
+            SMOKE_DOMAIN="${{ vars.SINGLE_DOMAIN || env.DOMAIN }}"
+          elif [ "${PLATFORM}" = "swarm" ]; then
+            SMOKE_DOMAIN="${{ vars.SWARM_DOMAIN || env.DOMAIN }}"
+          else
+            SMOKE_DOMAIN="${{ env.DOMAIN }}"
+          fi
+          URL="https://${SMOKE_DOMAIN}/health"
           echo "Smoke testing: ${URL}"
 
           for i in $(seq 1 10); do
@@ -945,6 +1172,17 @@ jobs:
           echo "::warning::Smoke test failed — rolling back Helm release"
           helm rollback ecom -n ecom --wait || echo "::error::Helm rollback failed"
 
+      - name: Rollback Single Server
+        if: failure() && env.PLATFORM == 'single-server'
+        run: |
+          echo "::warning::Smoke test failed — restarting services on single server"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SINGLE_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          SSH_CMD="ssh -o StrictHostKeyChecking=no ${{ vars.SINGLE_USER || 'root' }}@${{ vars.SINGLE_HOST }}"
+          ${SSH_CMD} "cd /opt/ecom && docker compose -f docker-compose.prod.yml restart api-gateway user-service product-service cart-service order-service" 2>/dev/null || true
+          rm -f ~/.ssh/id_ed25519
+
       - name: Rollback Swarm services
         if: failure() && env.PLATFORM == 'swarm'
         run: |
@@ -967,11 +1205,20 @@ jobs:
         run: |
           PLATFORM="${{ env.PLATFORM }}"
           case "${PLATFORM}" in
-            k3s-single) PLATFORM_LABEL="K3s single (Helm)" ;;
-            k3s-multi)  PLATFORM_LABEL="K3s multi (Helm)" ;;
-            swarm)      PLATFORM_LABEL="Docker Swarm" ;;
-            *)          PLATFORM_LABEL="${PLATFORM}" ;;
+            k3s-single)    PLATFORM_LABEL="K3s single (Helm)" ;;
+            k3s-multi)     PLATFORM_LABEL="K3s multi (Helm)" ;;
+            swarm)         PLATFORM_LABEL="Docker Swarm" ;;
+            single-server) PLATFORM_LABEL="Single Server (Docker Compose)" ;;
+            *)             PLATFORM_LABEL="${PLATFORM}" ;;
           esac
+
+          if [ "${PLATFORM}" = "single-server" ]; then
+            DEPLOY_DOMAIN="${{ vars.SINGLE_DOMAIN || env.DOMAIN }}"
+          elif [ "${PLATFORM}" = "swarm" ]; then
+            DEPLOY_DOMAIN="${{ vars.SWARM_DOMAIN || env.DOMAIN }}"
+          else
+            DEPLOY_DOMAIN="${{ env.DOMAIN }}"
+          fi
 
           echo "## ${PLATFORM_LABEL} Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -979,7 +1226,7 @@ jobs:
           echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Commit** | \`${GITHUB_SHA::12}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Branch** | \`${GITHUB_REF_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Domain** | [https://${{ env.DOMAIN }}](https://${{ env.DOMAIN }}) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Domain** | [https://${DEPLOY_DOMAIN}](https://${DEPLOY_DOMAIN}) |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Platform** | ${PLATFORM_LABEL} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Trigger** | \`${GITHUB_EVENT_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Actor** | \`${GITHUB_ACTOR}\` |" >> "$GITHUB_STEP_SUMMARY"

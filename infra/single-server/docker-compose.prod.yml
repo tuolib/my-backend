@@ -1,0 +1,246 @@
+# Docker Compose — 单机生产部署（学习/演示用）
+#
+# 9 个服务：1 PG + 1 Redis + 1 Nginx + 1 Certbot + 5 应用
+# 无 HA（无 etcd/Patroni/Sentinel/HAProxy）
+#
+# 部署方式：docker compose -f docker-compose.prod.yml up -d
+# 前置条件：服务器已运行 init-server.sh 完成初始化
+
+networks:
+  app_net:
+    driver: bridge
+  data_net:
+    driver: bridge
+    internal: true
+
+volumes:
+  pg_data:
+  redis_data:
+  certbot_conf:
+  certbot_webroot:
+
+services:
+
+  # ── PostgreSQL 16（单实例） ───────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    hostname: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ecommerce
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    networks:
+      - data_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis 7（单实例） ─────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    hostname: redis
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - data_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Nginx（SSL 终结 + 反向代理） ──────────────────────────────────────────
+
+  nginx:
+    image: nginx:1.27-alpine
+    hostname: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    networks:
+      - app_net
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Certbot（Let's Encrypt 自动签发 & 续签） ──────────────────────────────
+
+  certbot:
+    image: certbot/certbot:latest
+    entrypoint: /bin/sh
+    command: ["/scripts/certbot-renew.sh"]
+    environment:
+      DOMAIN: ${DOMAIN:-example.com}
+      EMAIL: ${EMAIL:-admin@example.com}
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+      - ./certbot-renew.sh:/scripts/certbot-renew.sh:ro
+    networks:
+      - app_net
+    restart: unless-stopped
+
+  # ── 应用微服务 ────────────────────────────────────────────────────────────
+
+  api-gateway:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-api-gateway:${TAG:-latest}
+    hostname: api-gateway
+    environment:
+      API_GATEWAY_PORT: "3000"
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/ecommerce
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET required}
+      INTERNAL_SECRET: ${INTERNAL_SECRET:?INTERNAL_SECRET required}
+      USER_SERVICE_URL: http://user-service:3001
+      PRODUCT_SERVICE_URL: http://product-service:3002
+      CART_SERVICE_URL: http://cart-service:3003
+      ORDER_SERVICE_URL: http://order-service:3004
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    networks:
+      - app_net
+      - data_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  user-service:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-user-service:${TAG:-latest}
+    hostname: user-service
+    environment:
+      USER_SERVICE_PORT: "3001"
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/ecommerce
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
+    networks:
+      - app_net
+      - data_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  product-service:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-product-service:${TAG:-latest}
+    hostname: product-service
+    environment:
+      PRODUCT_SERVICE_PORT: "3002"
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/ecommerce
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
+    networks:
+      - app_net
+      - data_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  cart-service:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-cart-service:${TAG:-latest}
+    hostname: cart-service
+    environment:
+      CART_SERVICE_PORT: "3003"
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/ecommerce
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
+      PRODUCT_SERVICE_URL: http://product-service:3002
+    networks:
+      - app_net
+      - data_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  order-service:
+    image: ${REGISTRY:-ghcr.io/OWNER}/ecom-order-service:${TAG:-latest}
+    hostname: order-service
+    environment:
+      ORDER_SERVICE_PORT: "3004"
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/ecommerce
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
+      PRODUCT_SERVICE_URL: http://product-service:3002
+      CART_SERVICE_URL: http://cart-service:3003
+      USER_SERVICE_URL: http://user-service:3001
+    networks:
+      - app_net
+      - data_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "--post-data", "", "http://localhost:3004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped

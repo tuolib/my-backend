@@ -72,9 +72,8 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - certbot_conf:/etc/letsencrypt:ro
-      - certbot_webroot:/var/www/certbot:ro
       - ./ssl:/etc/nginx/ssl:ro
+      - certbot_webroot:/var/www/certbot:ro
     networks:
       - app_net
     depends_on:
@@ -95,6 +94,8 @@ services:
       - certbot_conf:/etc/letsencrypt
       - certbot_webroot:/var/www/certbot
       - ./certbot-renew.sh:/scripts/certbot-renew.sh:ro
+      - ./ssl:/etc/nginx/ssl
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - app_net
     restart: unless-stopped

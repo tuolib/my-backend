@@ -120,6 +120,11 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
 
+# Swap（1G 内存服务器防 OOM，>2G 可跳过）
+fallocate -l 1G /swapfile && chmod 600 /swapfile
+mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
 # 创建部署目录 + 自签 SSL
 mkdir -p /opt/ecom/ssl
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \

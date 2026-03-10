@@ -15,10 +15,10 @@ on:
         description: "目标平台"
         required: true
         type: choice
-        default: "swarm"
+        default: "single-server"
         options:
-          - swarm
           - single-server
+          - swarm
           - k3s-single
           - k3s-multi
       image_tag:
@@ -36,7 +36,7 @@ permissions:
   packages: write
 
 env:
-  PLATFORM: ${{ inputs.platform || 'swarm' }}
+  PLATFORM: ${{ inputs.platform || 'single-server' }}
   DOMAIN: api.find345.site
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────────
@@ -518,7 +518,8 @@ jobs:
     name: Deploy to Single Server
     needs: build-images
     if: >-
-      github.event_name == 'workflow_dispatch' && inputs.platform == 'single-server'
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.platform == 'single-server')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -730,8 +731,7 @@ jobs:
     name: Deploy to Swarm
     needs: build-images
     if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && inputs.platform == 'swarm')
+      github.event_name == 'workflow_dispatch' && inputs.platform == 'swarm'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

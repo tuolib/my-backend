@@ -614,7 +614,7 @@ jobs:
             echo "JWT_ACCESS_SECRET='${JWT_ACCESS_SECRET}'"
             echo "JWT_REFRESH_SECRET='${JWT_REFRESH_SECRET}'"
             echo "INTERNAL_SECRET='${INTERNAL_SECRET}'"
-            echo "CORS_ORIGINS='https://${DOMAIN}'"
+            echo "CORS_ORIGINS='*'"
           } | ${SSH_CMD} "cat > ${DEPLOY_DIR}/.env && chmod 600 ${DEPLOY_DIR}/.env"
 
           # ── [5/7] 拉取镜像 ──
